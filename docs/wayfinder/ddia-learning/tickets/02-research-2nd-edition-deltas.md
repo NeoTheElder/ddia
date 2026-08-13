@@ -1,7 +1,7 @@
 # Research: 2nd-edition deltas per 1st-edition chapter
 
 - **Type**: wayfinder:research (AFK)
-- **Status**: open
+- **Status**: closed (2026-08-13)
 - **Assignee**: research subagent (fired at charting, 2026-08-12)
 - **Blocked by**: —
 
@@ -23,4 +23,14 @@ Output: `research/02-second-edition-deltas.md`, one section per 1st-edition chap
 
 ## Resolution
 
-_(recorded on close: link to findings file)_
+Findings: [research/02-second-edition-deltas.md](../research/02-second-edition-deltas.md) — per-chapter deltas with cited sources (O'Reilly catalog, Kleppmann's site, the official `ept/ddia2-references` repo, author interviews). Highest-impact:
+
+- **Structure**: 12 chapters/3 parts → 14 chapters/4 parts. 1st-ed Ch 1 splits into "Trade-Offs in Data Systems Architecture" + "Defining Nonfunctional Requirements"; Ch 2–11 map one-to-one to 2nd-ed Ch 3–12; 1st-ed Ch 12 splits into Ch 13 (streaming philosophy) + Ch 14 "Doing the Right Thing" (ethics, new Part IV).
+- **Rename**: Partitioning → **Sharding**, with new multitenancy/shard-manager content, and de-emphasized overall (bigger machines/cloud reduce the need).
+- **Biggest deletion**: MapReduce reduced to a teaching device — Spark/Flink replace it; S3/object storage replaces HDFS.
+- **Cloud-native throughout**: compute/storage separation, object storage as substrate, Aurora/Socrates/Snowflake, serverless.
+- **AI/ML additions**: vector indexes/HNSW, dataframes, embeddings/RAG, training-data pipelines.
+- **Replication**: new sync-engines/local-first/CRDT thread (Figma, Linear); Consistency & Consensus expanded with proper Raft coverage.
+- Co-author Chris Riccomini added; ~670pp; print March 2026.
+
+Inferences from the refs repo are flagged in the file; thin-record chapters are called out explicitly.

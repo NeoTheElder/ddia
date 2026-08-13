@@ -25,6 +25,8 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
+- [Research: 2nd-edition deltas per 1st-edition chapter](tickets/02-research-2nd-edition-deltas.md) — 2nd ed is 14 chapters/4 parts (Ch 1 and Ch 12 split; middle chapters map one-to-one, shifted +1); Partitioning renamed Sharding; MapReduce demoted to teaching device (Spark/Flink + object storage replace it); cloud-native, vector-index/AI, and sync-engine/CRDT material added; findings with per-chapter detail in `research/02-second-edition-deltas.md`.
+
 ## Not yet specified
 
 - **Hosting mode** — GitHub Pages (needs GitHub Pro for private repos, or making the repo public) vs plain `file://` browsing; resolves inside the bootstrap ticket once `gh` account/plan is known.
