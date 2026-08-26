@@ -2,7 +2,7 @@
 
 - **Type**: wayfinder:prototype (HITL)
 - **Status**: open
-- **Assignee**:
+- **Assignee**: yagyesh (pilot session, 2026-08-26)
 - **Blocked by**: [01-bootstrap-repo](01-bootstrap-repo.md), [02-research-2nd-edition-deltas](02-research-2nd-edition-deltas.md), [03-crossref-scheme](03-crossref-scheme.md)
 
 ## Question

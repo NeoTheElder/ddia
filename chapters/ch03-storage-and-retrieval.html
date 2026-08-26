@@ -1,16 +1,1409 @@
-<title>DDIA Ch 3: Storage and Retrieval</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 3 — Storage and Retrieval</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#data-structures-that-power-your-database">data-structures</a>
+  <a href="#hash-indexes">hash-indexes</a>
+  <a href="#sstables-and-lsm-trees">sstables-lsm-trees</a>
+  <a href="#b-trees">b-trees</a>
+  <a href="#comparing-b-trees-and-lsm-trees">btree-vs-lsm</a>
+  <a href="#other-indexing-structures">other-indexes</a>
+  <a href="#keeping-everything-in-memory">in-memory</a>
+  <a class="l1" href="#transaction-processing-or-analytics">oltp-or-olap</a>
+  <a href="#data-warehousing">data-warehousing</a>
+  <a href="#stars-and-snowflakes-schemas-for-analytics">stars-snowflakes</a>
+  <a class="l1" href="#column-oriented-storage">column-storage</a>
+  <a href="#column-compression">column-compression</a>
+  <a href="#sort-order-in-column-storage">sort-order</a>
+  <a href="#writing-to-column-oriented-storage">writing-columns</a>
+  <a href="#aggregation-data-cubes-and-materialized-views">cubes-mat-views</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 3: Storage and Retrieval</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;03</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;04</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Storage and Retrieval</h1>
+  <p class="epigraph">Wer Ordnung hält, ist nur zu faul zum Suchen.<br>
+  (If you keep things tidily ordered, you're just too lazy to go searching.)
+  <span class="attr">— German proverb</span></p>
+</header>
+
+<p>A database has exactly two jobs: when you give it data, it stores the data; when you ask later, it gives the data back. This chapter is about how it does those two things — not because you'll write a storage engine, but because you have to <em>choose</em> one and tune it, and you can't do either without a rough model of what's happening under the hood. In <a class="xref back" href="ch02-data-models-query-languages.html" data-tip="Ch 2 · Data Models and Query Languages — how you hand data to the database and ask for it back">Chapter&nbsp;2<sup>←2</sup></a> we looked at data from the application's point of view; now we flip to the database's point of view.</p>
+
+<p>The single most important fork in the road: storage engines optimized for <strong>transactional</strong> workloads (OLTP) look completely different from engines optimized for <strong>analytics</strong> (OLAP). The first two thirds of this chapter live in the OLTP world, where two schools of thought compete — <em>log-structured</em> engines (append-only files) and <em>update-in-place</em> engines (B-trees). The final third crosses over into analytics and column-oriented storage.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Every storage engine is a bargain between the cost of <span style="color:var(--write);font-weight:600">writing</span> and the cost of <span style="color:var(--read);font-weight:600">reading</span>. A pile of papers on your desk is instant to add to (drop it on top) and miserable to search. A perfectly organized filing cabinet is instant to search and miserable to add to (find the right folder, make space, reshuffle). Every structure in this chapter — hash indexes, LSM-trees, B-trees, column files — is just a different point on that trade-off curve. Throughout this page, <span style="color:var(--write);font-weight:600">ember means the write path</span> and <span style="color:var(--read);font-weight:600">cyan means the read path</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="data-structures-that-power-your-database">
+<span class="key-chip">data-structures-that-power-your-database</span>
+<h2><a class="self" href="#data-structures-that-power-your-database">Data Structures That Power Your Database</a></h2>
+
+<p>Kleppmann opens with the world's simplest database — two shell functions:</p>
+
+<pre><code>#!/bin/bash
+db_set () {
+    echo "$1,$2" &gt;&gt; database
+}
+db_get () {
+    grep "^$1," database | sed -e "s/^$1,//" | tail -n 1
+}</code></pre>
+
+<p><code>db_set key value</code> appends a line to a file. <code>db_get key</code> greps the whole file and keeps the <em>last</em> match — because updates never overwrite anything, they just append a newer line, so the latest value for a key is the last occurrence in the file. This file is a <strong>log</strong>: an append-only sequence of records. Not a log as in "application log output" — in this book, <em>log</em> always means the general thing: an append-only sequence of records, human-readable or not. Logs will come back again and again — they're the backbone of <a class="xref fwd" href="ch05-replication.html#leaders-and-followers" data-tip="Ch 5 · Leaders and Followers — replication ships the leader's log to followers · not yet written">replication<sup>→5</sup></a> and of <a class="xref fwd" href="ch11-stream-processing.html#databases-and-streams" data-tip="Ch 11 · Databases and Streams — the log as the source of truth for stream processing · not yet written">stream processing<sup>→11</sup></a>.</p>
+
+<p>Here's the asymmetry that drives the whole chapter: <code>db_set</code> is <em>fast</em> — appending to a file is about the cheapest write there is. <code>db_get</code> is <em>terrible</em> — O(n), a full scan per lookup; double your data, double your lookup time. To read efficiently you need an <strong>index</strong>: extra metadata on the side that acts as a signpost to where data lives. And indexes are not free:</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the fundamental trade-off of indexing</span>
+An index is a derived structure — a cheat-sheet built from your data. Every cheat-sheet must be kept up to date, so <strong>every index makes writes slower</strong>, because each write now has to update the data <em>and</em> the cheat-sheet. Well-chosen indexes speed up reads; all indexes slow down writes. That's why databases make <em>you</em> choose indexes instead of indexing everything: you know your query patterns, the database doesn't.</div>
+
+<h3 id="hash-indexes"><a class="self" href="#hash-indexes">Hash Indexes</a></h3>
+<span class="key-chip">hash-indexes</span>
+
+<p>The simplest real index: keep the append-only log exactly as it is, and hold an <strong>in-memory hash map from every key to the byte offset</strong> where that key's latest value lives in the file. On every write, append to the file and update the map. On every read, consult the map, <code>seek()</code> to the offset, read the value — one disk seek at most, zero if the file section is already in the OS page cache. Step through it:</p>
+
+<figure class="anim" id="anim-log-hash">
+<svg viewBox="0 0 660 300" role="img" aria-label="An append-only log file indexed by an in-memory hash map: writes append and update the map; a read is one hash lookup plus one seek.">
+  <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">data file (append-only log, on disk)</text>
+  <rect x="20" y="34" width="380" height="180" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <text x="440" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">hash map (in memory)</text>
+  <rect x="440" y="34" width="200" height="130" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <text x="446" y="52" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".5">key      → byte offset</text>
+
+  <!-- log rows -->
+  <g data-on="2-7" data-hot="2">
+    <rect x="30" y="62" width="360" height="30" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1"/>
+    <text x="38" y="81" font-size="11" font-family="ui-monospace,Menlo,monospace">123456,{"name":"London","attractions":[…]}</text>
+    <text x="356" y="58" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".55">offset 0</text>
+  </g>
+  <g data-on="4-7" data-hot="4">
+    <rect x="30" y="100" width="360" height="30" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1"/>
+    <text x="38" y="119" font-size="11" font-family="ui-monospace,Menlo,monospace">42,{"name":"San Francisco","attr":["GG Bridge"]}</text>
+    <text x="348" y="96" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".55">offset 64</text>
+  </g>
+  <g data-on="5-7">
+    <rect x="30" y="100" width="360" height="30" rx="3" fill="none" stroke="currentColor" stroke-opacity=".25"/>
+    <text x="300" y="119" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".45">(stale)</text>
+  </g>
+  <g data-on="5-7" data-hot="5">
+    <rect x="30" y="138" width="360" height="30" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1"/>
+    <text x="38" y="157" font-size="11" font-family="ui-monospace,Menlo,monospace">42,{"name":"San Francisco","attr":["Exploratorium"]}</text>
+    <text x="342" y="134" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".55">offset 128</text>
+  </g>
+
+  <!-- hash map entries -->
+  <g data-on="3-7" data-hot="3">
+    <text x="446" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">123456   →  0</text>
+  </g>
+  <g data-on="4">
+    <text x="446" y="98" font-size="11" font-family="ui-monospace,Menlo,monospace">42       →  64</text>
+  </g>
+  <g data-on="5-7" data-hot="5">
+    <text x="446" y="98" font-size="11" font-family="ui-monospace,Menlo,monospace">42       →  128</text>
+  </g>
+
+  <!-- read path -->
+  <g data-on="6-7" data-hot="6" color="var(--read)">
+    <text x="440" y="200" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">db_get 42</text>
+    <path d="M 470 208 C 470 240, 400 250, 240 250 C 150 250, 120 220, 118 172" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR)"/>
+    <text x="250" y="268" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">1. hash lookup → 128   2. seek(128)   3. read value</text>
+  </g>
+  <defs>
+    <marker id="arrR" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> An empty append-only data file on disk, and an empty hash map in memory. Every key will map to the byte offset of its <em>latest</em> value in the file.</li>
+  <li><strong>WRITE</strong> <code>db_set 123456 {London…}</code> — the record is <em>appended</em> at offset 0. Appending is the cheapest possible disk write: purely sequential.</li>
+  <li><strong>INDEX</strong> The hash map records <code>123456 → 0</code>. The write updated data <em>and</em> cheat-sheet — that's the indexing tax on every write.</li>
+  <li><strong>WRITE</strong> <code>db_set 42 {San Francisco…}</code> appends at offset 64, and the map learns <code>42 → 64</code>. Same recipe for inserts and updates alike.</li>
+  <li><strong>UPDATE</strong> The value for key 42 changes. Nothing is overwritten — a newer record is appended at offset 128 and the map now points there. The old record at 64 is stale garbage that still occupies disk.</li>
+  <li><strong>READ</strong> <code>db_get 42</code>: hash lookup gives offset 128, one <code>seek()</code>, read the value. If that file region is in the filesystem cache, zero disk I/O.</li>
+  <li><strong>TAKEAWAY</strong> This is essentially <strong>Bitcask</strong> (Riak's default engine): blazing reads and writes — <em>if</em> all keys fit in RAM. Values can exceed RAM; keys can't.</li>
+</ol>
+</figure>
+
+<p>This design (essentially Bitcask) shines when the value for each key is updated frequently: think <em>key = cat-video URL, value = play count</em>. Tons of writes, but few distinct keys — so all keys fit comfortably in memory while the values churn.</p>
+
+<h4 id="compaction">Segments, compaction, and merging</h4>
+
+<p>One problem: we only ever append, so the file grows forever. The fix: break the log into <strong>segments</strong> — close a segment file when it reaches a size limit and write on into a fresh one. Frozen segments are then <strong>compacted</strong>: throw away duplicate keys, keep only the most recent update for each. Since compaction shrinks segments, several segments can also be <strong>merged</strong> into one in the same pass. Crucially, all of this happens in a <em>background thread</em> against immutable files, while reads and writes continue against the old segments; when the merged segment is ready, reads atomically switch over and the old files are deleted.</p>
+
+<figure class="anim" id="anim-compaction">
+<svg viewBox="0 0 660 330" role="img" aria-label="Two frozen log segments with duplicate keys are merged and compacted in the background into one new segment holding only the latest value per key; reads then switch over and old segments are deleted.">
+  <g data-on="1-5">
+    <text x="20" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">segment 1 (frozen)</text>
+    <rect x="20" y="30" width="190" height="112" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+    <text x="30" y="52" font-size="11" font-family="ui-monospace,Menlo,monospace">mew:  1078</text>
+    <text x="30" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">purr: 2103</text>
+    <text x="30" y="100" font-size="11" font-family="ui-monospace,Menlo,monospace">purr: 2104</text>
+    <text x="30" y="124" font-size="11" font-family="ui-monospace,Menlo,monospace">mew:  1079</text>
+  </g>
+  <g data-on="1-5">
+    <text x="240" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">segment 2 (frozen)</text>
+    <rect x="240" y="30" width="190" height="112" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+    <text x="250" y="52" font-size="11" font-family="ui-monospace,Menlo,monospace">purr: 2105</text>
+    <text x="250" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">yawn: 511</text>
+    <text x="250" y="100" font-size="11" font-family="ui-monospace,Menlo,monospace">mew:  1080</text>
+    <text x="250" y="124" font-size="11" font-family="ui-monospace,Menlo,monospace">purr: 2106</text>
+  </g>
+  <g data-on="1-5">
+    <text x="470" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">segment 3 (active)</text>
+    <rect x="470" y="30" width="170" height="112" rx="6" fill="none" stroke="var(--write)" stroke-dasharray="4 3"/>
+    <text x="480" y="52" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">← new writes</text>
+  </g>
+
+  <!-- highlight latest values -->
+  <g data-on="3-5" data-hot="3">
+    <rect x="246" y="62" width="90" height="18" rx="3" fill="none" stroke="var(--write)"/>
+    <rect x="246" y="86" width="96" height="18" rx="3" fill="none" stroke="var(--write)"/>
+    <rect x="246" y="110" width="100" height="18" rx="3" fill="none" stroke="var(--write)"/>
+  </g>
+
+  <!-- merge arrows -->
+  <g data-on="2-4" data-hot="2">
+    <path d="M 115 146 L 115 190 L 200 218" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW1)"/>
+    <path d="M 335 146 L 335 190 L 260 218" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW1)"/>
+    <text x="90" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">background merge + compact</text>
+  </g>
+
+  <!-- merged segment -->
+  <g data-on="2-5" data-hot="4">
+    <text x="130" y="238" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">merged segment (new file)</text>
+    <rect x="130" y="246" width="220" height="70" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  </g>
+  <g data-on="3-5">
+    <text x="140" y="268" font-size="11" font-family="ui-monospace,Menlo,monospace">mew:  1080   purr: 2106</text>
+    <text x="140" y="292" font-size="11" font-family="ui-monospace,Menlo,monospace">yawn: 511</text>
+  </g>
+
+  <!-- read switch -->
+  <g data-on="5" data-hot="5">
+    <path d="M 470 290 L 360 290" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR2)"/>
+    <text x="478" y="294" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">reads switch here</text>
+    <line x1="24" y1="86" x2="206" y2="86" stroke="var(--bad)" stroke-width="1.4" transform="rotate(-8 115 86)"/>
+    <line x1="244" y1="86" x2="426" y2="86" stroke="var(--bad)" stroke-width="1.4" transform="rotate(-8 335 86)"/>
+    <text x="20" y="160" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">old segments deleted</text>
+  </g>
+  <defs>
+    <marker id="arrW1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> The log is split into segments. Segments 1 and 2 are frozen (closed, immutable) and full of per-key updates — play counts for cat videos. New writes go only to the active segment 3.</li>
+  <li><strong>MERGE</strong> A background thread starts merging and compacting the frozen segments into a brand-new file. Reads and writes continue undisturbed against the old files — they're immutable, so there's nothing to coordinate.</li>
+  <li><strong>COMPACT</strong> Duplicate keys are resolved: only the <em>most recent</em> value per key survives (segment 2's values beat segment 1's — it's newer). <code>mew:1080</code>, <code>purr:2106</code>, <code>yawn:511</code>.</li>
+  <li><strong>NEW FILE</strong> The merged segment is written as a new file — frozen segments are never modified in place. Each segment gets its own in-memory hash map; reads check the newest segment's map first, then older ones.</li>
+  <li><strong>SWITCH</strong> Reads atomically switch to the merged segment; the old segment files are deleted. Disk space is reclaimed without ever blocking a reader or writer.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · compaction</span>
+Imagine a scoreboard where you only ever <em>append</em> score updates: "alice 10", "bob 3", "alice 12", "alice 15". Compaction is rewriting that list as just "alice 15, bob 3" — same information, way less paper. And because the old sheets are never edited (only replaced wholesale), someone can keep reading the old sheet while you prepare the new one.</div>
+
+<h4>What a real implementation worries about</h4>
+<ul>
+<li><strong>File format</strong> — not CSV; a binary format (length prefix, then raw bytes) is faster and needs no escaping.</li>
+<li><strong>Deletes</strong> — you can't remove from an append-only file, so you append a <strong>tombstone</strong>: a special deletion record telling the merge process to discard all previous values for that key.</li>
+<li><strong>Crash recovery</strong> — the in-memory hash maps die with the process. Rebuilding them by rescanning every segment is slow, so Bitcask snapshots each segment's hash map to disk.</li>
+<li><strong>Partially written records</strong> — a crash mid-append leaves a torn record; checksums detect and skip the corrupted tail.</li>
+<li><strong>Concurrency</strong> — one writer thread (writes are strictly sequential anyway); segments are immutable, so any number of concurrent readers.</li>
+</ul>
+
+<h4>Why append-only beats update-in-place</h4>
+<ol>
+<li>Appending and merging are <strong>sequential writes</strong> — vastly faster than random writes on spinning disks, and still preferable on SSDs.</li>
+<li><strong>Crash recovery and concurrency are simple</strong>: you never have to reason about a file that's half old value, half new value.</li>
+<li>Merging periodically rewrites the data, so files <strong>never fragment</strong> over time.</li>
+</ol>
+
+<h4>And the two hard limits of hash indexes</h4>
+<ol>
+<li><strong>All keys must fit in RAM.</strong> An on-disk hash map performs badly: random I/O everywhere, expensive to grow, fiddly collision handling.</li>
+<li><strong>No efficient range queries.</strong> You can't scan <code>kitty00000</code> through <code>kitty99999</code> — every single key would be a separate hash lookup.</li>
+</ol>
+
+<p>Both limits fall to the next structure — which only asks one small thing of the segment file: keep it <em>sorted</em>.</p>
+
+<h3 id="sstables-and-lsm-trees"><a class="self" href="#sstables-and-lsm-trees">SSTables and LSM-Trees</a></h3>
+<span class="key-chip">sstables-and-lsm-trees</span>
+
+<p>Take the segment files from before and add one requirement: <strong>key-value pairs are sorted by key</strong>, and each key appears only once per segment (compaction already guarantees that). This format is called a <strong>Sorted String Table — SSTable</strong>. Sorting looks like it breaks the append-only trick (writes arrive in any order!), but hold that thought — the fix is coming. First, what sorting buys you:</p>
+
+<p><strong>1. Merging becomes mergesort.</strong> Even for files far bigger than RAM: read the inputs side by side, copy the lowest key, repeat. When the same key appears in several inputs, the value from the <em>newest</em> segment wins — every value in a newer segment is more recent than everything in an older one.</p>
+
+<figure class="anim" id="anim-sst-merge">
+<svg viewBox="0 0 660 310" role="img" aria-label="Merging three sorted SSTable segments mergesort-style: compare the head of each input, copy the lowest key to the sorted output, newest segment wins on duplicate keys.">
+  <text x="20" y="20" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">segment 1 (oldest)</text>
+  <rect x="20" y="28" width="180" height="96" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <text x="32" y="50" font-size="11" font-family="ui-monospace,Menlo,monospace">apple : 3</text>
+  <text x="32" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">dog   : 1</text>
+  <text x="32" y="102" font-size="11" font-family="ui-monospace,Menlo,monospace">mango : 7</text>
+  <text x="240" y="20" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">segment 2</text>
+  <rect x="240" y="28" width="180" height="96" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <text x="252" y="50" font-size="11" font-family="ui-monospace,Menlo,monospace">apple : 5</text>
+  <text x="252" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">cat   : 2</text>
+  <text x="252" y="102" font-size="11" font-family="ui-monospace,Menlo,monospace">zebra : 1</text>
+  <text x="460" y="20" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">segment 3 (newest)</text>
+  <rect x="460" y="28" width="180" height="96" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <text x="472" y="50" font-size="11" font-family="ui-monospace,Menlo,monospace">banana: 4</text>
+  <text x="472" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">cat   : 9</text>
+
+  <!-- head pointers, per step -->
+  <g data-on="1-2" color="var(--read)"><polygon points="24,40 24,52 15,46" fill="var(--read)"/></g>
+  <g data-on="1-2" color="var(--read)"><polygon points="244,40 244,52 235,46" fill="var(--read)"/></g>
+  <g data-on="1-3" color="var(--read)"><polygon points="464,40 464,52 455,46" fill="var(--read)"/></g>
+  <g data-on="3-4"><polygon points="24,66 24,78 15,72" fill="var(--read)"/></g>
+  <g data-on="3-4"><polygon points="244,66 244,78 235,72" fill="var(--read)"/></g>
+  <g data-on="4"><polygon points="464,66 464,78 455,72" fill="var(--read)"/></g>
+  <g data-on="5"><polygon points="24,92 24,104 15,98" fill="var(--read)"/></g>
+  <g data-on="5"><polygon points="244,92 244,104 235,98" fill="var(--read)"/></g>
+
+  <!-- duplicate callouts -->
+  <g data-on="2" data-hot="2">
+    <rect x="28" y="38" width="86" height="17" rx="3" fill="none" stroke="var(--bad)" stroke-dasharray="3 2"/>
+    <rect x="248" y="38" width="86" height="17" rx="3" fill="none" stroke="var(--write)" stroke-width="1.6"/>
+    <text x="122" y="51" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">loses</text>
+    <text x="340" y="51" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">newer wins</text>
+  </g>
+  <g data-on="4" data-hot="4">
+    <rect x="248" y="64" width="86" height="17" rx="3" fill="none" stroke="var(--bad)" stroke-dasharray="3 2"/>
+    <rect x="468" y="64" width="86" height="17" rx="3" fill="none" stroke="var(--write)" stroke-width="1.6"/>
+  </g>
+
+  <!-- output -->
+  <text x="20" y="180" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">merged output (sorted, written sequentially)</text>
+  <rect x="20" y="190" width="620" height="46" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <g data-on="2-6" data-hot="2"><text x="34" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">apple:5</text></g>
+  <g data-on="3-6" data-hot="3"><text x="120" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">banana:4</text></g>
+  <g data-on="4-6" data-hot="4"><text x="216" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">cat:9</text></g>
+  <g data-on="5-6" data-hot="5"><text x="284" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">dog:1</text></g>
+  <g data-on="5-6" data-hot="5"><text x="352" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">mango:7</text></g>
+  <g data-on="5-6" data-hot="5"><text x="440" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">zebra:1</text></g>
+  <g data-on="6">
+    <text x="20" y="270" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">sequential reads in → sequential write out. RAM barely involved.</text>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> Three sorted segments to merge. A read cursor (◀) sits at the head of each. This is exactly the merge phase of mergesort.</li>
+  <li><strong>PICK LOWEST</strong> Heads are <code>apple</code>, <code>apple</code>, <code>banana</code>. Lowest key: <code>apple</code> — but it's in two segments. Segment 2 is newer, so <code>apple:5</code> wins; <code>apple:3</code> is discarded. Both cursors advance.</li>
+  <li><strong>REPEAT</strong> Heads: <code>dog</code>, <code>cat</code>, <code>banana</code>. Lowest is <code>banana:4</code> — copied to output, cursor advances.</li>
+  <li><strong>DUPLICATE AGAIN</strong> Heads: <code>dog</code>, <code>cat</code>, <code>cat</code>. Segment 3 is newest, so <code>cat:9</code> beats <code>cat:2</code>.</li>
+  <li><strong>DRAIN</strong> The rest (<code>dog:1</code>, <code>mango:7</code>, <code>zebra:1</code>) drains in sorted order.</li>
+  <li><strong>TAKEAWAY</strong> Every read and write in this process is sequential, and only three cursor positions live in memory — merging works no matter how much bigger than RAM the files are.</li>
+</ol>
+</figure>
+
+<p><strong>2. The in-memory index can be sparse.</strong> To find a key you no longer need <em>every</em> key in memory. Know the offsets of a few keys, and sorting tells you which gap your key must be in — jump there and scan a few kilobytes:</p>
+
+<figure>
+<svg viewBox="0 0 660 250" role="img" aria-label="A sparse in-memory index over a sorted SSTable: to find handiwork, jump to the known offset of handbag and scan forward; the region between indexed keys can also be stored as one compressed block.">
+  <text x="20" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">sparse index (memory) — one key per few KB</text>
+  <rect x="20" y="32" width="230" height="120" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <text x="32" y="56" font-size="11" font-family="ui-monospace,Menlo,monospace">hammock  → 100491</text>
+  <text x="32" y="82" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="600">handbag  → 102134</text>
+  <text x="32" y="108" font-size="11" font-family="ui-monospace,Menlo,monospace">handsome → 104667</text>
+  <text x="32" y="134" font-size="11" font-family="ui-monospace,Menlo,monospace">hangout  → 106812</text>
+
+  <text x="330" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">SSTable file (disk, sorted)</text>
+  <rect x="330" y="32" width="310" height="180" rx="6" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+  <rect x="342" y="70" width="286" height="76" rx="4" fill="var(--read-soft)" fill-opacity=".55" stroke="var(--read)" stroke-dasharray="4 3"/>
+  <text x="342" y="56" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">… hammock …</text>
+  <text x="354" y="92" font-size="11" font-family="ui-monospace,Menlo,monospace">handbag   handcuffs   handful</text>
+  <text x="354" y="118" font-size="11" font-family="ui-monospace,Menlo,monospace">handicap  <tspan fill="var(--read)" font-weight="700">handiwork ✓</tspan></text>
+  <text x="354" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">(one compressible block)</text>
+  <text x="342" y="176" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">handsome …</text>
+  <text x="342" y="200" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".6">hangout …</text>
+
+  <path d="M 250 78 C 300 78, 300 74, 338 74" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR3)"/>
+  <path d="M 380 96 C 372 104, 372 106, 380 112" fill="none" stroke="var(--read)" stroke-width="1.4" marker-end="url(#arrR3)"/>
+  <text x="255" y="240" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">jump to handbag's offset, scan forward → handiwork</text>
+  <defs><marker id="arrR3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+</svg>
+<figcaption>Looking up <code>handiwork</code>, which isn't in the sparse index: sorting guarantees it lies between <code>handbag</code> and <code>handsome</code>, so jump to <code>handbag</code>'s offset and scan. <strong>Bonus 3:</strong> since reads scan a range anyway, the records between index entries can be grouped into one block and <em>compressed</em> — saving disk space and I/O bandwidth; each sparse-index entry then points at a compressed block's start.</figcaption>
+</figure>
+
+<h4 id="constructing-sstables">Constructing and maintaining SSTables — the LSM-tree</h4>
+
+<p>Now the held thought: writes arrive in any order, so how does data get sorted? Answer: <strong>sort it in memory first</strong>. Maintaining a sorted structure in RAM is easy — any balanced tree (red-black, AVL) takes inserts in random order and reads them back sorted. The full recipe, which is what <strong>LevelDB, RocksDB, Cassandra, and HBase</strong> run (the design descends from Google's Bigtable paper, which coined <em>SSTable</em> and <em>memtable</em>, and was first described academically as the <strong>Log-Structured Merge-Tree</strong> by Patrick O'Neil et al.):</p>
+
+<figure class="anim" id="anim-lsm">
+<svg viewBox="0 0 680 370" role="img" aria-label="The full LSM-tree lifecycle: writes go to a write-ahead log and a memtable; the memtable flushes to sorted SSTables; background compaction merges them; reads check memtable then SSTables newest-first, with Bloom filters skipping files; after a crash the WAL rebuilds the memtable.">
+  <!-- memory / disk divider -->
+  <line x1="20" y1="150" x2="660" y2="150" stroke="currentColor" stroke-opacity=".3" stroke-dasharray="6 4"/>
+  <text x="600" y="144" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".5">memory</text>
+  <text x="608" y="166" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".5">disk</text>
+
+  <!-- incoming write -->
+  <g data-on="1-8" data-hot="1">
+    <text x="24" y="40" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="600">write</text>
+    <path d="M 70 36 L 128 36" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW2)"/>
+  </g>
+
+  <!-- memtable -->
+  <g data-on="1-8">
+    <rect x="140" y="20" width="190" height="110" rx="8" fill="none" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="150" y="40" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">memtable (balanced tree)</text>
+  </g>
+  <g data-on="1" data-hot="1"><text x="156" y="66" font-size="11" font-family="ui-monospace,Menlo,monospace">cat:9</text></g>
+  <g data-on="2-3"><text x="156" y="66" font-size="11" font-family="ui-monospace,Menlo,monospace">apple:5  cat:9</text></g>
+  <g data-on="2-3" data-hot="2"><text x="156" y="90" font-size="11" font-family="ui-monospace,Menlo,monospace">dog:1  zebra:1</text></g>
+  <g data-on="2-3"><text x="156" y="114" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">(kept sorted, ~few MB)</text></g>
+  <g data-on="4-7"><text x="156" y="66" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".7">(fresh memtable)</text></g>
+  <g data-on="8" data-hot="8"><text x="156" y="66" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">rebuilt from WAL ✓</text></g>
+
+  <!-- WAL -->
+  <g data-on="1-8">
+    <rect x="30" y="170" width="230" height="44" rx="6" fill="none" stroke="var(--write)" stroke-dasharray="5 3"/>
+    <text x="40" y="188" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">write-ahead log (unsorted)</text>
+    <text x="40" y="206" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".6">every write appended here first</text>
+  </g>
+  <g data-on="1-2" data-hot="1">
+    <path d="M 66 46 C 60 90, 55 130, 55 166" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW2)"/>
+  </g>
+
+  <!-- flush -->
+  <g data-on="3-7" data-hot="3">
+    <path d="M 235 134 L 235 176 L 296 210" fill="none" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW2)"/>
+    <text x="245" y="170" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">flush when full</text>
+  </g>
+
+  <!-- L0 SSTables -->
+  <g data-on="3-8">
+    <rect x="300" y="200" width="110" height="52" rx="6" fill="var(--write-soft)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="310" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace">SSTable A</text>
+    <text x="310" y="236" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">sorted ✓</text>
+  </g>
+  <g data-on="4-8">
+    <rect x="424" y="200" width="110" height="52" rx="6" fill="var(--write-soft)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="434" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace">SSTable B</text>
+    <rect x="548" y="200" width="110" height="52" rx="6" fill="var(--write-soft)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="558" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace">SSTable C</text>
+    <text x="300" y="192" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">newest ⟵ recent segments ⟶ oldest</text>
+  </g>
+
+  <!-- bloom filters -->
+  <g data-on="7-8" data-hot="7">
+    <circle cx="402" cy="208" r="7" fill="none" stroke="var(--read)" stroke-width="1.4"/>
+    <circle cx="526" cy="208" r="7" fill="none" stroke="var(--read)" stroke-width="1.4"/>
+    <circle cx="650" cy="208" r="7" fill="none" stroke="var(--read)" stroke-width="1.4"/>
+    <text x="396" y="212" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">B</text>
+    <text x="520" y="212" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">B</text>
+    <text x="644" y="212" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">B</text>
+  </g>
+
+  <!-- compaction to L1 -->
+  <g data-on="5-8" data-hot="5">
+    <path d="M 355 256 L 355 286" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN)"/>
+    <path d="M 479 256 L 420 290" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN)"/>
+    <rect x="300" y="292" width="234" height="46" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="310" y="312" font-size="10" font-family="ui-monospace,Menlo,monospace">merged, larger sorted runs</text>
+    <text x="310" y="328" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">background merge+compact, discard overwritten/deleted</text>
+  </g>
+
+  <!-- read path -->
+  <g data-on="6-8" data-hot="6">
+    <text x="480" y="40" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="600">read k</text>
+    <path d="M 478 46 C 420 60, 360 60, 336 60" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR4)"/>
+    <path d="M 500 50 C 500 120, 420 160, 372 196" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR4)"/>
+    <path d="M 520 50 C 530 120, 500 170, 486 196" fill="none" stroke="var(--read)" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrR4)"/>
+    <text x="540" y="76" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">1 memtable</text>
+    <text x="540" y="92" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">2 newest SSTable</text>
+    <text x="540" y="108" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">3 older… (miss = slow)</text>
+  </g>
+
+  <!-- crash -->
+  <g data-on="8" data-hot="8">
+    <text x="24" y="90" font-size="13" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)" font-weight="700">⚡ crash</text>
+    <path d="M 60 176 C 80 120, 100 80, 136 60" fill="none" stroke="var(--write)" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arrW2)"/>
+    <text x="86" y="120" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">replay WAL</text>
+  </g>
+
+  <defs>
+    <marker id="arrW2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR4" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    <marker id="arrN" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>WRITE</strong> A write does two things: appended to the <em>write-ahead log</em> on disk (unsorted — its only job is crash recovery), and inserted into the <em>memtable</em>, an in-memory balanced tree that keeps keys sorted.</li>
+  <li><strong>ACCUMULATE</strong> More writes land; the tree absorbs them in any order and maintains sorted order internally. The memtable is allowed to grow to a few megabytes.</li>
+  <li><strong>FLUSH</strong> Threshold hit: the memtable is written out to disk as an SSTable — already sorted, so this is one cheap sequential write. A fresh memtable (and fresh WAL) takes over; the old WAL is discarded.</li>
+  <li><strong>ACCUMULATE SEGMENTS</strong> Flushes pile up SSTables on disk, newest first. Each is internally sorted, but the same key may exist in several of them with different values.</li>
+  <li><strong>COMPACT</strong> Background merging (the mergesort from earlier) folds segments into larger sorted runs, discarding overwritten and tombstoned values. This is what keeps read costs bounded and reclaims space.</li>
+  <li><strong>READ</strong> A lookup checks the memtable first, then SSTables newest → oldest. Worst case — a key that <em>doesn't exist</em> — touches every segment before giving up.</li>
+  <li><strong>BLOOM FILTER</strong> The fix for missing keys: each SSTable carries a Bloom filter — a tiny, probabilistic set summary that can say "definitely not in this file" and never lies in that direction. Most segments get skipped without any disk read.</li>
+  <li><strong>CRASH</strong> Power cut: the memtable evaporates. On restart, replay the WAL to rebuild it — no acknowledged write is lost. This is why step 1 wrote to disk <em>before</em> the tree.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · the LSM-tree</span>
+A chef takes orders on a <strong>whiteboard</strong> (memtable) — fast to scribble, kept tidy and sorted. When the whiteboard fills up, she photographs it into a <strong>binder page</strong> (SSTable flush) and wipes it. Every night, someone staples related binder pages together and throws away superseded orders (compaction). And because whiteboards get erased by accident, every order is <em>also</em> jotted instantly on a <strong>carbon-copy pad</strong> nobody sorts or reads — unless the whiteboard is lost, in which case the pad recreates it (WAL). Fast writes, sorted reads, crash safety: pick three.</div>
+
+<h4>Performance details worth knowing</h4>
+<ul>
+<li><strong>Lucene does the same trick for text.</strong> The term dictionary of Lucene (inside Elasticsearch and Solr) maps <em>term → postings list</em> (word → IDs of documents containing it), stored in SSTable-like sorted files merged in the background.</li>
+<li><strong>Compaction strategies differ.</strong> <em>Size-tiered</em>: newer, smaller SSTables get merged into older, larger ones (HBase; Cassandra supports it). <em>Leveled</em>: the key range is split into smaller SSTables and older data moves into separate levels, letting compaction proceed incrementally with less disk (LevelDB — hence the name — and RocksDB; Cassandra supports both).</li>
+<li><strong>The core strengths</strong>: data is sorted, so range queries work; disk writes are sequential, so write throughput is remarkably high; the working set need not fit in RAM.</li>
+</ul>
+
+<div class="ed2"><span class="tag">2ND EDITION · storage engines in the cloud era</span>
+The 2nd edition (where this material is Chapter&nbsp;4) treats <strong>RocksDB</strong> as the modern LSM workhorse — it's the embedded engine inside many newer databases. New coverage reflects hardware and deployment shifts: <strong>NVMe/SSD-aware designs</strong> like WiscKey (separating keys from values to cut write amplification), and storage engines built over <strong>object storage (S3)</strong> — the compute/storage separation behind systems like Snowflake and Aurora. The RUM conjecture — you can't simultaneously optimize Read overhead, Update overhead, and Memory/space overhead — gives the B-tree-vs-LSM trade-off a formal frame.</div>
+
+<h3 id="b-trees"><a class="self" href="#b-trees">B-Trees</a></h3>
+<span class="key-chip">b-trees</span>
+
+<p>Log-structured indexes are the insurgents; the incumbent — the standard index in almost every relational database and many non-relational ones — is the <strong>B-tree</strong>, introduced in 1970 and called "ubiquitous" within a decade. Like SSTables, B-trees keep key-value pairs <em>sorted by key</em> (efficient lookups <em>and</em> range queries), but the design philosophy is the opposite. Log-structured engines deal in variable-size <em>segments</em> (megabytes, written sequentially, never modified). B-trees break the database into <strong>fixed-size pages</strong> — traditionally 4&nbsp;KB, mirroring the disk's own block structure — and <strong>read or write one page at a time, in place</strong>. Pages reference each other by on-disk address (a pointer, but on disk), forming a tree:</p>
+
+<figure class="anim" id="anim-btree-lookup">
+<svg viewBox="0 0 680 300" role="img" aria-label="Looking up key 251 in a B-tree: from the root page, follow the reference for the range containing 251 down through an intermediate page to the leaf page holding the key.">
+  <!-- root -->
+  <rect x="180" y="20" width="320" height="34" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="192" y="42" font-size="11" font-family="ui-monospace,Menlo,monospace">◦ 100 ◦ 200 ◦ 300 ◦ 400 ◦ 500 ◦</text>
+  <text x="180" y="14" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">root page (each ◦ is a ref to a child covering a key range)</text>
+
+  <!-- inner -->
+  <rect x="180" y="120" width="320" height="34" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="192" y="142" font-size="11" font-family="ui-monospace,Menlo,monospace">◦ 210 ◦ 230 ◦ 250 ◦ 270 ◦ 290 ◦</text>
+  <text x="180" y="114" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">page for keys 200–300</text>
+
+  <!-- leaf -->
+  <rect x="180" y="220" width="320" height="34" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="192" y="242" font-size="11" font-family="ui-monospace,Menlo,monospace">250:v  <tspan id="k251">251:v</tspan>  252:v  253:v  254:v</text>
+  <text x="180" y="214" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">leaf page for keys 250–270 (values inline or by ref)</text>
+
+  <!-- query -->
+  <g data-on="1-5">
+    <text x="24" y="42" font-size="13" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">find 251</text>
+  </g>
+  <!-- step highlights -->
+  <g data-on="2-5" data-hot="2">
+    <rect x="330" y="24" width="66" height="26" rx="4" fill="none" stroke="var(--read)" stroke-width="1.6"/>
+    <path d="M 362 56 C 362 80, 350 100, 344 116" fill="none" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR5)"/>
+    <text x="380" y="90" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">200 ≤ 251 &lt; 300</text>
+  </g>
+  <g data-on="3-5" data-hot="3">
+    <rect x="330" y="124" width="66" height="26" rx="4" fill="none" stroke="var(--read)" stroke-width="1.6"/>
+    <path d="M 362 156 C 362 180, 350 200, 344 216" fill="none" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR5)"/>
+    <text x="380" y="190" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">250 ≤ 251 &lt; 270</text>
+  </g>
+  <g data-on="4-5" data-hot="4">
+    <rect x="246" y="226" width="48" height="24" rx="4" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.6"/>
+    <text x="252" y="242" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">251:v</text>
+  </g>
+  <g data-on="5">
+    <text x="24" y="284" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".75">3–4 page reads reach any key in a 256 TB database (branching factor ~500, 4 KB pages)</text>
+  </g>
+  <defs><marker id="arrR5" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> We're looking up key 251. One page is designated the <em>root</em>; every lookup starts there. A page holds keys and references to children, where each child owns a continuous key range and the keys between refs mark the boundaries.</li>
+  <li><strong>DESCEND</strong> At the root, 251 falls between boundaries 200 and 300 — follow that child reference (one disk page read).</li>
+  <li><strong>DESCEND</strong> The child breaks 200–300 into finer ranges; 251 falls between 250 and 270. Follow again.</li>
+  <li><strong>LEAF</strong> We've reached a <em>leaf page</em>, which holds individual keys — the value is either inline or a reference to where it lives. Found: 251.</li>
+  <li><strong>TAKEAWAY</strong> The tree stays <em>balanced</em>: n keys always means O(log n) depth. Branching factors run to several hundred, so 3–4 levels cover enormous databases — most lookups are 3–4 page reads.</li>
+</ol>
+</figure>
+
+<p>Updating an existing key is easy: find the leaf, change the value, <strong>overwrite the page in place</strong> — references to it stay valid since its address doesn't change. Adding a key is easy until the target page is full — then it must <strong>split</strong>:</p>
+
+<figure class="anim" id="anim-btree-split">
+<svg viewBox="0 0 660 300" role="img" aria-label="Inserting key 334 into a full B-tree leaf page: the page splits into two half-full pages and the parent is overwritten to add the new boundary; three pages change in one logical insert, which is why a write-ahead log is needed.">
+  <!-- parent -->
+  <rect x="180" y="20" width="300" height="34" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <g data-on="1-2"><text x="192" y="42" font-size="11" font-family="ui-monospace,Menlo,monospace">… ◦ 333 ◦ 360 ◦ …</text></g>
+  <g data-on="3-5" data-hot="3"><text x="192" y="42" font-size="11" font-family="ui-monospace,Menlo,monospace">… ◦ 333 ◦ <tspan fill="var(--write)" font-weight="700">340</tspan> ◦ 360 ◦ …</text></g>
+  <text x="180" y="14" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">parent page</text>
+
+  <!-- full leaf -->
+  <g data-on="1-2" data-hot="1">
+    <rect x="120" y="120" width="240" height="34" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="130" y="142" font-size="11" font-family="ui-monospace,Menlo,monospace">333 337 340 344 347 352</text>
+    <text x="368" y="142" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">FULL</text>
+  </g>
+  <g data-on="1-2">
+    <text x="24" y="142" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">insert 334 ⟶</text>
+  </g>
+
+  <!-- split result -->
+  <g data-on="2-5" data-hot="2">
+    <rect x="100" y="200" width="180" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)"/>
+    <text x="112" y="222" font-size="11" font-family="ui-monospace,Menlo,monospace">333 <tspan font-weight="700" fill="var(--write)">334</tspan> 337</text>
+    <rect x="320" y="200" width="200" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)"/>
+    <text x="332" y="222" font-size="11" font-family="ui-monospace,Menlo,monospace">340 344 347 352</text>
+    <text x="100" y="252" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".6">two half-full pages, both written</text>
+  </g>
+  <g data-on="3-5">
+    <path d="M 300 56 C 260 110, 210 160, 195 196" fill="none" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW3)"/>
+    <path d="M 360 56 C 390 110, 410 160, 415 196" fill="none" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW3)"/>
+  </g>
+
+  <!-- crash hazard -->
+  <g data-on="4-5" data-hot="4">
+    <text x="24" y="282" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">⚡ crash after 2 of 3 page writes ⇒ corrupted tree (orphan page)</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <rect x="470" y="252" width="170" height="40" rx="6" fill="none" stroke="var(--write)" stroke-dasharray="5 3"/>
+    <text x="480" y="270" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">write-ahead log</text>
+    <text x="480" y="284" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">every change logged first</text>
+  </g>
+  <defs><marker id="arrW3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>INSERT</strong> Key 334 must go into the leaf covering its range — but that page is full. (Deleting while keeping the tree balanced is even hairier; the book waves at the textbooks.)</li>
+  <li><strong>SPLIT</strong> The page splits into two half-full pages, its keys divided between them. Both new pages are written to disk.</li>
+  <li><strong>UPDATE PARENT</strong> The parent is overwritten too: it needs the new boundary (340) and a reference to the new page. One logical insert has now touched <em>three</em> pages.</li>
+  <li><strong>THE HAZARD</strong> A crash after only some of those page writes leaves a corrupted index — e.g. an orphan page no parent references. Update-in-place makes partial failure dangerous in a way append-only never is.</li>
+  <li><strong>THE FIX</strong> A <em>write-ahead log</em> (WAL / redo log): every modification is appended there <em>before</em> being applied to pages. After a crash, the WAL restores the tree to consistency. (Irony noted: the update-in-place school carries a little log-structured engine in its pocket.)</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · B-tree</span>
+A B-tree is the library's signage system: the lobby sign sends you to a floor (root), the floor sign to an aisle, the aisle sign to a shelf where books sit in order (leaf). Nobody ever moves the shelves — they relabel them in place. And when a shelf overflows, the librarian splits its contents across two shelves and fixes the aisle sign. The signage guarantees any book is 3–4 signs away, whether the library holds a thousand books or a billion.</div>
+
+<h4>Making B-trees reliable</h4>
+<p>Overwriting a page is a real hardware act — on a spinning disk, moving the head and rewriting a sector; on SSDs, erasing and rewriting a large block. Three protections matter: the <strong>WAL</strong> for crash recovery (above); some engines also write each page <em>twice</em> to survive torn pages from power loss mid-write; and <strong>latches</strong> (lightweight locks) protect the tree from concurrent threads seeing it mid-surgery. Log-structured engines dodge the concurrency problem entirely — merging happens in the background on immutable files, swapped in atomically.</p>
+
+<h4>B-tree optimizations, briefly</h4>
+<ul>
+<li><strong>Copy-on-write</strong> instead of WAL (LMDB): a modified page is written to a <em>new</em> location with new parent versions pointing at it — which, bonus, is exactly what <a class="xref fwd" href="ch07-transactions.html#snapshot-isolation-and-repeatable-read" data-tip="Ch 7 · Snapshot Isolation and Repeatable Read — readers see a consistent snapshot while writers proceed · not yet written">snapshot isolation<sup>→7</sup></a> wants.</li>
+<li><strong>Key abbreviation</strong>: interior pages only need enough of each key to mark range boundaries — packing more keys per page raises the branching factor and lowers the depth (this variant is the ubiquitous B<sup>+</sup>-tree).</li>
+<li><strong>Sequential leaf layout</strong>: engines try to place leaf pages in key order on disk so range scans don't seek per page — hard to maintain as the tree grows, and a place where LSM-trees (which rewrite big runs anyway) have it easier.</li>
+<li><strong>Sibling pointers</strong>: leaf pages referencing their left/right neighbors make in-order scans cheap without climbing back up.</li>
+<li><strong>Fractal trees</strong> borrow log-structured buffering to cut seeks (no fractals involved).</li>
+</ul>
+
+<h3 id="comparing-b-trees-and-lsm-trees"><a class="self" href="#comparing-b-trees-and-lsm-trees">Comparing B-Trees and LSM-Trees</a></h3>
+<span class="key-chip">comparing-b-trees-and-lsm-trees</span>
+
+<p>Rule of thumb: <strong>LSM-trees are typically faster for writes; B-trees are thought to be faster for reads</strong> (an LSM read may check the memtable plus several SSTables at different compaction stages). But benchmarks are workload-sensitive and often inconclusive — <em>test with your workload</em>. What follows is the checklist of what to weigh.</p>
+
+<figure>
+<svg viewBox="0 0 680 260" role="img" aria-label="Side by side: one logical write in a B-tree becomes a WAL append plus whole-page overwrites, possibly times three on a split; in an LSM-tree it becomes a WAL append, a memtable insert, one flush, and a rewrite per compaction pass — both amplify writes, differently.">
+  <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">B-tree: one write becomes…</text>
+  <g color="var(--write)">
+    <text x="20" y="56" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">set x=1</text>
+    <path d="M 90 52 L 130 52" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW4)"/>
+  </g>
+  <rect x="136" y="36" width="150" height="28" rx="4" fill="none" stroke="var(--write)" stroke-dasharray="4 3"/>
+  <text x="144" y="54" font-size="10" font-family="ui-monospace,Menlo,monospace">1. WAL append</text>
+  <rect x="136" y="74" width="150" height="28" rx="4" fill="none" stroke="var(--write)"/>
+  <text x="144" y="92" font-size="10" font-family="ui-monospace,Menlo,monospace">2. overwrite 4KB page</text>
+  <rect x="136" y="112" width="150" height="28" rx="4" fill="none" stroke="var(--write)" stroke-opacity=".55"/>
+  <text x="144" y="130" font-size="10" font-family="ui-monospace,Menlo,monospace">3. (split: ×3 pages)</text>
+  <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">whole page written even if</text>
+  <text x="20" y="194" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">a few bytes changed;</text>
+  <text x="20" y="208" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">random I/O; fragmentation</text>
+
+  <line x1="340" y1="16" x2="340" y2="244" stroke="currentColor" stroke-opacity=".25"/>
+
+  <text x="360" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">LSM-tree: one write becomes…</text>
+  <g color="var(--write)">
+    <text x="360" y="56" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">set x=1</text>
+    <path d="M 430 52 L 470 52" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW4)"/>
+  </g>
+  <rect x="476" y="36" width="180" height="28" rx="4" fill="none" stroke="var(--write)" stroke-dasharray="4 3"/>
+  <text x="484" y="54" font-size="10" font-family="ui-monospace,Menlo,monospace">1. WAL append + memtable</text>
+  <rect x="476" y="74" width="180" height="28" rx="4" fill="none" stroke="var(--write)"/>
+  <text x="484" y="92" font-size="10" font-family="ui-monospace,Menlo,monospace">2. flush (sequential)</text>
+  <rect x="476" y="112" width="180" height="28" rx="4" fill="none" stroke="var(--write)" stroke-opacity=".55"/>
+  <text x="484" y="130" font-size="10" font-family="ui-monospace,Menlo,monospace">3. rewrite per compaction ×N</text>
+  <text x="360" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">all sequential I/O; compact</text>
+  <text x="360" y="194" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">files, no fragmentation; but</text>
+  <text x="360" y="208" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">compaction repeats the work</text>
+  <defs><marker id="arrW4" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+</svg>
+<figcaption><strong>Write amplification</strong> — one database write turning into multiple disk writes over the database's lifetime — exists on <em>both</em> sides; the question is who pays less for your workload. It matters doubly on SSDs, whose blocks survive a limited number of overwrites, and in write-heavy apps where disk bandwidth is the bottleneck: the more the engine writes per logical write, the fewer writes per second fit in the same disk.</figcaption>
+</figure>
+
+<div class="tablewrap"><table>
+<tr><th></th><th>LSM-tree advantages</th><th>B-tree advantages</th></tr>
+<tr><td><strong>Writes</strong></td><td>Higher sustained throughput: often lower write amplification, and compact SSTables are written sequentially — a huge win on spinning disks, still relevant on SSDs.</td><td>Predictable: no background compaction competing for the disk.</td></tr>
+<tr><td><strong>Space</strong></td><td>Compresses better; periodic rewriting removes fragmentation (especially with leveled compaction).</td><td>Pages keep unused gaps from splits — some space is always wasted.</td></tr>
+<tr><td><strong>Read latency</strong></td><td>—</td><td>More predictable tail latency: compaction bursts can push LSM <a class="xref back" href="ch01-reliable-scalable-maintainable.html#describing-performance" data-tip="Ch 1 · Describing Performance — why p99 matters more than the average">high-percentile response times<sup>←1</sup></a> way up while the disk is busy.</td></tr>
+<tr><td><strong>Under pressure</strong></td><td>—</td><td>LSM failure mode: at high write rates, compaction can fall behind — unmerged segments pile up until the disk fills, and reads slow down. Engines typically <em>don't throttle incoming writes</em> when this happens; you need monitoring to catch it.</td></tr>
+<tr><td><strong>Transactions</strong></td><td>—</td><td>Each key lives in <em>exactly one place</em> (LSM may hold copies across segments) — so range locks for transaction isolation attach directly to the tree. More in <a class="xref fwd" href="ch07-transactions.html" data-tip="Ch 7 · Transactions — isolation levels and how they're implemented · not yet written">Chapter&nbsp;7<sup>→7</sup></a>.</td></tr>
+</table></div>
+
+<p>B-trees are deeply ingrained and consistently good; log-structured indexes keep winning ground in new datastores. There's no shortcut rule — measure.</p>
+
+<h3 id="other-indexing-structures"><a class="self" href="#other-indexing-structures">Other Indexing Structures</a></h3>
+<span class="key-chip">other-indexing-structures</span>
+
+<p>Everything so far was a <em>primary key</em> index: key uniquely identifies one row/document/vertex. Just as common are <strong>secondary indexes</strong> (<code>CREATE INDEX</code> …), often crucial for joins — e.g. an index on <code>user_id</code> to find all rows belonging to a user, referencing <a class="xref back" href="ch02-data-models-query-languages.html#relational-model-versus-document-model" data-tip="Ch 2 · Relational Model Versus Document Model — the schema this example (users, posts) comes from">Chapter&nbsp;2's example schema<sup>←2</sup></a>. The twist: secondary keys aren't unique. Two solutions: make each index value a <em>list</em> of matching row IDs (like a postings list), or make each key unique by appending the row ID. Either way, both B-trees and LSM-trees work fine as secondary indexes.</p>
+
+<h4 id="storing-values-within-the-index">Where does the value live? Heap, clustered, covering</h4>
+
+<figure>
+<svg viewBox="0 0 680 250" role="img" aria-label="Two secondary indexes both point into one heap file that stores the actual rows; a clustered index instead stores the row inside the index itself.">
+  <text x="20" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">index on user_id</text>
+  <rect x="20" y="30" width="160" height="88" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+  <text x="30" y="52" font-size="11" font-family="ui-monospace,Menlo,monospace">101 → [•, •]</text>
+  <text x="30" y="76" font-size="11" font-family="ui-monospace,Menlo,monospace">102 → [•]</text>
+  <text x="20" y="152" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">index on email</text>
+  <rect x="20" y="160" width="160" height="64" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+  <text x="30" y="182" font-size="11" font-family="ui-monospace,Menlo,monospace">a@x.com → •</text>
+  <text x="30" y="206" font-size="11" font-family="ui-monospace,Menlo,monospace">b@y.com → •</text>
+
+  <text x="280" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">heap file (rows in no particular order)</text>
+  <rect x="280" y="30" width="220" height="194" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+  <rect x="292" y="44" width="196" height="26" rx="3" fill="var(--panel2)"/><text x="300" y="61" font-size="10" font-family="ui-monospace,Menlo,monospace">row: user 101, a@x.com, …</text>
+  <rect x="292" y="78" width="196" height="26" rx="3" fill="var(--panel2)"/><text x="300" y="95" font-size="10" font-family="ui-monospace,Menlo,monospace">row: user 102, b@y.com, …</text>
+  <rect x="292" y="112" width="196" height="26" rx="3" fill="var(--panel2)"/><text x="300" y="129" font-size="10" font-family="ui-monospace,Menlo,monospace">row: user 101, …</text>
+  <path d="M 130 48 C 220 48, 240 55, 288 55" fill="none" stroke="var(--read)" stroke-width="1.3" marker-end="url(#arrR6)"/>
+  <path d="M 130 52 C 220 60, 240 120, 288 124" fill="none" stroke="var(--read)" stroke-width="1.3" marker-end="url(#arrR6)"/>
+  <path d="M 120 72 C 220 72, 240 88, 288 90" fill="none" stroke="var(--read)" stroke-width="1.3" marker-end="url(#arrR6)"/>
+  <path d="M 122 178 C 220 170, 240 62, 288 58" fill="none" stroke="var(--read)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#arrR6)"/>
+  <path d="M 122 202 C 230 200, 250 96, 288 92" fill="none" stroke="var(--read)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#arrR6)"/>
+
+  <text x="530" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">clustered index</text>
+  <rect x="530" y="30" width="140" height="110" rx="6" fill="none" stroke="var(--write)"/>
+  <text x="540" y="52" font-size="10" font-family="ui-monospace,Menlo,monospace">key → <tspan fill="var(--write)" font-weight="700">entire row</tspan></text>
+  <text x="540" y="72" font-size="10" font-family="ui-monospace,Menlo,monospace">stored inside</text>
+  <text x="540" y="88" font-size="10" font-family="ui-monospace,Menlo,monospace">the index</text>
+  <text x="540" y="116" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">(InnoDB primary key)</text>
+  <defs><marker id="arrR6" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+</svg>
+<figcaption>The <strong>heap file</strong> approach: rows live once, in no particular order; every index just points at heap locations — no duplication no matter how many indexes exist. Updating a value in place is cheap if the new value fits; if it's bigger, the row moves and either all indexes are updated or a <em>forwarding pointer</em> is left behind. When the extra hop costs too much, store the row <em>inside</em> the index — a <strong>clustered index</strong> (MySQL InnoDB's primary key always is; secondary indexes there point at the primary key, not the heap). Halfway between: a <strong>covering index</strong> stores <em>some</em> columns inline, so it alone can answer ("cover") certain queries. As always: duplicated data speeds reads, taxes writes, and adds transactional bookkeeping.</figcaption>
+</figure>
+
+<h4 id="multi-column-indexes">Multi-column and multi-dimensional indexes</h4>
+<p>A <strong>concatenated index</strong> glues fields into one key — like a phone book sorted by <code>(lastname, firstname)</code>: great for "all Smiths" and "Smith, Jane", useless for "everyone named Jane". For genuinely multi-dimensional queries — the classic being geospatial:</p>
+<pre><code>SELECT * FROM restaurants WHERE latitude  > 51.4946 AND latitude  &lt; 51.5079
+                            AND longitude > -0.1162 AND longitude &lt; -0.1004;</code></pre>
+<p>— a single B-tree or LSM index can give you a latitude <em>stripe</em> or a longitude <em>stripe</em>, but not the rectangle. Options: map 2D into 1D with a <strong>space-filling curve</strong> and use a normal B-tree, or use a purpose-built spatial index — <strong>R-trees</strong> (PostGIS, via PostgreSQL's GiST). And dimensions needn't be geographic: <code>(red, green, blue)</code> for color search, <code>(date, temperature)</code> for weather queries — a 2D index narrows both at once where a 1D index must scan one dimension entirely.</p>
+
+<h4 id="full-text-search-and-fuzzy-indexes">Full-text search and fuzzy indexes</h4>
+<p>Everything above assumes exact keys or exact ranges. Searching for <em>similar</em> keys — misspellings, synonyms, grammatical variants, nearby words — needs different machinery. Lucene can search within an <em>edit distance</em> (edit distance 1 = one letter added/removed/replaced): its in-memory index over the term dictionary isn't a sparse key list but a <strong>finite state automaton</strong> over the keys' characters (trie-like), which can be transformed into a <em>Levenshtein automaton</em> that walks all terms within a given edit distance efficiently. Beyond that lies document classification and machine learning — information-retrieval textbook territory.</p>
+
+<h4 id="keeping-everything-in-memory">Keeping everything in memory</h4>
+<p>Every structure in this chapter is an answer to the awkwardness of disks. Disks earn it two ways: durability, and a lower cost per gigabyte than RAM. But RAM keeps getting cheaper, and many datasets simply aren't that big — hence <strong>in-memory databases</strong>: Memcached (cache-only, loss acceptable), and durable ones — VoltDB, MemSQL, Oracle TimesTen (relational), RAMCloud (durable in-memory KV), Redis and Couchbase (weak durability via async disk writes). Durability comes from a change log on disk, periodic snapshots, replication, or battery-backed RAM — but reads never touch disk.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the counterintuitive part</span>
+The speed win of in-memory databases is <em>not</em> "no disk reads" — a disk-based engine with enough RAM also never reads disk, because the OS caches everything anyway. The win is skipping the <strong>work of encoding</strong> in-memory structures into a disk-writable format at all. That's also why they can offer data models that are awkward on disk — Redis serves priority queues and sets database-style precisely because everything lives in memory.</div>
+
+<p>Research pushes further: <strong>anti-caching</strong> evicts least-recently-used records to disk and pulls them back on access — like OS swapping, but at record granularity instead of page granularity, which the database can manage far better than the OS. (Indexes must still fit in memory, Bitcask-style.) And if non-volatile memory (NVM) matures, storage engine design shifts again — an open research frontier as of the 1st edition.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · a brand-new index family + embedded engines</span>
+The biggest addition to this chapter's territory (2nd-ed Ch&nbsp;4): <strong>vector indexes</strong> for semantic search over embeddings — where the query is "nearest neighbors in a high-dimensional space," which no B-tree can answer. Coverage spans approximate-nearest-neighbor structures like <strong>HNSW</strong> (navigable small-world graphs) and <strong>IVF</strong>, with <code>pgvector</code> as the working example — the storage layer under RAG and semantic search. Also new: <strong>embedded/in-process databases</strong> (DuckDB, SQLite — including Bluesky's single-tenant-SQLite architecture), fuller full-text internals (Lucene, Postgres GIN), and modern spatial indexing (Uber's H3, bkd-trees).</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="transaction-processing-or-analytics">
+<span class="key-chip">transaction-processing-or-analytics</span>
+<h2><a class="self" href="#transaction-processing-or-analytics">Transaction Processing or Analytics?</a></h2>
+
+<p>The word <em>transaction</em> is a fossil: early databases recorded commercial transactions (sales, orders, salaries), and the name stuck for any group of reads and writes forming a logical unit — money or not. A transaction here <strong>does not imply ACID</strong>; it just means low-latency reads and writes, as opposed to batch jobs that run periodically. (ACID proper is <a class="xref fwd" href="ch07-transactions.html" data-tip="Ch 7 · Transactions — ACID, isolation levels, serializability · not yet written">Chapter&nbsp;7<sup>→7</sup></a>; batch is <a class="xref fwd" href="ch10-batch-processing.html" data-tip="Ch 10 · Batch Processing — MapReduce and dataflow engines · not yet written">Chapter&nbsp;10<sup>→10</sup></a>.)</p>
+
+<p>Two access patterns pulled databases apart. <strong>OLTP</strong> (online transaction processing): an interactive app looks up a handful of records by key via an index, inserts or updates from user input. <strong>OLAP</strong> (online analytic processing): a business analyst's query scans <em>millions</em> of records, reads only a few columns per record, and computes aggregates — total revenue per store in January; how many extra bananas did the promotion sell; which brand of baby food is bought with brand-X diapers. The workloads differ in every dimension:</p>
+
+<div class="tablewrap"><table>
+<tr><th>property</th><th>OLTP</th><th>OLAP</th></tr>
+<tr><td>Main read pattern</td><td>Few records per query, fetched by key</td><td>Aggregate over huge numbers of records</td></tr>
+<tr><td>Main write pattern</td><td>Random-access, low-latency writes from user input</td><td>Bulk import (ETL) or <a class="xref fwd" href="ch11-stream-processing.html#transmitting-event-streams" data-tip="Ch 11 · Transmitting Event Streams — the streaming alternative to periodic ETL · not yet written">event stream<sup>→11</sup></a></td></tr>
+<tr><td>Used by</td><td>End users, via an application</td><td>Internal analysts, for decisions (business intelligence)</td></tr>
+<tr><td>Data represents</td><td>Latest state, now</td><td>History of events over time</td></tr>
+<tr><td>Size</td><td>GB–TB</td><td>TB–PB</td></tr>
+<tr><td>Bottleneck</td><td>Disk <em>seek time</em></td><td>Disk <em>bandwidth</em></td></tr>
+</table></div>
+
+<h3 id="data-warehousing"><a class="self" href="#data-warehousing">Data Warehousing</a></h3>
+<span class="key-chip">data-warehousing</span>
+
+<p>A real enterprise runs dozens of OLTP systems — website, point-of-sale, inventory, vehicle routing, suppliers, payroll — each critical, each latency-sensitive, each jealously guarded by its DBAs. Nobody sane lets analysts run monster ad-hoc scans against them. So the analysts get their own database: the <strong>data warehouse</strong>, a read-only copy of data from all the OLTP systems, loaded by <strong>ETL</strong> — Extract (dump or continuous stream), Transform (into an analysis-friendly, cleaned-up schema), Load:</p>
+
+<figure>
+<svg viewBox="0 0 680 240" role="img" aria-label="ETL: data is extracted from many OLTP systems, transformed into an analysis-friendly schema, and loaded into a data warehouse that analysts query without touching production.">
+  <g>
+    <rect x="20" y="30" width="130" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".55"/><text x="34" y="55" font-size="11" font-family="ui-monospace,Menlo,monospace">sales OLTP</text>
+    <rect x="20" y="90" width="130" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".55"/><text x="34" y="115" font-size="11" font-family="ui-monospace,Menlo,monospace">inventory OLTP</text>
+    <rect x="20" y="150" width="130" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".55"/><text x="34" y="175" font-size="11" font-family="ui-monospace,Menlo,monospace">website OLTP</text>
+  </g>
+  <g color="var(--write)">
+    <path d="M 154 50 C 220 50, 230 95, 268 102" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW5)"/>
+    <path d="M 154 110 L 268 110" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW5)"/>
+    <path d="M 154 170 C 220 170, 230 125, 268 118" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW5)"/>
+    <text x="175" y="90" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">extract</text>
+  </g>
+  <rect x="272" y="86" width="120" height="48" rx="6" fill="var(--write-soft)" stroke="var(--write)"/>
+  <text x="290" y="106" font-size="11" font-family="ui-monospace,Menlo,monospace">transform</text>
+  <text x="284" y="122" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">clean, reshape</text>
+  <path d="M 396 110 L 448 110" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW5)"/>
+  <text x="404" y="102" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">load</text>
+  <rect x="452" y="70" width="208" height="80" rx="8" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="470" y="100" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">data warehouse</text>
+  <text x="470" y="120" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">read-only copy, optimized</text>
+  <text x="470" y="134" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">for analytic scans</text>
+  <g color="var(--read)">
+    <path d="M 556 200 L 556 156" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR7)"/>
+    <text x="500" y="222" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">analysts hammer away safely</text>
+  </g>
+  <defs>
+    <marker id="arrW5" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR7" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<figcaption>Warehouses exist in virtually every large enterprise and almost no small ones — small companies have few systems and little enough data to analyze in a conventional database or a spreadsheet. The payoff of separation: the warehouse's internals can be optimized purely for analytics. Both sides speak SQL, but under the hood they diverge completely — most vendors focus on one side or the other (SQL Server and SAP HANA ship both, increasingly as two engines behind one dialect).</figcaption>
+</figure>
+
+<div class="ed2"><span class="tag">2ND EDITION · where this section went, and what replaced SQL-on-Hadoop</span>
+In the 2nd edition, this OLTP-vs-OLAP framing moves forward into Chapter&nbsp;1 as a foundational trade-off, and the warehouse story is retold cloud-natively: the 1st edition's commercial-license vendors (Teradata, Vertica, ParAccel/Redshift) and SQL-on-Hadoop projects (Hive, Impala, Presto, Drill, Tajo) give way to <strong>elastic cloud warehouses</strong> (Snowflake, BigQuery) and the <strong>lakehouse</strong> pattern — ACID table formats like <strong>Delta Lake</strong> layered directly over object storage. The 1st edition's throwaway mention of Dremel is now the lineage of a whole ecosystem.</div>
+
+<h3 id="stars-and-snowflakes-schemas-for-analytics"><a class="self" href="#stars-and-snowflakes-schemas-for-analytics">Stars and Snowflakes: Schemas for Analytics</a></h3>
+<span class="key-chip">stars-and-snowflakes-schemas-for-analytics</span>
+
+<p>OLTP schemas vary wildly with the application; analytics converged on one formula: the <strong>star schema</strong> (a.k.a. dimensional modeling). At the center, a <strong>fact table</strong> — one row per <em>event</em>: a product sold, a page viewed. Around it, <strong>dimension tables</strong> answering the event's <em>who, what, where, when, how, why</em>, referenced by foreign keys:</p>
+
+<figure>
+<svg viewBox="0 0 680 300" role="img" aria-label="A star schema: a central fact_sales table with one row per purchase event, foreign keys radiating to dimension tables for date, product, store, promotion, and customer.">
+  <rect x="240" y="110" width="200" height="80" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.6"/>
+  <text x="262" y="136" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">fact_sales</text>
+  <text x="262" y="154" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">1 row = 1 purchase event</text>
+  <text x="262" y="170" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">price, cost, qty + 5 FKs</text>
+  <g stroke="currentColor" stroke-opacity=".5">
+    <line x1="240" y1="130" x2="150" y2="60"/><line x1="340" y1="110" x2="340" y2="56"/><line x1="440" y1="130" x2="530" y2="60"/><line x1="240" y1="170" x2="150" y2="240"/><line x1="440" y1="170" x2="530" y2="240"/>
+  </g>
+  <rect x="60" y="20" width="130" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="72" y="45" font-size="11" font-family="ui-monospace,Menlo,monospace">dim_date</text>
+  <rect x="275" y="16" width="130" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="287" y="41" font-size="11" font-family="ui-monospace,Menlo,monospace">dim_product</text>
+  <rect x="490" y="20" width="130" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="502" y="45" font-size="11" font-family="ui-monospace,Menlo,monospace">dim_store</text>
+  <rect x="60" y="240" width="150" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="72" y="265" font-size="11" font-family="ui-monospace,Menlo,monospace">dim_promotion</text>
+  <rect x="490" y="240" width="150" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="502" y="265" font-size="11" font-family="ui-monospace,Menlo,monospace">dim_customer</text>
+  <text x="30" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">who/what/where/</text>
+  <text x="30" y="164" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">when/how/why</text>
+</svg>
+<figcaption>Facts are captured as individual events (maximum analytic flexibility later), so fact tables get <em>enormous</em> — petabytes at a big retailer — and <em>wide</em>: often 100+ columns. Dimensions are smaller but rich: <code>dim_product</code> holds SKU, brand, category, package size…; even date is a dimension so holidays can be encoded. The <strong>snowflake</strong> variant normalizes dimensions into sub-dimensions (brand table, category table) — more normalized, but analysts prefer plain stars for simplicity.</figcaption>
+</figure>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="column-oriented-storage">
+<span class="key-chip">column-oriented-storage</span>
+<h2><a class="self" href="#column-oriented-storage">Column-Oriented Storage</a></h2>
+
+<p>Trillions of rows, petabytes of facts — how do you query that? Note what a typical warehouse query actually touches: a fact table 100+ columns wide, but only <strong>4 or 5 columns per query</strong>. The book's running example — "do people buy more fresh fruit or candy, by weekday?" — reads exactly three columns of <code>fact_sales</code>:</p>
+
+<pre><code>SELECT dim_date.weekday, dim_product.category, SUM(fact_sales.quantity)
+FROM fact_sales
+  JOIN dim_date    ON fact_sales.date_key   = dim_date.date_key
+  JOIN dim_product ON fact_sales.product_sk = dim_product.product_sk
+WHERE dim_date.year = 2013 AND dim_product.category IN ('Fresh fruit','Candy')
+GROUP BY dim_date.weekday, dim_product.category;</code></pre>
+
+<figure class="anim" id="anim-column">
+<svg viewBox="0 0 680 320" role="img" aria-label="Row-oriented storage forces the query to load entire 100-column rows to use 3 columns; column-oriented storage stores each column in its own file so the query reads only the 3 files it needs, reassembling rows by position.">
+  <!-- row-oriented -->
+  <g data-on="1-2">
+    <text x="20" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">row-oriented (OLTP-style): each row contiguous</text>
+    <rect x="20" y="32" width="640" height="26" rx="4" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <rect x="20" y="64" width="640" height="26" rx="4" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <rect x="20" y="96" width="640" height="26" rx="4" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+  </g>
+  <g data-on="1-2">
+    <text x="28" y="49" font-size="9" font-family="ui-monospace,Menlo,monospace">date│prod│qty│<tspan opacity=".4">store│promo│cust│price│cost│…97 more columns…</tspan></text>
+    <text x="28" y="81" font-size="9" font-family="ui-monospace,Menlo,monospace">date│prod│qty│<tspan opacity=".4">store│promo│cust│price│cost│…97 more columns…</tspan></text>
+    <text x="28" y="113" font-size="9" font-family="ui-monospace,Menlo,monospace">date│prod│qty│<tspan opacity=".4">store│promo│cust│price│cost│…97 more columns…</tspan></text>
+  </g>
+  <g data-on="2" data-hot="2">
+    <rect x="20" y="32" width="640" height="90" rx="4" fill="none" stroke="var(--bad)" stroke-width="1.6"/>
+    <text x="330" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">must load ALL of every row from disk, then throw 97% away</text>
+  </g>
+
+  <!-- column-oriented -->
+  <g data-on="3-5">
+    <text x="20" y="22" font-size="12" font-family="ui-monospace,Menlo,monospace" opacity=".65">column-oriented: each column in its own file, same row order</text>
+    <rect x="20" y="34" width="420" height="24" rx="4" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="28" y="50" font-size="9" font-family="ui-monospace,Menlo,monospace">date_key:   140102│140102│140102│140103│140103│…</text>
+    <rect x="20" y="66" width="420" height="24" rx="4" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="28" y="82" font-size="9" font-family="ui-monospace,Menlo,monospace">product_sk: 69│69│74│31│31│…</text>
+    <rect x="20" y="98" width="420" height="24" rx="4" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="28" y="114" font-size="9" font-family="ui-monospace,Menlo,monospace">quantity:   1│3│1│5│2│…</text>
+    <rect x="20" y="130" width="420" height="24" rx="4" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="4 3"/>
+    <text x="28" y="146" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".4">store_sk, promo_sk, price, … (97 more files)</text>
+  </g>
+  <g data-on="4-5" data-hot="4">
+    <rect x="20" y="34" width="420" height="24" rx="4" fill="none" stroke="var(--read)" stroke-width="1.6"/>
+    <rect x="20" y="66" width="420" height="24" rx="4" fill="none" stroke="var(--read)" stroke-width="1.6"/>
+    <rect x="20" y="98" width="420" height="24" rx="4" fill="none" stroke="var(--read)" stroke-width="1.6"/>
+    <text x="460" y="82" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">read exactly 3 files;</text>
+    <text x="460" y="98" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">97 files never touched</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <line x1="118" y1="34" x2="118" y2="122" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="4 3"/>
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">row k = the kth entry of every column file — that's the whole reassembly contract</text>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>ROW LAYOUT</strong> OLTP engines (and document stores) lay data out row-wise: all values of a row adjacent. Perfect when the app fetches whole records by key.</li>
+  <li><strong>THE PROBLEM</strong> For the analytics query, even with indexes on <code>date_key</code>/<code>product_sk</code>, the engine loads entire 100+-attribute rows into memory, parses them, and discards everything but 3 fields. Disk bandwidth dies.</li>
+  <li><strong>COLUMN LAYOUT</strong> Store all values of each <em>column</em> together instead, one file per column — with every file keeping rows in the same order.</li>
+  <li><strong>THE WIN</strong> The query reads the 3 column files it mentions. The other 97 aren't touched. Work is proportional to columns used, not table width.</li>
+  <li><strong>REASSEMBLY</strong> Need the full row? Take the kth entry from every column file — position is identity. This ordering contract is what everything else (compression, sorting) builds on.</li>
+</ol>
+</figure>
+
+<p>Column storage isn't inherently relational — <strong>Parquet</strong> is a columnar format for a document data model, based on Google's Dremel. (Beware a naming trap: Cassandra/HBase "column families," inherited from Bigtable, store each row's columns <em>together</em> with a row key and don't compress columns — mostly row-oriented, despite the name.)</p>
+
+<h3 id="column-compression"><a class="self" href="#column-compression">Column Compression</a></h3>
+<span class="key-chip">column-compression</span>
+
+<p>Look down a single column and you see repetition — few distinct values, long runs. That's compression fuel. The warehouse favorite is <strong>bitmap encoding</strong>:</p>
+
+<figure>
+<svg viewBox="0 0 680 290" role="img" aria-label="Bitmap encoding of one column: the sequence of product_sk values becomes one bitmap per distinct value with a bit per row; sparse bitmaps are further run-length encoded; WHERE clauses become bitwise AND and OR of bitmaps.">
+  <text x="20" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">product_sk column (18 rows)</text>
+  <text x="20" y="44" font-size="11" font-family="ui-monospace,Menlo,monospace">69 69 69 69 74 31 31 31 31 29 30 30 31 31 31 68 69 69</text>
+  <text x="20" y="84" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">one bitmap per distinct value, one bit per row:</text>
+  <text x="20" y="108" font-size="11" font-family="ui-monospace,Menlo,monospace">29:  0 0 0 0 0 0 0 0 0 <tspan fill="var(--read)" font-weight="700">1</tspan> 0 0 0 0 0 0 0 0</text>
+  <text x="20" y="130" font-size="11" font-family="ui-monospace,Menlo,monospace">30:  0 0 0 0 0 0 0 0 0 0 <tspan fill="var(--read)" font-weight="700">1 1</tspan> 0 0 0 0 0 0</text>
+  <text x="20" y="152" font-size="11" font-family="ui-monospace,Menlo,monospace">31:  0 0 0 0 0 <tspan fill="var(--read)" font-weight="700">1 1 1 1</tspan> 0 0 0 <tspan fill="var(--read)" font-weight="700">1 1 1</tspan> 0 0 0</text>
+  <text x="20" y="174" font-size="11" font-family="ui-monospace,Menlo,monospace">68:  0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 <tspan fill="var(--read)" font-weight="700">1</tspan> 0 0</text>
+  <text x="20" y="196" font-size="11" font-family="ui-monospace,Menlo,monospace">69:  <tspan fill="var(--read)" font-weight="700">1 1 1 1</tspan> 0 0 0 0 0 0 0 0 0 0 0 0 <tspan fill="var(--read)" font-weight="700">1 1</tspan></text>
+  <text x="20" y="218" font-size="11" font-family="ui-monospace,Menlo,monospace">74:  0 0 0 0 <tspan fill="var(--read)" font-weight="700">1</tspan> 0 0 0 0 0 0 0 0 0 0 0 0 0</text>
+  <text x="20" y="256" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">sparse? run-length encode:  31 → <tspan fill="var(--write)">"5,4,3,3"</tspan>  (5 zeros, 4 ones, 3 zeros, 3 ones, rest zeros)</text>
+  <text x="20" y="280" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">WHERE product_sk IN (30,68,69) → OR the bitmaps · WHERE a=31 AND b=3 → AND them</text>
+</svg>
+<figcaption>Billions of sales but ~100k distinct products: n distinct values become n bitmaps, one bit per row. Small n (a country column, ~200 values) stores fine as raw bits; large n means sparse bitmaps, which run-length encode down to almost nothing. And the killer feature: <code>IN</code> and <code>AND</code> conditions become <em>bitwise OR / AND</em> over bitmaps — possible only because all column files share row order, so bit k always means row k.</figcaption>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · bitmaps</span>
+An attendance register: one row of checkboxes per student across all class dates. "Which dates had Alice or Bob?" is just laying Alice's row over Bob's and OR-ing the checkmarks — no reading names, no scanning records, pure bit arithmetic that CPUs eat for breakfast.</div>
+
+<p><strong>Memory bandwidth and vectorized processing.</strong> Disk-to-memory bandwidth isn't the only bottleneck — analytical engines also fight for memory-to-CPU-cache bandwidth, dodge branch mispredictions, and exploit SIMD. Column layout helps here too: a chunk of compressed column data fits in L1 cache and can be processed in a tight, call-free loop; operators like those bitwise AND/ORs work on compressed chunks directly. This is <strong>vectorized processing</strong>.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · the columnar ecosystem grew up</span>
+What the 1st edition sketched became an industry (2nd-ed Ch&nbsp;4 + a dataframes thread in later chapters): <strong>Parquet</strong> everywhere on disk, <strong>Apache Arrow</strong> as the in-memory columnar standard (plus newer formats like Lance and Nimble), "composable" query engines built from these parts, and the query-execution debate refined into <strong>vectorized vs. compiled</strong> execution (the MonetDB/X100 lineage). <strong>DuckDB</strong> — an embedded, in-process columnar OLAP engine — is the era's emblem: warehouse techniques in a library you <code>import</code>. Real-time OLAP (ClickHouse-class) and <strong>dataframes</strong> as an analytics interface get first-class treatment.</div>
+
+<h3 id="sort-order-in-column-storage"><a class="self" href="#sort-order-in-column-storage">Sort Order in Column Storage</a></h3>
+<span class="key-chip">sort-order-in-column-storage</span>
+
+<p>Rows <em>can</em> be stored in insert order — appending a row just appends to each column file. But choosing a sort order (SSTable-style) helps twice. It's an <strong>indexing mechanism</strong>: sort by <code>date_key</code> first and queries over "last month" scan a narrow slice instead of everything; a second sort key (<code>product_sk</code>) groups same-product sales within each date for grouping/filtering. And it's a <strong>compression multiplier</strong>: the first sort key gets long runs of repeated values — run-length encoding can crush a billion-row column to kilobytes. (Later sort keys are progressively more jumbled; the win concentrates in the first.) Remember the constraint: you can't sort each column independently — position is identity, so the <em>rows</em> sort as units, stored columnwise.</p>
+
+<p><strong>Several sort orders at once?</strong> C-Store's trick, adopted by Vertica: you're replicating data across machines for fault tolerance anyway — store each replica sorted <em>differently</em> and route each query to the version that fits it best. It rhymes with secondary indexes on a row store, with one deep difference: a row store keeps one authoritative row location plus pointers; a column store has no pointers at all — only columns of values in some order.</p>
+
+<h3 id="writing-to-column-oriented-storage"><a class="self" href="#writing-to-column-oriented-storage">Writing to Column-Oriented Storage</a></h3>
+<span class="key-chip">writing-to-column-oriented-storage</span>
+
+<p>All these read optimizations make writes awkward: update-in-place à la B-tree is impossible against compressed, sorted columns — inserting one row mid-sort would rewrite every column file to keep positions consistent. The answer is an old friend: <strong>the LSM pattern</strong>. Writes accumulate in a sorted in-memory store (row- or column-oriented, doesn't matter); when enough pile up, they're merged with the on-disk column files and written as new files in bulk — essentially what Vertica does. Queries transparently combine disk columns with recent in-memory writes; analysts never see the seam.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · one trick, twice</span>
+Notice what just happened: the chapter's two halves reunited. The write side of a "read-optimized" column store <em>is</em> an LSM-tree. Sorted immutable files + in-memory buffer + background merge isn't an OLTP trick — it's <em>the</em> general answer to "writes arrive randomly, reads want order."</div>
+
+<h3 id="aggregation-data-cubes-and-materialized-views"><a class="self" href="#aggregation-data-cubes-and-materialized-views">Aggregation: Data Cubes and Materialized Views</a></h3>
+<span class="key-chip">aggregation-data-cubes-and-materialized-views</span>
+
+<p>Warehouse queries lean on aggregates (<code>COUNT</code>, <code>SUM</code>, <code>AVG</code>, <code>MIN</code>, <code>MAX</code>). If many queries recompute the same aggregates, cache them: a <strong>materialized view</strong> is a view whose results are physically written to disk — unlike a <em>virtual</em> view, which is just a saved query expanded on the fly. When underlying data changes, the materialized copy must be refreshed, which taxes writes — fine in a read-heavy warehouse, rarely worth it in OLTP.</p>
+
+<figure>
+<svg viewBox="0 0 680 260" role="img" aria-label="A two-dimensional slice of a data cube: sums of sales by date and product, with row and column margins pre-aggregated so totals along either dimension are precomputed.">
+  <text x="20" y="24" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">data cube (2 of 5 dimensions shown): SUM(net_price) by date × product</text>
+  <g font-size="11" font-family="ui-monospace,Menlo,monospace">
+    <text x="100" y="60" opacity=".6">prod32</text><text x="180" y="60" opacity=".6">prod33</text><text x="260" y="60" opacity=".6">prod34</text><text x="340" y="60" opacity=".6">prod35</text><text x="440" y="60" fill="var(--write)" font-weight="700">total</text>
+    <text x="20" y="88" opacity=".6">Jan 1</text><text x="104" y="88">149</text><text x="184" y="88">31</text><text x="264" y="88">84</text><text x="344" y="88">28</text><text x="444" y="88" fill="var(--write)" font-weight="700">292</text>
+    <text x="20" y="116" opacity=".6">Jan 2</text><text x="104" y="116">132</text><text x="184" y="116">19</text><text x="264" y="116">82</text><text x="344" y="116">10</text><text x="444" y="116" fill="var(--write)" font-weight="700">243</text>
+    <text x="20" y="144" opacity=".6">Jan 3</text><text x="104" y="144">196</text><text x="184" y="144">34</text><text x="264" y="144">83</text><text x="344" y="144">38</text><text x="444" y="144" fill="var(--write)" font-weight="700">351</text>
+    <text x="20" y="186" fill="var(--write)" font-weight="700">total</text><text x="104" y="186" fill="var(--write)" font-weight="700">477</text><text x="184" y="186" fill="var(--write)" font-weight="700">84</text><text x="264" y="186" fill="var(--write)" font-weight="700">249</text><text x="344" y="186" fill="var(--write)" font-weight="700">76</text>
+  </g>
+  <line x1="20" y1="66" x2="500" y2="66" stroke="currentColor" stroke-opacity=".3"/>
+  <line x1="20" y1="160" x2="500" y2="160" stroke="currentColor" stroke-opacity=".3"/>
+  <line x1="420" y1="46" x2="420" y2="196" stroke="currentColor" stroke-opacity=".3"/>
+  <text x="20" y="234" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">"total sales per store yesterday" = read one precomputed margin. No scan.</text>
+</svg>
+<figcaption>A <strong>data cube (OLAP cube)</strong>: the special-case materialized view — a grid of aggregates grouped by dimensions, with margins summarizing away one dimension at a time. Real facts have five dimensions here (date, product, store, promotion, customer): the cube's cells hold every combination, repeatedly summarizable along any axis. The trade: certain queries become instant, but flexibility dies — the cube can't tell you what fraction of sales were items over $100, because price isn't a dimension. Hence the standard practice: keep the raw data, use cubes purely as a performance boost for known-hot queries.</figcaption>
+</figure>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Every storage engine trades write cost against read cost.</strong> An index is derived metadata: it speeds targeted reads and taxes every write. Nothing in this chapter escapes that bargain.</li>
+<li><strong>Two OLTP schools.</strong> Log-structured (append-only, immutable segments: Bitcask, SSTables/LSM — LevelDB, RocksDB, Cassandra, HBase, Lucene) vs update-in-place (fixed-size pages: B-trees, in every major relational database).</li>
+<li><strong>The LSM recipe</strong>: WAL for durability → sorted memtable in RAM → flush to immutable SSTables → background mergesort compaction → reads check memtable then segments newest-first, with Bloom filters skipping segments that definitely lack the key.</li>
+<li><strong>The B-tree recipe</strong>: fixed 4&nbsp;KB pages in a balanced tree, O(log n) page reads to any key (3–4 levels in practice), pages overwritten in place, page splits on overflow, WAL + latches for crash safety and concurrency.</li>
+<li><strong>Rules of thumb</strong>: LSM sustains higher write throughput (sequential I/O, often lower write amplification, better compression); B-trees give steadier read latency (no compaction bursts) and each key one canonical location — which transactional range-locking loves. Benchmarks are workload-sensitive: measure your own.</li>
+<li><strong>Write amplification</strong> — one logical write becoming many physical writes — is the shared currency for comparing engines, and it matters most on SSDs and write-heavy workloads.</li>
+<li><strong>Secondary indexes</strong> are key-value indexes with non-unique keys; values live in a heap file (indexes point), a clustered index (row inside the index), or a covering index (some columns inside).</li>
+<li><strong>OLTP ≠ OLAP.</strong> Few-records-by-key vs millions-scanned-few-columns; seek-time-bound vs bandwidth-bound. The warehouse (fed by ETL, shaped as a star schema: fact table + dimensions) exists so analysts can't hurt production.</li>
+<li><strong>Column storage wins analytics</strong>: read only the columns the query touches; compress aggressively (bitmaps + run-length encoding, multiplied by sort order); process vectorized, cache-friendly chunks. Writes come back around to the LSM pattern.</li>
+<li><strong>Materialized views and data cubes</strong> precompute aggregates: instant answers for anticipated shapes, no flexibility beyond them — keep raw data, cube as accelerant.</li>
+<li><strong>2nd-edition arc</strong>: same physics, new hardware and deployment — RocksDB as workhorse, NVMe-aware designs, storage over object stores (Snowflake/Delta Lake), Parquet/Arrow standardization, DuckDB-style embedded OLAP, and one genuinely new index family: vector indexes (HNSW) for embeddings.</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Sixteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="c">
+<p>Kleppmann's two-function Bash "database" has fast writes and slow reads. Adding an index changes that balance how?</p>
+<label><input type="radio" name="q1" value="a"> Reads and writes both get faster — that's the point of an index</label>
+<label><input type="radio" name="q1" value="b"> Reads get faster; writes are unaffected because the log is still append-only</label>
+<label><input type="radio" name="q1" value="c"> Well-chosen indexes speed up reads, but every index slows down writes</label>
+<label><input type="radio" name="q1" value="d"> Writes get faster because the index absorbs them</label>
+</div>
+
+<div class="q" data-a="b">
+<p>A Bitcask-style hash index (all keys in an in-memory hash map, values on disk) is best suited to which workload?</p>
+<label><input type="radio" name="q2" value="a"> Range scans over lexicographically adjacent keys</label>
+<label><input type="radio" name="q2" value="b"> Frequent updates to a modest number of distinct keys — like a play-counter per video URL</label>
+<label><input type="radio" name="q2" value="c"> Billions of distinct keys that must all be indexed</label>
+<label><input type="radio" name="q2" value="d"> Analytical scans over a few columns of a wide table</label>
+</div>
+
+<div class="q" data-a="a">
+<p>How do you delete a key from an append-only log segment?</p>
+<label><input type="radio" name="q3" value="a"> Append a tombstone record; merging later discards the key's previous values</label>
+<label><input type="radio" name="q3" value="b"> Overwrite the record in place with zeros</label>
+<label><input type="radio" name="q3" value="c"> Remove the entry from the hash map — the disk data becomes unreachable and is reclaimed immediately</label>
+<label><input type="radio" name="q3" value="d"> Deletes aren't possible; the data stays forever</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Which of these is NOT one of the reasons append-only design beats update-in-place?</p>
+<label><input type="radio" name="q4" value="a"> Sequential writes are much faster than random writes, especially on spinning disks</label>
+<label><input type="radio" name="q4" value="b"> Crash recovery is simpler — no file is ever half-old, half-new</label>
+<label><input type="radio" name="q4" value="c"> Periodic merging prevents data files from fragmenting over time</label>
+<label><input type="radio" name="q4" value="d"> Lookups no longer need any index structure</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Requiring segment files to be sorted by key (SSTables) buys you what?</p>
+<label><input type="radio" name="q5" value="a"> Merging segments becomes a simple mergesort that works even for files much bigger than RAM</label>
+<label><input type="radio" name="q5" value="b"> The in-memory index can be sparse — one key per few kilobytes instead of every key</label>
+<label><input type="radio" name="q5" value="c"> Records between index entries can be grouped and compressed as blocks</label>
+<label><input type="radio" name="q5" value="d"> All three of the above</label>
+</div>
+
+<div class="q" data-a="b">
+<p>In an LSM engine, the database crashes before the memtable is flushed. Why are acknowledged writes safe?</p>
+<label><input type="radio" name="q6" value="a"> The memtable lives in battery-backed RAM</label>
+<label><input type="radio" name="q6" value="b"> Every write was appended to an on-disk write-ahead log before being acknowledged; replaying it rebuilds the memtable</label>
+<label><input type="radio" name="q6" value="c"> The most recent SSTable always contains a copy of the memtable</label>
+<label><input type="radio" name="q6" value="d"> They aren't — recent writes are lost by design</label>
+</div>
+
+<div class="q" data-a="c">
+<p>What exactly does a Bloom filter contribute to LSM read performance?</p>
+<label><input type="radio" name="q7" value="a"> It caches the values of the hottest keys in memory</label>
+<label><input type="radio" name="q7" value="b"> It tells you exactly which segment contains a key</label>
+<label><input type="radio" name="q7" value="c"> It can say a key is definitely NOT in a segment, so lookups for nonexistent keys skip most disk reads</label>
+<label><input type="radio" name="q7" value="d"> It compresses SSTables so they fit in memory</label>
+</div>
+
+<div class="q" data-a="a">
+<p>A B-tree with a branching factor of 500 and 4&nbsp;KB pages, four levels deep, can address roughly:</p>
+<label><input type="radio" name="q8" value="a"> 256 TB — because depth grows as O(log n), most databases fit in 3–4 levels</label>
+<label><input type="radio" name="q8" value="b"> 2 GB — B-trees are limited by RAM like hash indexes</label>
+<label><input type="radio" name="q8" value="c"> 500 MB — one page per key</label>
+<label><input type="radio" name="q8" value="d"> Unlimited, because pages can chain arbitrarily without affecting depth</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why do B-trees need a write-ahead log when LSM segments (mostly) get away with simpler recovery?</p>
+<label><input type="radio" name="q9" value="a"> B-trees write more data per operation, so the log evens out throughput</label>
+<label><input type="radio" name="q9" value="b"> The WAL is only needed for replication, not recovery</label>
+<label><input type="radio" name="q9" value="c"> B-tree pages are too small to include checksums</label>
+<label><input type="radio" name="q9" value="d"> Operations like a page split overwrite several pages in place; a crash midway would corrupt the tree (e.g. orphan pages), so every change is logged first</label>
+</div>
+
+<div class="q" data-a="b">
+<p>"Write amplification" means:</p>
+<label><input type="radio" name="q10" value="a"> Writes getting slower as the dataset grows</label>
+<label><input type="radio" name="q10" value="b"> One database write turning into multiple disk writes over the database's lifetime — a concern for SSD wear and for write-heavy workloads bounded by disk bandwidth</label>
+<label><input type="radio" name="q10" value="c"> The WAL doubling the size of every value</label>
+<label><input type="radio" name="q10" value="d"> Replication multiplying writes across machines</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Which failure mode is specific to LSM-trees under sustained high write throughput?</p>
+<label><input type="radio" name="q11" value="a"> Compaction falls behind incoming writes; unmerged segments accumulate until disk fills, reads slow down — and the engine typically doesn't throttle writers, so you need monitoring</label>
+<label><input type="radio" name="q11" value="b"> The tree becomes unbalanced and lookups degrade to O(n)</label>
+<label><input type="radio" name="q11" value="c"> Page splits cascade upward and lock the root</label>
+<label><input type="radio" name="q11" value="d"> The memtable overwrites acknowledged data</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Why are B-trees attractive to databases offering strong transactional semantics?</p>
+<label><input type="radio" name="q12" value="a"> They never need locks</label>
+<label><input type="radio" name="q12" value="b"> Their WAL doubles as the transaction log, making commits free</label>
+<label><input type="radio" name="q12" value="c"> Each key exists in exactly one place (unlike LSM's multiple segment copies), so locks on key ranges can attach directly to the tree</label>
+<label><input type="radio" name="q12" value="d"> They store all transactions in a separate isolation buffer</label>
+</div>
+
+<div class="q" data-a="b">
+<p>The typical hardware bottleneck for OLTP vs OLAP workloads is:</p>
+<label><input type="radio" name="q13" value="a"> OLTP: CPU · OLAP: RAM</label>
+<label><input type="radio" name="q13" value="b"> OLTP: disk seek time (many small key lookups) · OLAP: disk bandwidth (huge sequential scans)</label>
+<label><input type="radio" name="q13" value="c"> OLTP: network · OLAP: seek time</label>
+<label><input type="radio" name="q13" value="d"> Both: seek time</label>
+</div>
+
+<div class="q" data-a="a">
+<p>The core reason column-oriented storage speeds up warehouse queries is:</p>
+<label><input type="radio" name="q14" value="a"> Queries touch ~4–5 of 100+ columns; storing each column in its own file means reading only what the query uses — and repetitive per-column data compresses extremely well</label>
+<label><input type="radio" name="q14" value="b"> Each column can be sorted independently for its own optimal order</label>
+<label><input type="radio" name="q14" value="c"> Columns are stored in RAM while rows live on disk</label>
+<label><input type="radio" name="q14" value="d"> Column files avoid needing any joins</label>
+</div>
+
+<div class="q" data-a="d">
+<p><code>WHERE product_sk IN (30, 68, 69)</code> against a bitmap-encoded column executes as:</p>
+<label><input type="radio" name="q15" value="a"> Three B-tree lookups, one per value</label>
+<label><input type="radio" name="q15" value="b"> A full scan with a hash-set membership test per row</label>
+<label><input type="radio" name="q15" value="c"> A binary search in each of the three bitmaps</label>
+<label><input type="radio" name="q15" value="d"> Load three bitmaps and bitwise-OR them — valid because all column files keep rows in the same order, so bit k always means row k</label>
+</div>
+
+<div class="q" data-a="c">
+<p>The fundamental limitation of a data cube (materialized aggregate grid) is:</p>
+<label><input type="radio" name="q16" value="a"> It's slower than scanning raw data</label>
+<label><input type="radio" name="q16" value="b"> It can only aggregate two dimensions</label>
+<label><input type="radio" name="q16" value="c"> No flexibility beyond its dimensions — e.g. it can't compute the share of sales from items over $100 if price isn't a dimension; hence: keep raw data, use cubes as a boost</label>
+<label><input type="radio" name="q16" value="d"> It must be rebuilt from scratch on every write</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — c.</span> The index is a derived structure that must be updated on every write; that's overhead no index escapes. The payoff is targeted read speed — which is why databases let <em>you</em> pick indexes based on query patterns rather than indexing everything.</div>
+<div class="ak"><span class="which">Q2 — b.</span> Bitcask's constraint is that <em>all keys</em> live in an in-memory hash map (values may exceed RAM). Lots of writes across few distinct keys — the cat-video play counter — fits perfectly. (a) fails because hash maps can't range-scan; (c) fails the keys-in-RAM constraint.</div>
+<div class="ak"><span class="which">Q3 — a.</span> Nothing in an append-only file is ever modified, so deletion is itself an append: a tombstone. Compaction/merging sees it and drops all earlier values for the key. The hash-map trick in (c) would leak disk space forever and break after the map is rebuilt from the log.</div>
+<div class="ak"><span class="which">Q4 — d.</span> Sequential writes (a), simple crash recovery (b), and no fragmentation (c) are the book's three stated advantages. Indexes are still needed — the hash map, sparse SSTable index, etc. Append-only changes how you <em>write</em>, not whether you need read signposts.</div>
+<div class="ak"><span class="which">Q5 — d.</span> Sorting enables all three: mergesort-style merging with only a cursor per input in memory; a sparse index because sorting bounds where a key can be; and block compression because reads scan ranges anyway. This trio is the whole case for SSTables over raw hash-indexed logs.</div>
+<div class="ak"><span class="which">Q6 — b.</span> The WAL is the unsorted on-disk safety copy, written before the in-memory tree. It has exactly one job (rebuild the memtable after a crash) and is discarded at each flush. (d) describes what happens <em>without</em> a WAL.</div>
+<div class="ak"><span class="which">Q7 — c.</span> A Bloom filter is a probabilistic set summary with one-sided error: "maybe present" or "definitely absent." The painful LSM read is a key that doesn't exist (check memtable + every segment); Bloom filters eliminate most of those disk touches. It stores no values (a) and can't pinpoint segments (b).</div>
+<div class="ak"><span class="which">Q8 — a.</span> 500⁴ leaf references × 4 KB ≈ 256 TB in four levels. Balance guarantees O(log n) depth; the huge branching factor is what makes the log base so friendly. This is why "3–4 page reads per lookup" covers essentially all real databases.</div>
+<div class="ak"><span class="which">Q9 — d.</span> Update-in-place means partial multi-page operations are visible after a crash — a split writes two leaves plus the parent, and stopping midway orphans a page. Logging every modification first makes the pages reconstructible. LSM avoids the problem by never modifying files (its WAL protects only the memtable).</div>
+<div class="ak"><span class="which">Q10 — b.</span> B-trees amplify via WAL + whole-page overwrites (+ splits, + torn-page double writes); LSM amplifies via WAL + flush + a rewrite per compaction pass. On SSDs, blocks tolerate limited overwrites (wear); on write-heavy systems, amplification directly eats the disk bandwidth budget that determines writes/second.</div>
+<div class="ak"><span class="which">Q11 — a.</span> Flushes and compaction share finite disk bandwidth with foreground writes; the bigger the database, the more compaction needs. Falling behind is silent by default — segments pile up, disk fills, reads check ever more files. B-trees also see compaction-free, steadier tail latencies (no background bursts to queue behind).</div>
+<div class="ak"><span class="which">Q12 — c.</span> Isolation in many relational databases is implemented with locks on key ranges; those locks attach directly to a B-tree because the tree holds each key exactly once. An LSM engine may have the same key in memtable + several SSTables at once. Details in Chapter 7.</div>
+<div class="ak"><span class="which">Q13 — b.</span> OLTP: many independent small lookups → dominated by positioning the read (seek). OLAP: few queries, each scanning millions of rows → dominated by how many bytes/second you can pull (bandwidth). This split is why the two worlds diverged into different engines — and it's the bridge to column storage: fewer bytes read per query.</div>
+<div class="ak"><span class="which">Q14 — a.</span> Both halves matter: I/O proportional to columns-used-not-table-width, and compression (bitmaps, RLE, sort-order runs) shrinking what's left — which also feeds CPU-cache-friendly vectorized processing. (b) is the classic trap: columns can NEVER be sorted independently — position is identity; rows sort as units.</div>
+<div class="ak"><span class="which">Q15 — d.</span> Each distinct value's bitmap has one bit per row, all files share row order, so set membership per row is pure bitwise OR (AND for conjunctions). This is why bitmap encoding isn't just compression — it's an execution strategy.</div>
+<div class="ak"><span class="which">Q16 — c.</span> A cube precomputes aggregates over chosen dimensions; anything outside them is unanswerable from the cube. Fast for anticipated queries, rigid for exploration — so warehouses keep raw events and treat cubes (like all materialized views) as a cache, accepting the write-time refresh cost.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch02-data-models-query-languages.html">← ch 2 · Data Models and Query Languages</a>
+  <a href="index.html">index</a>
+  <a href="ch04-encoding-and-evolution.html">ch 4 · Encoding and Evolution →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>

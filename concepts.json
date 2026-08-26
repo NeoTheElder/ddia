@@ -278,95 +278,95 @@
   "data-structures-that-power-your-database": {
    "chapter": 3,
    "title": "Data Structures That Power Your Database",
-   "definition": "",
+   "definition": "Why storage engines exist: logs make writes cheap, indexes make reads cheap, and every index taxes writes.",
    "pdf_page": 91
   },
   "hash-indexes": {
    "chapter": 3,
    "title": "Hash Indexes",
-   "definition": "",
+   "definition": "In-memory hash map from every key to its byte offset in an append-only log (Bitcask); fast, but keys must fit in RAM and range queries don't work.",
    "pdf_page": 93,
    "parent": "data-structures-that-power-your-database"
   },
   "sstables-and-lsm-trees": {
    "chapter": 3,
    "title": "SSTables and LSM-Trees",
-   "definition": "",
+   "definition": "Sorted segment files (SSTables) fed by an in-memory memtable + WAL, merged by background compaction \u2014 the LSM-tree design behind LevelDB, RocksDB, Cassandra, HBase.",
    "pdf_page": 97,
    "parent": "data-structures-that-power-your-database"
   },
   "b-trees": {
    "chapter": 3,
    "title": "B-Trees",
-   "definition": "",
+   "definition": "The ubiquitous update-in-place index: fixed-size 4KB pages in a balanced tree, O(log n) lookups, page splits on overflow, WAL for crash safety.",
    "pdf_page": 100,
    "parent": "data-structures-that-power-your-database"
   },
   "comparing-b-trees-and-lsm-trees": {
    "chapter": 3,
    "title": "Comparing B-Trees and LSM-Trees",
-   "definition": "",
+   "definition": "LSM: faster writes, better compression, compaction risk; B-tree: steadier reads, one copy per key (good for transactional locks). Write amplification is the shared currency; measure your workload.",
    "pdf_page": 104,
    "parent": "data-structures-that-power-your-database"
   },
   "other-indexing-structures": {
    "chapter": 3,
    "title": "Other Indexing Structures",
-   "definition": "",
+   "definition": "Secondary indexes; heap files vs clustered vs covering indexes; concatenated and multi-dimensional (R-tree) indexes; fuzzy/full-text search.",
    "pdf_page": 106,
    "parent": "data-structures-that-power-your-database"
   },
   "transaction-processing-or-analytics": {
    "chapter": 3,
    "title": "Transaction Processing or Analytics?",
-   "definition": "",
+   "definition": "OLTP (few records by key, seek-bound, user-facing) vs OLAP (scan millions, bandwidth-bound, analyst-facing) \u2014 the fork that splits storage engine design.",
    "pdf_page": 111
   },
   "data-warehousing": {
    "chapter": 3,
    "title": "Data Warehousing",
-   "definition": "",
+   "definition": "A separate read-only analytics database fed from OLTP systems by ETL, so analysts can scan freely without hurting production.",
    "pdf_page": 112,
    "parent": "transaction-processing-or-analytics"
   },
   "stars-and-snowflakes-schemas-for-analytics": {
    "chapter": 3,
    "title": "Stars and Snowflakes: Schemas for Analytics",
-   "definition": "",
+   "definition": "Star schema: a huge fact table (one row per event) with foreign keys to dimension tables (who/what/where/when/why); snowflake = normalized dimensions.",
    "pdf_page": 114,
    "parent": "transaction-processing-or-analytics"
   },
   "column-oriented-storage": {
    "chapter": 3,
    "title": "Column-Oriented Storage",
-   "definition": "",
+   "definition": "Store each column in its own file (same row order everywhere): queries read only the columns they use, and repetitive columns compress brilliantly.",
    "pdf_page": 116
   },
   "column-compression": {
    "chapter": 3,
    "title": "Column Compression",
-   "definition": "",
+   "definition": "Bitmap encoding (one bitmap per distinct value) + run-length encoding; WHERE clauses become bitwise AND/OR; feeds vectorized, CPU-cache-friendly execution.",
    "pdf_page": 118,
    "parent": "column-oriented-storage"
   },
   "sort-order-in-column-storage": {
    "chapter": 3,
    "title": "Sort Order in Column Storage",
-   "definition": "",
+   "definition": "Rows sort as units (position = identity); the first sort key doubles as an index and a compression multiplier; replicas can each use a different sort order (Vertica).",
    "pdf_page": 120,
    "parent": "column-oriented-storage"
   },
   "writing-to-column-oriented-storage": {
    "chapter": 3,
    "title": "Writing to Column-Oriented Storage",
-   "definition": "",
+   "definition": "Update-in-place is impossible against compressed sorted columns \u2014 so writes go through an LSM-style in-memory buffer merged into new column files in bulk.",
    "pdf_page": 122,
    "parent": "column-oriented-storage"
   },
   "aggregation-data-cubes-and-materialized-views": {
    "chapter": 3,
    "title": "Aggregation: Data Cubes and Materialized Views",
-   "definition": "",
+   "definition": "Materialized views physically cache query results; data cubes precompute aggregate grids by dimension \u2014 instant for anticipated queries, inflexible beyond them.",
    "pdf_page": 122,
    "parent": "column-oriented-storage"
   },
