@@ -2,7 +2,7 @@
 
 - **Type**: wayfinder:task (HITL — needs the user's GitHub auth and Downloads access)
 - **Status**: open
-- **Assignee**:
+- **Assignee**: yagyesh (session, 2026-08-13)
 - **Blocked by**: —
 
 ## Question

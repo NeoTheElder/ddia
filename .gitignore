@@ -1,2 +1,3 @@
 reference/*.pdf
+.venv/
 .DS_Store
