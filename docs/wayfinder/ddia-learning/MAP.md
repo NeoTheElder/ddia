@@ -25,11 +25,11 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
+- [Bootstrap the ddia repo](tickets/01-bootstrap-repo.md) — PDF at `reference/ddia-1st-edition.pdf`; section-level TOC extracted to `reference/toc.md` (the completeness checklist); private repo pushed to https://github.com/NeoTheElder/ddia; hosting = local `file://` browsing (Pages deferred); pypdf venv at `.venv/` for chapter text extraction.
 - [Research: 2nd-edition deltas per 1st-edition chapter](tickets/02-research-2nd-edition-deltas.md) — 2nd ed is 14 chapters/4 parts (Ch 1 and Ch 12 split; middle chapters map one-to-one, shifted +1); Partitioning renamed Sharding; MapReduce demoted to teaching device (Spark/Flink + object storage replace it); cloud-native, vector-index/AI, and sync-engine/CRDT material added; findings with per-chapter detail in `research/02-second-edition-deltas.md`.
 
 ## Not yet specified
 
-- **Hosting mode** — GitHub Pages (needs GitHub Pro for private repos, or making the repo public) vs plain `file://` browsing; resolves inside the bootstrap ticket once `gh` account/plan is known.
 - **Shared animation library** — after 2–3 chapters exist, decide whether to extract common click-through-animation JS/CSS into a shared file (breaks strict self-containment) or keep duplicating inline.
 - **Quiz sizing & depth calibration** — how many MCQs per chapter and how deep the explanations go; calibrated by user feedback on the pilot.
 - **Revision workflow** — whether the repo later grows re-study aids (progress tracking on the index, re-quiz mode). Depends on how the reference gets used once several chapters exist.

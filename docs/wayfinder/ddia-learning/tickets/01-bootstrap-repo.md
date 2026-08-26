@@ -1,7 +1,7 @@
 # Bootstrap the ddia repo
 
 - **Type**: wayfinder:task (HITL — needs the user's GitHub auth and Downloads access)
-- **Status**: open
+- **Status**: closed (2026-08-25)
 - **Assignee**: yagyesh (session, 2026-08-13)
 - **Blocked by**: —
 
@@ -17,4 +17,7 @@ Get `~/ddia` fully operational so chapter work can start:
 
 ## Resolution
 
-_(recorded on close: what was done, remote URL, hosting choice)_
+1. **Book file**: shell `cp` from Downloads was TCC-blocked even with sudo; user copied via Finder drag. Lives at `reference/ddia-1st-edition.pdf` (613 pages, gitignored).
+2. **TOC**: extracted from the PDF's bookmark outline (210 entries, section-level, 0-based PDF page indexes) → `reference/toc.md`. Tooling: `.venv/` (gitignored) with pypdf 6.16.1 — reuse in chapter sessions for text extraction.
+3. **GitHub**: private repo created and pushed — https://github.com/NeoTheElder/ddia (user confirmed NeoTheElder is their personal account).
+4. **Hosting**: `file://` local browsing chosen; repo stays private. GitHub Pages deliberately deferred — can be added later without rework.
