@@ -1,8 +1,8 @@
 # Cross-reference scheme (concept anchor registry)
 
 - **Type**: wayfinder:grilling (HITL)
-- **Status**: open
-- **Assignee**:
+- **Status**: closed (2026-08-26)
+- **Assignee**: yagyesh (session, 2026-08-25)
 - **Blocked by**: [01-bootstrap-repo](01-bootstrap-repo.md)
 
 ## Question
@@ -21,4 +21,10 @@ Output: the scheme recorded here + the initial registry file committed, feeding 
 
 ## Resolution
 
-_(recorded on close)_
+Scheme decided (user picked all recommended options) and artifacts committed:
+
+1. **Anchors**: `<chapter file>#<concept-slug>` — kebab-case section titles, globally unique (collisions suffixed `-chNN`). Chapter files: `chapters/chNN-<slug>.html`.
+2. **Registry**: `concepts.json` at repo root, pre-seeded from the PDF outline — 12 chapters + 169 concepts, each with title, chapter, parent section, 0-based `pdf_page`, 2nd-edition location per chapter, and an empty `definition`. **Definitions are filled by each chapter's build session** (its own concepts); until then tooltips fall back to title + "not yet written". Chapter builds may add finer-grained slugs — additive only, never rename existing slugs.
+3. **Dangling links**: every chapter has a stub HTML page at its final filename from day one (committed) — links never 404; builds replace stubs in place. Stubs link to `index.html`, which lands with ticket 16.
+4. **Presentation**: inline links at point of mention, styled distinctly (dotted underline, →chN marker), hover tooltip showing the registry definition; backward vs forward refs visually distinguished. Exact styling locks in the pilot.
+5. **2nd-ed notes**: carried per chapter in `concepts.json` (`chapters.*.second_ed`) from the deltas research.

@@ -1,0 +1,1224 @@
+{
+ "_meta": {
+  "anchor_rule": "anchor = concept slug; link = <chapter file>#<slug>. Slugs are kebab-case section titles, globally unique (collisions suffixed -chNN).",
+  "definition_rule": "filled by the chapter's build session; empty = chapter not built, tooltip falls back to title + 'not yet written'.",
+  "source": "generated from PDF outline; pdf_page is 0-based index into reference/ddia-1st-edition.pdf"
+ },
+ "chapters": {
+  "1": {
+   "file": "ch01-reliable-scalable-maintainable.html",
+   "title": "Reliable, Scalable, and Maintainable Applications",
+   "second_ed": "Ch 1-2 (split: Trade-Offs / Nonfunctional Requirements)",
+   "pdf_page": 24
+  },
+  "2": {
+   "file": "ch02-data-models-query-languages.html",
+   "title": "Data Models and Query Languages",
+   "second_ed": "Ch 3",
+   "pdf_page": 48
+  },
+  "3": {
+   "file": "ch03-storage-and-retrieval.html",
+   "title": "Storage and Retrieval",
+   "second_ed": "Ch 4",
+   "pdf_page": 90
+  },
+  "4": {
+   "file": "ch04-encoding-and-evolution.html",
+   "title": "Encoding and Evolution",
+   "second_ed": "Ch 5",
+   "pdf_page": 132
+  },
+  "5": {
+   "file": "ch05-replication.html",
+   "title": "Replication",
+   "second_ed": "Ch 6",
+   "pdf_page": 172
+  },
+  "6": {
+   "file": "ch06-partitioning.html",
+   "title": "Partitioning",
+   "second_ed": "Ch 7 (renamed Sharding)",
+   "pdf_page": 220
+  },
+  "7": {
+   "file": "ch07-transactions.html",
+   "title": "Transactions",
+   "second_ed": "Ch 8",
+   "pdf_page": 242
+  },
+  "8": {
+   "file": "ch08-trouble-with-distributed-systems.html",
+   "title": "The Trouble with Distributed Systems",
+   "second_ed": "Ch 9",
+   "pdf_page": 294
+  },
+  "9": {
+   "file": "ch09-consistency-and-consensus.html",
+   "title": "Consistency and Consensus",
+   "second_ed": "Ch 10",
+   "pdf_page": 342
+  },
+  "10": {
+   "file": "ch10-batch-processing.html",
+   "title": "Batch Processing",
+   "second_ed": "Ch 11",
+   "pdf_page": 410
+  },
+  "11": {
+   "file": "ch11-stream-processing.html",
+   "title": "Stream Processing",
+   "second_ed": "Ch 12",
+   "pdf_page": 460
+  },
+  "12": {
+   "file": "ch12-future-of-data-systems.html",
+   "title": "The Future of Data Systems",
+   "second_ed": "Ch 13-14 (split: Streaming Philosophy / Doing the Right Thing)",
+   "pdf_page": 510
+  }
+ },
+ "concepts": {
+  "thinking-about-data-systems": {
+   "chapter": 1,
+   "title": "Thinking About Data Systems",
+   "definition": "",
+   "pdf_page": 25
+  },
+  "reliability": {
+   "chapter": 1,
+   "title": "Reliability",
+   "definition": "",
+   "pdf_page": 27
+  },
+  "hardware-faults": {
+   "chapter": 1,
+   "title": "Hardware Faults",
+   "definition": "",
+   "pdf_page": 28,
+   "parent": "reliability"
+  },
+  "software-errors": {
+   "chapter": 1,
+   "title": "Software Errors",
+   "definition": "",
+   "pdf_page": 29,
+   "parent": "reliability"
+  },
+  "human-errors": {
+   "chapter": 1,
+   "title": "Human Errors",
+   "definition": "",
+   "pdf_page": 30,
+   "parent": "reliability"
+  },
+  "how-important-is-reliability": {
+   "chapter": 1,
+   "title": "How Important Is Reliability?",
+   "definition": "",
+   "pdf_page": 31,
+   "parent": "reliability"
+  },
+  "scalability": {
+   "chapter": 1,
+   "title": "Scalability",
+   "definition": "",
+   "pdf_page": 31
+  },
+  "describing-load": {
+   "chapter": 1,
+   "title": "Describing Load",
+   "definition": "",
+   "pdf_page": 32,
+   "parent": "scalability"
+  },
+  "describing-performance": {
+   "chapter": 1,
+   "title": "Describing Performance",
+   "definition": "",
+   "pdf_page": 34,
+   "parent": "scalability"
+  },
+  "approaches-for-coping-with-load": {
+   "chapter": 1,
+   "title": "Approaches for Coping with Load",
+   "definition": "",
+   "pdf_page": 38,
+   "parent": "scalability"
+  },
+  "maintainability": {
+   "chapter": 1,
+   "title": "Maintainability",
+   "definition": "",
+   "pdf_page": 39
+  },
+  "operability-making-life-easy-for-operations": {
+   "chapter": 1,
+   "title": "Operability: Making Life Easy for Operations",
+   "definition": "",
+   "pdf_page": 40,
+   "parent": "maintainability"
+  },
+  "simplicity-managing-complexity": {
+   "chapter": 1,
+   "title": "Simplicity: Managing Complexity",
+   "definition": "",
+   "pdf_page": 41,
+   "parent": "maintainability"
+  },
+  "evolvability-making-change-easy": {
+   "chapter": 1,
+   "title": "Evolvability: Making Change Easy",
+   "definition": "",
+   "pdf_page": 42,
+   "parent": "maintainability"
+  },
+  "relational-model-versus-document-model": {
+   "chapter": 2,
+   "title": "Relational Model Versus Document Model",
+   "definition": "",
+   "pdf_page": 49
+  },
+  "the-birth-of-nosql": {
+   "chapter": 2,
+   "title": "The Birth of NoSQL",
+   "definition": "",
+   "pdf_page": 50,
+   "parent": "relational-model-versus-document-model"
+  },
+  "the-object-relational-mismatch": {
+   "chapter": 2,
+   "title": "The Object-Relational Mismatch",
+   "definition": "",
+   "pdf_page": 50,
+   "parent": "relational-model-versus-document-model"
+  },
+  "many-to-one-and-many-to-many-relationships": {
+   "chapter": 2,
+   "title": "Many-to-One and Many-to-Many Relationships",
+   "definition": "",
+   "pdf_page": 54,
+   "parent": "relational-model-versus-document-model"
+  },
+  "are-document-databases-repeating-history": {
+   "chapter": 2,
+   "title": "Are Document Databases Repeating History?",
+   "definition": "",
+   "pdf_page": 57,
+   "parent": "relational-model-versus-document-model"
+  },
+  "relational-versus-document-databases-today": {
+   "chapter": 2,
+   "title": "Relational Versus Document Databases Today",
+   "definition": "",
+   "pdf_page": 59,
+   "parent": "relational-model-versus-document-model"
+  },
+  "query-languages-for-data": {
+   "chapter": 2,
+   "title": "Query Languages for Data",
+   "definition": "",
+   "pdf_page": 63
+  },
+  "declarative-queries-on-the-web": {
+   "chapter": 2,
+   "title": "Declarative Queries on the Web",
+   "definition": "",
+   "pdf_page": 65,
+   "parent": "query-languages-for-data"
+  },
+  "mapreduce-querying": {
+   "chapter": 2,
+   "title": "MapReduce Querying",
+   "definition": "",
+   "pdf_page": 67,
+   "parent": "query-languages-for-data"
+  },
+  "graph-like-data-models": {
+   "chapter": 2,
+   "title": "Graph-Like Data Models",
+   "definition": "",
+   "pdf_page": 70
+  },
+  "property-graphs": {
+   "chapter": 2,
+   "title": "Property Graphs",
+   "definition": "",
+   "pdf_page": 71,
+   "parent": "graph-like-data-models"
+  },
+  "the-cypher-query-language": {
+   "chapter": 2,
+   "title": "The Cypher Query Language",
+   "definition": "",
+   "pdf_page": 73,
+   "parent": "graph-like-data-models"
+  },
+  "graph-queries-in-sql": {
+   "chapter": 2,
+   "title": "Graph Queries in SQL",
+   "definition": "",
+   "pdf_page": 74,
+   "parent": "graph-like-data-models"
+  },
+  "triple-stores-and-sparql": {
+   "chapter": 2,
+   "title": "Triple-Stores and SPARQL",
+   "definition": "",
+   "pdf_page": 76,
+   "parent": "graph-like-data-models"
+  },
+  "the-foundation-datalog": {
+   "chapter": 2,
+   "title": "The Foundation: Datalog",
+   "definition": "",
+   "pdf_page": 81,
+   "parent": "graph-like-data-models"
+  },
+  "data-structures-that-power-your-database": {
+   "chapter": 3,
+   "title": "Data Structures That Power Your Database",
+   "definition": "",
+   "pdf_page": 91
+  },
+  "hash-indexes": {
+   "chapter": 3,
+   "title": "Hash Indexes",
+   "definition": "",
+   "pdf_page": 93,
+   "parent": "data-structures-that-power-your-database"
+  },
+  "sstables-and-lsm-trees": {
+   "chapter": 3,
+   "title": "SSTables and LSM-Trees",
+   "definition": "",
+   "pdf_page": 97,
+   "parent": "data-structures-that-power-your-database"
+  },
+  "b-trees": {
+   "chapter": 3,
+   "title": "B-Trees",
+   "definition": "",
+   "pdf_page": 100,
+   "parent": "data-structures-that-power-your-database"
+  },
+  "comparing-b-trees-and-lsm-trees": {
+   "chapter": 3,
+   "title": "Comparing B-Trees and LSM-Trees",
+   "definition": "",
+   "pdf_page": 104,
+   "parent": "data-structures-that-power-your-database"
+  },
+  "other-indexing-structures": {
+   "chapter": 3,
+   "title": "Other Indexing Structures",
+   "definition": "",
+   "pdf_page": 106,
+   "parent": "data-structures-that-power-your-database"
+  },
+  "transaction-processing-or-analytics": {
+   "chapter": 3,
+   "title": "Transaction Processing or Analytics?",
+   "definition": "",
+   "pdf_page": 111
+  },
+  "data-warehousing": {
+   "chapter": 3,
+   "title": "Data Warehousing",
+   "definition": "",
+   "pdf_page": 112,
+   "parent": "transaction-processing-or-analytics"
+  },
+  "stars-and-snowflakes-schemas-for-analytics": {
+   "chapter": 3,
+   "title": "Stars and Snowflakes: Schemas for Analytics",
+   "definition": "",
+   "pdf_page": 114,
+   "parent": "transaction-processing-or-analytics"
+  },
+  "column-oriented-storage": {
+   "chapter": 3,
+   "title": "Column-Oriented Storage",
+   "definition": "",
+   "pdf_page": 116
+  },
+  "column-compression": {
+   "chapter": 3,
+   "title": "Column Compression",
+   "definition": "",
+   "pdf_page": 118,
+   "parent": "column-oriented-storage"
+  },
+  "sort-order-in-column-storage": {
+   "chapter": 3,
+   "title": "Sort Order in Column Storage",
+   "definition": "",
+   "pdf_page": 120,
+   "parent": "column-oriented-storage"
+  },
+  "writing-to-column-oriented-storage": {
+   "chapter": 3,
+   "title": "Writing to Column-Oriented Storage",
+   "definition": "",
+   "pdf_page": 122,
+   "parent": "column-oriented-storage"
+  },
+  "aggregation-data-cubes-and-materialized-views": {
+   "chapter": 3,
+   "title": "Aggregation: Data Cubes and Materialized Views",
+   "definition": "",
+   "pdf_page": 122,
+   "parent": "column-oriented-storage"
+  },
+  "formats-for-encoding-data": {
+   "chapter": 4,
+   "title": "Formats for Encoding Data",
+   "definition": "",
+   "pdf_page": 133
+  },
+  "language-specific-formats": {
+   "chapter": 4,
+   "title": "Language-Specific Formats",
+   "definition": "",
+   "pdf_page": 134,
+   "parent": "formats-for-encoding-data"
+  },
+  "json-xml-and-binary-variants": {
+   "chapter": 4,
+   "title": "JSON, XML, and Binary Variants",
+   "definition": "",
+   "pdf_page": 135,
+   "parent": "formats-for-encoding-data"
+  },
+  "thrift-and-protocol-buffers": {
+   "chapter": 4,
+   "title": "Thrift and Protocol Buffers",
+   "definition": "",
+   "pdf_page": 138,
+   "parent": "formats-for-encoding-data"
+  },
+  "avro": {
+   "chapter": 4,
+   "title": "Avro",
+   "definition": "",
+   "pdf_page": 143,
+   "parent": "formats-for-encoding-data"
+  },
+  "the-merits-of-schemas": {
+   "chapter": 4,
+   "title": "The Merits of Schemas",
+   "definition": "",
+   "pdf_page": 148,
+   "parent": "formats-for-encoding-data"
+  },
+  "modes-of-dataflow": {
+   "chapter": 4,
+   "title": "Modes of Dataflow",
+   "definition": "",
+   "pdf_page": 149
+  },
+  "dataflow-through-databases": {
+   "chapter": 4,
+   "title": "Dataflow Through Databases",
+   "definition": "",
+   "pdf_page": 150,
+   "parent": "modes-of-dataflow"
+  },
+  "dataflow-through-services-rest-and-rpc": {
+   "chapter": 4,
+   "title": "Dataflow Through Services: REST and RPC",
+   "definition": "",
+   "pdf_page": 152,
+   "parent": "modes-of-dataflow"
+  },
+  "message-passing-dataflow": {
+   "chapter": 4,
+   "title": "Message-Passing Dataflow",
+   "definition": "",
+   "pdf_page": 157,
+   "parent": "modes-of-dataflow"
+  },
+  "leaders-and-followers": {
+   "chapter": 5,
+   "title": "Leaders and Followers",
+   "definition": "",
+   "pdf_page": 173
+  },
+  "synchronous-versus-asynchronous-replication": {
+   "chapter": 5,
+   "title": "Synchronous Versus Asynchronous Replication",
+   "definition": "",
+   "pdf_page": 174,
+   "parent": "leaders-and-followers"
+  },
+  "setting-up-new-followers": {
+   "chapter": 5,
+   "title": "Setting Up New Followers",
+   "definition": "",
+   "pdf_page": 176,
+   "parent": "leaders-and-followers"
+  },
+  "handling-node-outages": {
+   "chapter": 5,
+   "title": "Handling Node Outages",
+   "definition": "",
+   "pdf_page": 177,
+   "parent": "leaders-and-followers"
+  },
+  "implementation-of-replication-logs": {
+   "chapter": 5,
+   "title": "Implementation of Replication Logs",
+   "definition": "",
+   "pdf_page": 179,
+   "parent": "leaders-and-followers"
+  },
+  "problems-with-replication-lag": {
+   "chapter": 5,
+   "title": "Problems with Replication Lag",
+   "definition": "",
+   "pdf_page": 182
+  },
+  "reading-your-own-writes": {
+   "chapter": 5,
+   "title": "Reading Your Own Writes",
+   "definition": "",
+   "pdf_page": 183,
+   "parent": "problems-with-replication-lag"
+  },
+  "monotonic-reads": {
+   "chapter": 5,
+   "title": "Monotonic Reads",
+   "definition": "",
+   "pdf_page": 185,
+   "parent": "problems-with-replication-lag"
+  },
+  "consistent-prefix-reads": {
+   "chapter": 5,
+   "title": "Consistent Prefix Reads",
+   "definition": "",
+   "pdf_page": 186,
+   "parent": "problems-with-replication-lag"
+  },
+  "solutions-for-replication-lag": {
+   "chapter": 5,
+   "title": "Solutions for Replication Lag",
+   "definition": "",
+   "pdf_page": 188,
+   "parent": "problems-with-replication-lag"
+  },
+  "multi-leader-replication": {
+   "chapter": 5,
+   "title": "Multi-Leader Replication",
+   "definition": "",
+   "pdf_page": 189
+  },
+  "use-cases-for-multi-leader-replication": {
+   "chapter": 5,
+   "title": "Use Cases for Multi-Leader Replication",
+   "definition": "",
+   "pdf_page": 189,
+   "parent": "multi-leader-replication"
+  },
+  "handling-write-conflicts": {
+   "chapter": 5,
+   "title": "Handling Write Conflicts",
+   "definition": "",
+   "pdf_page": 192,
+   "parent": "multi-leader-replication"
+  },
+  "multi-leader-replication-topologies": {
+   "chapter": 5,
+   "title": "Multi-Leader Replication Topologies",
+   "definition": "",
+   "pdf_page": 196,
+   "parent": "multi-leader-replication"
+  },
+  "leaderless-replication": {
+   "chapter": 5,
+   "title": "Leaderless Replication",
+   "definition": "",
+   "pdf_page": 198
+  },
+  "writing-to-the-database-when-a-node-is-down": {
+   "chapter": 5,
+   "title": "Writing to the Database When a Node Is Down",
+   "definition": "",
+   "pdf_page": 198,
+   "parent": "leaderless-replication"
+  },
+  "limitations-of-quorum-consistency": {
+   "chapter": 5,
+   "title": "Limitations of Quorum Consistency",
+   "definition": "",
+   "pdf_page": 202,
+   "parent": "leaderless-replication"
+  },
+  "sloppy-quorums-and-hinted-handoff": {
+   "chapter": 5,
+   "title": "Sloppy Quorums and Hinted Handoff",
+   "definition": "",
+   "pdf_page": 204,
+   "parent": "leaderless-replication"
+  },
+  "detecting-concurrent-writes": {
+   "chapter": 5,
+   "title": "Detecting Concurrent Writes",
+   "definition": "",
+   "pdf_page": 205,
+   "parent": "leaderless-replication"
+  },
+  "partitioning-and-replication": {
+   "chapter": 6,
+   "title": "Partitioning and Replication",
+   "definition": "",
+   "pdf_page": 221
+  },
+  "partitioning-of-key-value-data": {
+   "chapter": 6,
+   "title": "Partitioning of Key-Value Data",
+   "definition": "",
+   "pdf_page": 222
+  },
+  "partitioning-by-key-range": {
+   "chapter": 6,
+   "title": "Partitioning by Key Range",
+   "definition": "",
+   "pdf_page": 223,
+   "parent": "partitioning-of-key-value-data"
+  },
+  "partitioning-by-hash-of-key": {
+   "chapter": 6,
+   "title": "Partitioning by Hash of Key",
+   "definition": "",
+   "pdf_page": 224,
+   "parent": "partitioning-of-key-value-data"
+  },
+  "skewed-workloads-and-relieving-hot-spots": {
+   "chapter": 6,
+   "title": "Skewed Workloads and Relieving Hot Spots",
+   "definition": "",
+   "pdf_page": 226,
+   "parent": "partitioning-of-key-value-data"
+  },
+  "partitioning-and-secondary-indexes": {
+   "chapter": 6,
+   "title": "Partitioning and Secondary Indexes",
+   "definition": "",
+   "pdf_page": 227
+  },
+  "partitioning-secondary-indexes-by-document": {
+   "chapter": 6,
+   "title": "Partitioning Secondary Indexes by Document",
+   "definition": "",
+   "pdf_page": 227,
+   "parent": "partitioning-and-secondary-indexes"
+  },
+  "partitioning-secondary-indexes-by-term": {
+   "chapter": 6,
+   "title": "Partitioning Secondary Indexes by Term",
+   "definition": "",
+   "pdf_page": 229,
+   "parent": "partitioning-and-secondary-indexes"
+  },
+  "rebalancing-partitions": {
+   "chapter": 6,
+   "title": "Rebalancing Partitions",
+   "definition": "",
+   "pdf_page": 230
+  },
+  "strategies-for-rebalancing": {
+   "chapter": 6,
+   "title": "Strategies for Rebalancing",
+   "definition": "",
+   "pdf_page": 231,
+   "parent": "rebalancing-partitions"
+  },
+  "operations-automatic-or-manual-rebalancing": {
+   "chapter": 6,
+   "title": "Operations: Automatic or Manual Rebalancing",
+   "definition": "",
+   "pdf_page": 234,
+   "parent": "rebalancing-partitions"
+  },
+  "request-routing": {
+   "chapter": 6,
+   "title": "Request Routing",
+   "definition": "",
+   "pdf_page": 235
+  },
+  "parallel-query-execution": {
+   "chapter": 6,
+   "title": "Parallel Query Execution",
+   "definition": "",
+   "pdf_page": 237,
+   "parent": "request-routing"
+  },
+  "the-slippery-concept-of-a-transaction": {
+   "chapter": 7,
+   "title": "The Slippery Concept of a Transaction",
+   "definition": "",
+   "pdf_page": 243
+  },
+  "the-meaning-of-acid": {
+   "chapter": 7,
+   "title": "The Meaning of ACID",
+   "definition": "",
+   "pdf_page": 244,
+   "parent": "the-slippery-concept-of-a-transaction"
+  },
+  "single-object-and-multi-object-operations": {
+   "chapter": 7,
+   "title": "Single-Object and Multi-Object Operations",
+   "definition": "",
+   "pdf_page": 249,
+   "parent": "the-slippery-concept-of-a-transaction"
+  },
+  "weak-isolation-levels": {
+   "chapter": 7,
+   "title": "Weak Isolation Levels",
+   "definition": "",
+   "pdf_page": 254
+  },
+  "read-committed": {
+   "chapter": 7,
+   "title": "Read Committed",
+   "definition": "",
+   "pdf_page": 255,
+   "parent": "weak-isolation-levels"
+  },
+  "snapshot-isolation-and-repeatable-read": {
+   "chapter": 7,
+   "title": "Snapshot Isolation and Repeatable Read",
+   "definition": "",
+   "pdf_page": 258,
+   "parent": "weak-isolation-levels"
+  },
+  "preventing-lost-updates": {
+   "chapter": 7,
+   "title": "Preventing Lost Updates",
+   "definition": "",
+   "pdf_page": 263,
+   "parent": "weak-isolation-levels"
+  },
+  "write-skew-and-phantoms": {
+   "chapter": 7,
+   "title": "Write Skew and Phantoms",
+   "definition": "",
+   "pdf_page": 267,
+   "parent": "weak-isolation-levels"
+  },
+  "serializability": {
+   "chapter": 7,
+   "title": "Serializability",
+   "definition": "",
+   "pdf_page": 272
+  },
+  "actual-serial-execution": {
+   "chapter": 7,
+   "title": "Actual Serial Execution",
+   "definition": "",
+   "pdf_page": 273,
+   "parent": "serializability"
+  },
+  "two-phase-locking-2pl": {
+   "chapter": 7,
+   "title": "Two-Phase Locking (2PL)",
+   "definition": "",
+   "pdf_page": 278,
+   "parent": "serializability"
+  },
+  "serializable-snapshot-isolation-ssi": {
+   "chapter": 7,
+   "title": "Serializable Snapshot Isolation (SSI)",
+   "definition": "",
+   "pdf_page": 282,
+   "parent": "serializability"
+  },
+  "faults-and-partial-failures": {
+   "chapter": 8,
+   "title": "Faults and Partial Failures",
+   "definition": "",
+   "pdf_page": 295
+  },
+  "cloud-computing-and-supercomputing": {
+   "chapter": 8,
+   "title": "Cloud Computing and Supercomputing",
+   "definition": "",
+   "pdf_page": 296,
+   "parent": "faults-and-partial-failures"
+  },
+  "unreliable-networks": {
+   "chapter": 8,
+   "title": "Unreliable Networks",
+   "definition": "",
+   "pdf_page": 298
+  },
+  "network-faults-in-practice": {
+   "chapter": 8,
+   "title": "Network Faults in Practice",
+   "definition": "",
+   "pdf_page": 300,
+   "parent": "unreliable-networks"
+  },
+  "detecting-faults": {
+   "chapter": 8,
+   "title": "Detecting Faults",
+   "definition": "",
+   "pdf_page": 301,
+   "parent": "unreliable-networks"
+  },
+  "timeouts-and-unbounded-delays": {
+   "chapter": 8,
+   "title": "Timeouts and Unbounded Delays",
+   "definition": "",
+   "pdf_page": 302,
+   "parent": "unreliable-networks"
+  },
+  "synchronous-versus-asynchronous-networks": {
+   "chapter": 8,
+   "title": "Synchronous Versus Asynchronous Networks",
+   "definition": "",
+   "pdf_page": 305,
+   "parent": "unreliable-networks"
+  },
+  "unreliable-clocks": {
+   "chapter": 8,
+   "title": "Unreliable Clocks",
+   "definition": "",
+   "pdf_page": 308
+  },
+  "monotonic-versus-time-of-day-clocks": {
+   "chapter": 8,
+   "title": "Monotonic Versus Time-of-Day Clocks",
+   "definition": "",
+   "pdf_page": 309,
+   "parent": "unreliable-clocks"
+  },
+  "clock-synchronization-and-accuracy": {
+   "chapter": 8,
+   "title": "Clock Synchronization and Accuracy",
+   "definition": "",
+   "pdf_page": 310,
+   "parent": "unreliable-clocks"
+  },
+  "relying-on-synchronized-clocks": {
+   "chapter": 8,
+   "title": "Relying on Synchronized Clocks",
+   "definition": "",
+   "pdf_page": 312,
+   "parent": "unreliable-clocks"
+  },
+  "process-pauses": {
+   "chapter": 8,
+   "title": "Process Pauses",
+   "definition": "",
+   "pdf_page": 316,
+   "parent": "unreliable-clocks"
+  },
+  "knowledge-truth-and-lies": {
+   "chapter": 8,
+   "title": "Knowledge, Truth, and Lies",
+   "definition": "",
+   "pdf_page": 321
+  },
+  "the-truth-is-defined-by-the-majority": {
+   "chapter": 8,
+   "title": "The Truth Is Defined by the Majority",
+   "definition": "",
+   "pdf_page": 321,
+   "parent": "knowledge-truth-and-lies"
+  },
+  "byzantine-faults": {
+   "chapter": 8,
+   "title": "Byzantine Faults",
+   "definition": "",
+   "pdf_page": 325,
+   "parent": "knowledge-truth-and-lies"
+  },
+  "system-model-and-reality": {
+   "chapter": 8,
+   "title": "System Model and Reality",
+   "definition": "",
+   "pdf_page": 327,
+   "parent": "knowledge-truth-and-lies"
+  },
+  "consistency-guarantees": {
+   "chapter": 9,
+   "title": "Consistency Guarantees",
+   "definition": "",
+   "pdf_page": 343
+  },
+  "linearizability": {
+   "chapter": 9,
+   "title": "Linearizability",
+   "definition": "",
+   "pdf_page": 345
+  },
+  "what-makes-a-system-linearizable": {
+   "chapter": 9,
+   "title": "What Makes a System Linearizable?",
+   "definition": "",
+   "pdf_page": 346,
+   "parent": "linearizability"
+  },
+  "relying-on-linearizability": {
+   "chapter": 9,
+   "title": "Relying on Linearizability",
+   "definition": "",
+   "pdf_page": 351,
+   "parent": "linearizability"
+  },
+  "implementing-linearizable-systems": {
+   "chapter": 9,
+   "title": "Implementing Linearizable Systems",
+   "definition": "",
+   "pdf_page": 353,
+   "parent": "linearizability"
+  },
+  "the-cost-of-linearizability": {
+   "chapter": 9,
+   "title": "The Cost of Linearizability",
+   "definition": "",
+   "pdf_page": 356,
+   "parent": "linearizability"
+  },
+  "ordering-guarantees": {
+   "chapter": 9,
+   "title": "Ordering Guarantees",
+   "definition": "",
+   "pdf_page": 360
+  },
+  "ordering-and-causality": {
+   "chapter": 9,
+   "title": "Ordering and Causality",
+   "definition": "",
+   "pdf_page": 360,
+   "parent": "ordering-guarantees"
+  },
+  "sequence-number-ordering": {
+   "chapter": 9,
+   "title": "Sequence Number Ordering",
+   "definition": "",
+   "pdf_page": 364,
+   "parent": "ordering-guarantees"
+  },
+  "total-order-broadcast": {
+   "chapter": 9,
+   "title": "Total Order Broadcast",
+   "definition": "",
+   "pdf_page": 369,
+   "parent": "ordering-guarantees"
+  },
+  "distributed-transactions-and-consensus": {
+   "chapter": 9,
+   "title": "Distributed Transactions and Consensus",
+   "definition": "",
+   "pdf_page": 373
+  },
+  "atomic-commit-and-two-phase-commit-2pc": {
+   "chapter": 9,
+   "title": "Atomic Commit and Two-Phase Commit (2PC)",
+   "definition": "",
+   "pdf_page": 375,
+   "parent": "distributed-transactions-and-consensus"
+  },
+  "distributed-transactions-in-practice": {
+   "chapter": 9,
+   "title": "Distributed Transactions in Practice",
+   "definition": "",
+   "pdf_page": 381,
+   "parent": "distributed-transactions-and-consensus"
+  },
+  "fault-tolerant-consensus": {
+   "chapter": 9,
+   "title": "Fault-Tolerant Consensus",
+   "definition": "",
+   "pdf_page": 385,
+   "parent": "distributed-transactions-and-consensus"
+  },
+  "membership-and-coordination-services": {
+   "chapter": 9,
+   "title": "Membership and Coordination Services",
+   "definition": "",
+   "pdf_page": 391,
+   "parent": "distributed-transactions-and-consensus"
+  },
+  "batch-processing-with-unix-tools": {
+   "chapter": 10,
+   "title": "Batch Processing with Unix Tools",
+   "definition": "",
+   "pdf_page": 412
+  },
+  "simple-log-analysis": {
+   "chapter": 10,
+   "title": "Simple Log Analysis",
+   "definition": "",
+   "pdf_page": 412,
+   "parent": "batch-processing-with-unix-tools"
+  },
+  "the-unix-philosophy": {
+   "chapter": 10,
+   "title": "The Unix Philosophy",
+   "definition": "",
+   "pdf_page": 415,
+   "parent": "batch-processing-with-unix-tools"
+  },
+  "mapreduce-and-distributed-filesystems": {
+   "chapter": 10,
+   "title": "MapReduce and Distributed Filesystems",
+   "definition": "",
+   "pdf_page": 418
+  },
+  "mapreduce-job-execution": {
+   "chapter": 10,
+   "title": "MapReduce Job Execution",
+   "definition": "",
+   "pdf_page": 420,
+   "parent": "mapreduce-and-distributed-filesystems"
+  },
+  "reduce-side-joins-and-grouping": {
+   "chapter": 10,
+   "title": "Reduce-Side Joins and Grouping",
+   "definition": "",
+   "pdf_page": 424,
+   "parent": "mapreduce-and-distributed-filesystems"
+  },
+  "map-side-joins": {
+   "chapter": 10,
+   "title": "Map-Side Joins",
+   "definition": "",
+   "pdf_page": 429,
+   "parent": "mapreduce-and-distributed-filesystems"
+  },
+  "the-output-of-batch-workflows": {
+   "chapter": 10,
+   "title": "The Output of Batch Workflows",
+   "definition": "",
+   "pdf_page": 432,
+   "parent": "mapreduce-and-distributed-filesystems"
+  },
+  "comparing-hadoop-to-distributed-databases": {
+   "chapter": 10,
+   "title": "Comparing Hadoop to Distributed Databases",
+   "definition": "",
+   "pdf_page": 435,
+   "parent": "mapreduce-and-distributed-filesystems"
+  },
+  "beyond-mapreduce": {
+   "chapter": 10,
+   "title": "Beyond MapReduce",
+   "definition": "",
+   "pdf_page": 440
+  },
+  "materialization-of-intermediate-state": {
+   "chapter": 10,
+   "title": "Materialization of Intermediate State",
+   "definition": "",
+   "pdf_page": 440,
+   "parent": "beyond-mapreduce"
+  },
+  "graphs-and-iterative-processing": {
+   "chapter": 10,
+   "title": "Graphs and Iterative Processing",
+   "definition": "",
+   "pdf_page": 445,
+   "parent": "beyond-mapreduce"
+  },
+  "high-level-apis-and-languages": {
+   "chapter": 10,
+   "title": "High-Level APIs and Languages",
+   "definition": "",
+   "pdf_page": 447,
+   "parent": "beyond-mapreduce"
+  },
+  "transmitting-event-streams": {
+   "chapter": 11,
+   "title": "Transmitting Event Streams",
+   "definition": "",
+   "pdf_page": 461
+  },
+  "messaging-systems": {
+   "chapter": 11,
+   "title": "Messaging Systems",
+   "definition": "",
+   "pdf_page": 462,
+   "parent": "transmitting-event-streams"
+  },
+  "partitioned-logs": {
+   "chapter": 11,
+   "title": "Partitioned Logs",
+   "definition": "",
+   "pdf_page": 467,
+   "parent": "transmitting-event-streams"
+  },
+  "databases-and-streams": {
+   "chapter": 11,
+   "title": "Databases and Streams",
+   "definition": "",
+   "pdf_page": 472
+  },
+  "keeping-systems-in-sync": {
+   "chapter": 11,
+   "title": "Keeping Systems in Sync",
+   "definition": "",
+   "pdf_page": 473,
+   "parent": "databases-and-streams"
+  },
+  "change-data-capture": {
+   "chapter": 11,
+   "title": "Change Data Capture",
+   "definition": "",
+   "pdf_page": 475,
+   "parent": "databases-and-streams"
+  },
+  "event-sourcing": {
+   "chapter": 11,
+   "title": "Event Sourcing",
+   "definition": "",
+   "pdf_page": 478,
+   "parent": "databases-and-streams"
+  },
+  "state-streams-and-immutability": {
+   "chapter": 11,
+   "title": "State, Streams, and Immutability",
+   "definition": "",
+   "pdf_page": 480,
+   "parent": "databases-and-streams"
+  },
+  "processing-streams": {
+   "chapter": 11,
+   "title": "Processing Streams",
+   "definition": "",
+   "pdf_page": 485
+  },
+  "uses-of-stream-processing": {
+   "chapter": 11,
+   "title": "Uses of Stream Processing",
+   "definition": "",
+   "pdf_page": 486,
+   "parent": "processing-streams"
+  },
+  "reasoning-about-time": {
+   "chapter": 11,
+   "title": "Reasoning About Time",
+   "definition": "",
+   "pdf_page": 489,
+   "parent": "processing-streams"
+  },
+  "stream-joins": {
+   "chapter": 11,
+   "title": "Stream Joins",
+   "definition": "",
+   "pdf_page": 493,
+   "parent": "processing-streams"
+  },
+  "fault-tolerance": {
+   "chapter": 11,
+   "title": "Fault Tolerance",
+   "definition": "",
+   "pdf_page": 497,
+   "parent": "processing-streams"
+  },
+  "data-integration": {
+   "chapter": 12,
+   "title": "Data Integration",
+   "definition": "",
+   "pdf_page": 511
+  },
+  "combining-specialized-tools-by-deriving-data": {
+   "chapter": 12,
+   "title": "Combining Specialized Tools by Deriving Data",
+   "definition": "",
+   "pdf_page": 511,
+   "parent": "data-integration"
+  },
+  "batch-and-stream-processing": {
+   "chapter": 12,
+   "title": "Batch and Stream Processing",
+   "definition": "",
+   "pdf_page": 515,
+   "parent": "data-integration"
+  },
+  "unbundling-databases": {
+   "chapter": 12,
+   "title": "Unbundling Databases",
+   "definition": "",
+   "pdf_page": 520
+  },
+  "composing-data-storage-technologies": {
+   "chapter": 12,
+   "title": "Composing Data Storage Technologies",
+   "definition": "",
+   "pdf_page": 520,
+   "parent": "unbundling-databases"
+  },
+  "designing-applications-around-dataflow": {
+   "chapter": 12,
+   "title": "Designing Applications Around Dataflow",
+   "definition": "",
+   "pdf_page": 525,
+   "parent": "unbundling-databases"
+  },
+  "observing-derived-state": {
+   "chapter": 12,
+   "title": "Observing Derived State",
+   "definition": "",
+   "pdf_page": 530,
+   "parent": "unbundling-databases"
+  },
+  "aiming-for-correctness": {
+   "chapter": 12,
+   "title": "Aiming for Correctness",
+   "definition": "",
+   "pdf_page": 536
+  },
+  "the-end-to-end-argument-for-databases": {
+   "chapter": 12,
+   "title": "The End-to-End Argument for Databases",
+   "definition": "",
+   "pdf_page": 537,
+   "parent": "aiming-for-correctness"
+  },
+  "enforcing-constraints": {
+   "chapter": 12,
+   "title": "Enforcing Constraints",
+   "definition": "",
+   "pdf_page": 542,
+   "parent": "aiming-for-correctness"
+  },
+  "timeliness-and-integrity": {
+   "chapter": 12,
+   "title": "Timeliness and Integrity",
+   "definition": "",
+   "pdf_page": 545,
+   "parent": "aiming-for-correctness"
+  },
+  "trust-but-verify": {
+   "chapter": 12,
+   "title": "Trust, but Verify",
+   "definition": "",
+   "pdf_page": 549,
+   "parent": "aiming-for-correctness"
+  },
+  "doing-the-right-thing": {
+   "chapter": 12,
+   "title": "Doing the Right Thing",
+   "definition": "",
+   "pdf_page": 554
+  },
+  "predictive-analytics": {
+   "chapter": 12,
+   "title": "Predictive Analytics",
+   "definition": "",
+   "pdf_page": 554,
+   "parent": "doing-the-right-thing"
+  },
+  "privacy-and-tracking": {
+   "chapter": 12,
+   "title": "Privacy and Tracking",
+   "definition": "",
+   "pdf_page": 557,
+   "parent": "doing-the-right-thing"
+  }
+ }
+}
