@@ -1,16 +1,903 @@
-<title>DDIA Ch 1: Reliable, Scalable, and Maintainable Applications</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 1 — Reliable, Scalable, and Maintainable Applications</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#thinking-about-data-systems">data-systems</a>
+  <a class="l1" href="#reliability">reliability</a>
+  <a href="#hardware-faults">hardware-faults</a>
+  <a href="#software-errors">software-errors</a>
+  <a href="#human-errors">human-errors</a>
+  <a href="#how-important-is-reliability">how-important</a>
+  <a class="l1" href="#scalability">scalability</a>
+  <a href="#describing-load">describing-load</a>
+  <a href="#describing-performance">describing-performance</a>
+  <a href="#approaches-for-coping-with-load">coping-with-load</a>
+  <a class="l1" href="#maintainability">maintainability</a>
+  <a href="#operability-making-life-easy-for-operations">operability</a>
+  <a href="#simplicity-managing-complexity">simplicity</a>
+  <a href="#evolvability-making-change-easy">evolvability</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 1: Reliable, Scalable, and Maintainable Applications</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;01</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapters&nbsp;01–02</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Reliable, Scalable, and Maintainable Applications</h1>
+  <p class="epigraph">The Internet was done so well that most people think of it as a natural resource like the Pacific Ocean, rather than something that was man-made. When was the last time a technology with a scale like that was so error-free?
+  <span class="attr">— Alan Kay, in interview with Dr Dobb's Journal (2012)</span></p>
+</header>
+
+<p>Most applications today are <strong>data-intensive</strong>, not compute-intensive: raw CPU is rarely the limit — the amount of data, its complexity, and how fast it changes are. And such applications are assembled from a handful of standard building blocks: <em>databases</em> (store data, find it later), <em>caches</em> (remember expensive results), <em>search indexes</em> (keyword search and filtering), <em>stream processing</em> (send a message to another process, handled asynchronously), <em>batch processing</em> (periodically crunch accumulated data). That list sounds painfully obvious precisely because these abstractions are so successful — nobody writes a storage engine from scratch when a database will do.</p>
+
+<p>But there are many databases with different characteristics because applications have different requirements; many ways to cache, many ways to index. You still have to <em>choose</em>, and combining tools when no single one does the job is hard. This chapter names the three things every choice is trying to achieve — <strong>reliability, scalability, maintainability</strong> — and gives you precise ways to think about each, so the rest of the book's techniques have something to aim at.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Three questions, asked of any system: <strong>Does it keep working when things break?</strong> (reliability). <strong>Does it keep working when it gets 10× bigger?</strong> (scalability). <strong>Can the people who inherit it keep working on it?</strong> (maintainability). Everyone nods at these words; the chapter's real content is turning each vague word into things you can <em>measure and design for</em> — faults vs failures, load parameters and percentiles, operability/simplicity/evolvability. As in the whole book: <span style="color:var(--write);font-weight:600">ember marks the write path</span>, <span style="color:var(--read);font-weight:600">cyan the read path</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="thinking-about-data-systems">
+<span class="key-chip">thinking-about-data-systems</span>
+<h2><a class="self" href="#thinking-about-data-systems">Thinking About Data Systems</a></h2>
+
+<p>Why lump databases, queues, and caches together as "data systems" when they're such different tools? Two reasons. First, <strong>the categories have blurred</strong>: Redis is a datastore also used as a message queue; Kafka is a message queue with database-like durability. New tools no longer fit the old boxes. Second, <strong>one tool is often not enough</strong>: demanding applications break their work into tasks each handled by a specialized tool, stitched together by application code — and then the application code owns the job of keeping them consistent:</p>
+
+<figure>
+<svg viewBox="0 0 680 300" role="img" aria-label="A composite data system: application code sits between clients and several specialized components — a primary database, a cache it must keep in sync, and a message queue feeding asynchronous workers that update a full-text index.">
+  <rect x="20" y="120" width="90" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="38" y="146" font-size="11" font-family="ui-monospace,Menlo,monospace">clients</text>
+  <path d="M 112 142 L 158 142" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN1)"/>
+  <text x="114" y="134" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">API</text>
+
+  <rect x="160" y="100" width="150" height="84" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-width="1.5"/>
+  <text x="178" y="130" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">application</text>
+  <text x="178" y="148" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">code</text>
+  <text x="178" y="170" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">= the glue, and the guarantees</text>
+
+  <!-- cache -->
+  <rect x="400" y="20" width="140" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="418" y="46" font-size="11" font-family="ui-monospace,Menlo,monospace">in-memory cache</text>
+  <path d="M 312 112 C 350 90, 360 60, 396 46" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR1)"/>
+  <text x="326" y="72" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">read first</text>
+  <path d="M 396 56 C 370 80, 350 100, 314 128" fill="none" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrW1)"/>
+  <text x="336" y="106" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">invalidate on write</text>
+
+  <!-- database -->
+  <rect x="400" y="120" width="140" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="418" y="146" font-size="11" font-family="ui-monospace,Menlo,monospace">primary database</text>
+  <path d="M 312 138 L 396 138" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW1)"/>
+  <path d="M 396 148 L 312 148" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR1)"/>
+  <text x="330" y="132" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">writes</text>
+  <text x="330" y="162" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">cache-miss reads</text>
+
+  <!-- queue → workers → search index -->
+  <rect x="400" y="220" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="418" y="246" font-size="11" font-family="ui-monospace,Menlo,monospace">message queue</text>
+  <path d="M 312 172 C 350 200, 360 230, 396 240" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW1)"/>
+  <text x="318" y="216" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">async: "doc changed"</text>
+  <rect x="560" y="220" width="100" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="574" y="246" font-size="11" font-family="ui-monospace,Menlo,monospace">worker</text>
+  <path d="M 522 242 L 556 242" stroke="currentColor" stroke-opacity=".6" stroke-width="1.4" marker-end="url(#arrN1)"/>
+  <rect x="560" y="120" width="100" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="566" y="146" font-size="11" font-family="ui-monospace,Menlo,monospace">search index</text>
+  <path d="M 610 216 L 610 168" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW1)"/>
+  <text x="618" y="196" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">update</text>
+  <path d="M 556 142 C 540 100, 480 80, 314 100" fill="none" stroke="var(--read)" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#arrR1)"/>
+  <text x="440" y="92" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">search queries</text>
+  <defs>
+    <marker id="arrN1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+    <marker id="arrW1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<figcaption>One possible composite architecture (the book's Figure 1-1). Behind one API, several general-purpose components become a new special-purpose data system — and its <em>guarantees</em> (e.g. "the cache is invalidated on every write, so clients see consistent results") are now the application's responsibility. The moment you draw this diagram you are no longer only an application developer: you are a <strong>data system designer</strong>, facing the questions of how to keep data correct when things go wrong inside, how to stay fast when parts are degraded, how to scale, and what a good API looks like. (Part III of the book — <a class="xref fwd" href="ch12-future-of-data-systems.html#data-integration" data-tip="Ch 12 · Data Integration — composing specialized tools by deriving data · not yet written">Chapter&nbsp;12<sup>→12</sup></a> — returns to exactly this picture.)</figcaption>
+</figure>
+
+<p>Many things shape a design — the team's skills, legacy dependencies, delivery timescales, risk tolerance, regulation. The book fixes on three concerns that matter for most systems:</p>
+<ul>
+<li><strong>Reliability</strong> — the system keeps working <em>correctly</em> (right function, at the desired performance) even in adversity: hardware or software faults, even human error.</li>
+<li><strong>Scalability</strong> — as the system grows (data volume, traffic, complexity), there are reasonable ways to deal with the growth.</li>
+<li><strong>Maintainability</strong> — over time many different people (engineering and operations) will work on it, maintaining current behavior and adapting to new cases, and all of them should be able to work productively.</li>
+</ul>
+
+<div class="ed2"><span class="tag">2ND EDITION · this chapter became two</span>
+The 2nd edition splits this chapter. A new <strong>Chapter 1, "Trade-Offs in Data Systems Architecture,"</strong> reframes the whole book around trade-offs rather than tool categories and pulls forward material that lived elsewhere in the 1st edition: the operational-vs-analytical (OLTP vs OLAP) divide — which you'll meet in this edition's <a class="xref fwd" href="ch03-storage-and-retrieval.html#transaction-processing-or-analytics" data-tip="Ch 3 · Transaction Processing or Analytics? — OLTP (few records by key, seek-bound) vs OLAP (scan millions, bandwidth-bound)">Chapter&nbsp;3<sup>→3</sup></a> — plus data lakes, ETL and reverse ETL, and HTAP. It adds explicitly modern decisions: <strong>cloud vs self-hosting</strong> (including the counter-trend of leaving the cloud for "one big server"), <strong>cloud-native database architecture</strong> (Aurora, Azure Socrates, Snowflake's disaggregated storage, AlloyDB), serverless, compute–storage separation, distributed vs single-node as a deliberate trade-off, microservices, and data-residency pressures like GDPR. The core of this 1st-edition chapter — reliability, scalability, maintainability — becomes <strong>Chapter 2, "Defining Nonfunctional Requirements,"</strong> the term now used as the umbrella for all three.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="reliability">
+<span class="key-chip">reliability</span>
+<h2><a class="self" href="#reliability">Reliability</a></h2>
+
+<p>Intuitively, reliable software: does what the user expected; tolerates the user making mistakes or using it in unexpected ways; performs well enough for the expected load and data; prevents unauthorized access and abuse. If all that is "working correctly," then <strong>reliability is continuing to work correctly even when things go wrong</strong>.</p>
+
+<p>The things that go wrong are <strong>faults</strong>; systems that anticipate and cope with them are <strong>fault-tolerant</strong> or <em>resilient</em>. "Fault-tolerant" slightly oversells it — no system tolerates <em>every</em> fault (if Earth is swallowed by a black hole, tolerance requires hosting in space; good luck with that budget line). You tolerate <em>certain types</em> of faults.</p>
+
+<figure>
+<svg viewBox="0 0 680 190" role="img" aria-label="A fault is one component deviating from its spec; a failure is the whole system stopping its service to the user. Fault-tolerance mechanisms sit between the two, so faults happen constantly but rarely become failures.">
+  <rect x="20" y="40" width="200" height="110" rx="8" fill="none" stroke="currentColor" stroke-opacity=".55"/>
+  <text x="34" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">FAULT</text>
+  <text x="34" y="84" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">one component deviates</text>
+  <text x="34" y="98" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">from its spec</text>
+  <text x="34" y="124" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".6">disk dies · bug fires ·</text>
+  <text x="34" y="138" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".6">operator typo · packet lost</text>
+  <path d="M 224 95 L 276 95" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN2)"/>
+  <rect x="280" y="30" width="130" height="130" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.6"/>
+  <text x="296" y="58" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">FAULT-</text>
+  <text x="296" y="74" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">TOLERANCE</text>
+  <text x="296" y="100" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".75">redundancy, retries,</text>
+  <text x="296" y="114" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".75">replication, isolation,</text>
+  <text x="296" y="128" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".75">rollback, monitoring</text>
+  <text x="296" y="150" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">most faults stop here</text>
+  <path d="M 414 95 L 466 95" stroke="var(--bad)" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#arrB2)"/>
+  <text x="418" y="86" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">leaks</text>
+  <rect x="470" y="40" width="190" height="110" rx="8" fill="none" stroke="var(--bad)" stroke-opacity=".8"/>
+  <text x="484" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700" fill="var(--bad)">FAILURE</text>
+  <text x="484" y="84" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">the system as a whole</text>
+  <text x="484" y="98" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">stops providing the</text>
+  <text x="484" y="112" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">required service</text>
+  <text x="484" y="138" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".6">what the user sees</text>
+  <defs>
+    <marker id="arrN2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+    <marker id="arrB2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+  </defs>
+</svg>
+<figcaption><strong>Fault ≠ failure.</strong> A fault is one component deviating from its spec; a failure is the system as a whole no longer serving the user. You cannot drive fault probability to zero, so the design goal is fault-tolerance machinery that keeps faults from becoming failures — building reliable systems from unreliable parts, the book's recurring theme (it gets its own chapter: <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#faults-and-partial-failures" data-tip="Ch 8 · Faults and Partial Failures — why distributed systems fail in pieces · not yet written">Chapter&nbsp;8<sup>→8</sup></a>).</figcaption>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · why you should break your own system on purpose</span>
+Counterintuitively, fault-tolerant systems benefit from <em>raising</em> the fault rate deliberately — randomly killing processes without warning, à la Netflix's <strong>Chaos Monkey</strong>. Most critical production bugs are actually bad <em>error handling</em>: code paths that only run when something has already gone wrong, and therefore never get exercised. Killing things on purpose keeps the fault-tolerance machinery continually tested, so you can trust it when faults arrive on their own. It's a fire drill: nobody learns the exits during a real fire.</div>
+
+<p>One caveat: prevention beats cure where no cure exists — security, above all. Once an attacker has read sensitive data, that can't be undone. This book mostly deals with faults that <em>can</em> be cured, in three families:</p>
+
+<h3 id="hardware-faults"><a class="self" href="#hardware-faults">Hardware Faults</a></h3>
+<span class="key-chip">hardware-faults</span>
+
+<p>Disks crash, RAM goes bad, the grid blacks out, someone unplugs the wrong cable. At scale these aren't rare events, they're weather: hard disks have a mean time to failure of roughly 10–50 years, so <strong>a cluster of 10,000 disks loses about one disk per day</strong>. The first response is hardware redundancy — RAID, dual power supplies, hot-swappable CPUs, batteries and diesel generators — which makes total failure of a single machine rare, and for most applications restoring a backup onto a new machine quickly was good enough. Only the rare high-availability application needed multi-machine redundancy.</p>
+
+<p>Two shifts changed that. Data volumes pushed applications onto many machines, multiplying the fault rate proportionally; and cloud platforms like AWS routinely make VM instances vanish without warning, prioritizing elasticity over single-machine reliability. Hence the move to <strong>software fault-tolerance</strong> — systems that tolerate the loss of whole machines — in preference to or on top of hardware redundancy. It has an operational bonus too: a single-server system needs planned downtime to reboot for a security patch; a machine-loss-tolerant system patches one node at a time with no downtime — a <strong>rolling upgrade</strong>, which <a class="xref fwd" href="ch04-encoding-and-evolution.html" data-tip="Ch 4 · Encoding and Evolution — rolling upgrades force old and new code to coexist, which is why data encodings must evolve compatibly · not yet written">Chapter&nbsp;4<sup>→4</sup></a> shows has consequences for how you encode data.</p>
+
+<h3 id="software-errors"><a class="self" href="#software-errors">Software Errors</a></h3>
+<span class="key-chip">software-errors</span>
+
+<p>Hardware faults are mostly random and <em>independent</em> — one disk dying says little about the next (weak correlations aside, like a hot rack). Software faults are the opposite: <strong>systematic errors, correlated across nodes</strong>, and therefore far more likely to cause outright failures. Examples: a bug that crashes every application server given one bad input (the 2012 leap second hung many services simultaneously via a Linux kernel bug); a runaway process eating a shared resource — CPU, memory, disk, bandwidth; a dependency that slows down, hangs, or starts returning corrupted responses; and <strong>cascading failures</strong>, where a small fault triggers another, and another.</p>
+
+<p>These bugs lie dormant until an unusual set of circumstances reveals a hidden <em>assumption about the environment</em> — usually true, until one day it isn't. There's no quick fix, only many small things: think carefully about assumptions and interactions; test thoroughly; isolate processes; let processes crash and restart; measure, monitor, analyze production behavior; and when a system promises a guarantee (a queue's messages-in equals messages-out), have it <strong>check itself continuously</strong> and alert on discrepancy.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · what a decade of production taught us about faults</span>
+The 2nd edition deepens this section with post-2017 production research: <strong>metastable failures</strong> (a system pushed into a bad state that sustains itself even after the trigger is gone — retry storms are the classic), <strong>backoff with jitter</strong>, <strong>circuit breakers</strong> and <strong>load shedding</strong> as the standard defenses against cascades; and on the hardware side, <strong>fail-slow</strong> hardware (degraded but not dead — worse than a clean crash), <strong>silent data corruption</strong> from CPUs that miscompute ("Cores That Don't Count"), and SSD/DRAM field-failure studies.</div>
+
+<h3 id="human-errors"><a class="self" href="#human-errors">Human Errors</a></h3>
+<span class="key-chip">human-errors</span>
+
+<p>Humans design, build, and operate the systems, and humans — with the best intentions — are unreliable. One study of large internet services found <strong>operator configuration errors were the leading cause of outages</strong>, with hardware faults involved in only 10–25%. Reliability despite unreliable humans comes from combining approaches:</p>
+<ul>
+<li><strong>Minimize opportunities for error</strong> — abstractions, APIs, and admin interfaces that make the right thing easy and the wrong thing awkward. Too restrictive, though, and people work around them, negating the benefit; the balance is delicate.</li>
+<li><strong>Decouple where mistakes happen from where they cause failures</strong> — full-featured non-production sandboxes with real data, where people can explore safely.</li>
+<li><strong>Test at every level</strong> — unit through whole-system integration and manual tests; automated tests earn their keep on corner cases that rarely arise normally.</li>
+<li><strong>Make recovery quick and easy</strong> — fast config rollback, gradual code rollout so bugs hit few users, tools to recompute data when the old computation was wrong.</li>
+<li><strong>Detailed, clear monitoring</strong> — performance metrics and error rates; in other engineering fields, <em>telemetry</em>. Once the rocket has left the ground, telemetry is how you know what's happening — early warning of violated assumptions, and the evidence for diagnosis afterward.</li>
+<li><strong>Good management and training</strong> — important, and beyond the book's scope.</li>
+</ul>
+
+<h3 id="how-important-is-reliability"><a class="self" href="#how-important-is-reliability">How Important Is Reliability?</a></h3>
+<span class="key-chip">how-important-is-reliability</span>
+
+<p>Not just nuclear plants and air traffic control. Business-application bugs cost productivity (and legal risk when figures are misreported); e-commerce outages cost revenue and reputation. Even in "noncritical" apps there's a duty to users: picture a parent who keeps every photo and video of their children in your photo app — and the database is suddenly corrupted. Would they even know how to restore a backup? Sometimes you consciously trade reliability for development cost (a prototype for an unproven market) or operational cost (razor-thin margins) — but be very conscious of <em>when</em> you're cutting the corner.</p>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="scalability">
+<span class="key-chip">scalability</span>
+<h2><a class="self" href="#scalability">Scalability</a></h2>
+
+<p>Reliable today doesn't mean reliable tomorrow — the common cause of degradation is <strong>increased load</strong>: 10k concurrent users become 100k, 1M become 10M; data volumes balloon. Scalability is a system's ability to cope with increased load. But — and this is the chapter's most-quoted point — <strong>it is not a one-dimensional label</strong>. "X is scalable" and "Y doesn't scale" are meaningless. The real questions: <em>If the system grows in a particular way, what are our options for coping?</em> and <em>How can we add computing resources to handle the additional load?</em> Answering them takes two things: a way to describe load, and a way to describe performance.</p>
+
+<h3 id="describing-load"><a class="self" href="#describing-load">Describing Load</a></h3>
+<span class="key-chip">describing-load</span>
+
+<p>Load is described by a few numbers — <strong>load parameters</strong> — and the right ones depend on your architecture: requests per second to a web server; read/write ratio in a database; simultaneously active users in a chat room; cache hit rate. Maybe the average case matters; maybe a handful of extreme cases dominate your bottleneck. The book's worked example is Twitter, using data it published in November 2012:</p>
+
+<figure class="anim" id="anim-twitter">
+<svg viewBox="0 0 680 360" role="img" aria-label="Twitter's home-timeline problem: approach 1 computes timelines at read time with an expensive join; approach 2 fans each tweet out at write time into every follower's timeline cache; celebrities with tens of millions of followers break approach 2, so the final design is a hybrid.">
+  <!-- load numbers -->
+  <g data-on="1-6">
+    <text x="20" y="24" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">post tweet: 4.6k/s avg · 12k/s peak</text>
+    <text x="380" y="24" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">home timeline: 300k/s</text>
+  </g>
+
+  <!-- poster + followers -->
+  <g data-on="1-6">
+    <circle cx="60" cy="120" r="22" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="48" y="124" font-size="10" font-family="ui-monospace,Menlo,monospace">user</text>
+    <text x="40" y="160" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">tweets</text>
+  </g>
+  <g data-on="2-6">
+    <circle cx="620" cy="90" r="16" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <circle cx="620" cy="140" r="16" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <circle cx="620" cy="190" r="16" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="588" y="228" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">followers (~75 avg)</text>
+  </g>
+
+  <!-- approach 1 -->
+  <g data-on="2">
+    <rect x="200" y="80" width="260" height="80" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="216" y="104" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">global tweets table</text>
+    <text x="216" y="122" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">+ follows table</text>
+    <path d="M 84 116 L 196 116" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW6)"/>
+    <text x="96" y="108" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">1 insert</text>
+    <path d="M 602 96 C 560 100, 520 100, 464 104" fill="none" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR6)"/>
+    <path d="M 602 140 L 464 128" fill="none" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR6)"/>
+    <path d="M 602 184 C 560 176, 520 160, 464 150" fill="none" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR6)"/>
+    <text x="230" y="200" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">each read: JOIN follows → tweets, merge by time</text>
+    <text x="230" y="216" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">300k/s of expensive queries — struggled</text>
+  </g>
+
+  <!-- approach 2 -->
+  <g data-on="3-6">
+    <rect x="440" y="70" width="120" height="30" rx="5" fill="var(--write-soft)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="450" y="90" font-size="9" font-family="ui-monospace,Menlo,monospace">timeline cache</text>
+    <rect x="440" y="124" width="120" height="30" rx="5" fill="var(--write-soft)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="450" y="144" font-size="9" font-family="ui-monospace,Menlo,monospace">timeline cache</text>
+    <rect x="440" y="178" width="120" height="30" rx="5" fill="var(--write-soft)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="450" y="198" font-size="9" font-family="ui-monospace,Menlo,monospace">timeline cache</text>
+    <path d="M 564 85 L 600 89" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR6)"/>
+    <path d="M 564 139 L 600 140" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR6)"/>
+    <path d="M 564 193 L 600 190" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR6)"/>
+    <text x="566" y="250" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">read = 1 mailbox</text>
+  </g>
+  <g data-on="3" data-hot="3">
+    <path d="M 84 112 C 200 80, 320 78, 436 84" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW6)"/>
+    <path d="M 84 120 C 200 130, 320 138, 436 139" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW6)"/>
+    <path d="M 84 128 C 200 180, 320 192, 436 192" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW6)"/>
+    <text x="180" y="240" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">fan-out on write: look up followers, insert into each cache</text>
+    <text x="180" y="256" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">4.6k tweets/s × ~75 = 345k cache writes/s — fine</text>
+  </g>
+
+  <!-- celebrity -->
+  <g data-on="4-6">
+    <circle cx="60" cy="290" r="26" fill="none" stroke="var(--bad)" stroke-width="1.6"/>
+    <text x="34" y="294" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">celebrity</text>
+    <text x="20" y="334" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">30M+ followers</text>
+  </g>
+  <g data-on="4" data-hot="4">
+    <path d="M 88 282 C 200 250, 320 230, 436 205" fill="none" stroke="var(--bad)" stroke-width="2.4" marker-end="url(#arrB6)"/>
+    <path d="M 88 290 C 200 280, 320 260, 436 150" fill="none" stroke="var(--bad)" stroke-width="2.4" marker-end="url(#arrB6)"/>
+    <path d="M 88 298 C 200 300, 320 290, 436 96" fill="none" stroke="var(--bad)" stroke-width="2.4" marker-end="url(#arrB6)"/>
+    <text x="200" y="330" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">one tweet ⇒ 30,000,000 timeline writes, target: within 5 s</text>
+  </g>
+
+  <!-- hybrid -->
+  <g data-on="5-6" data-hot="5">
+    <rect x="200" y="270" width="200" height="40" rx="6" fill="none" stroke="var(--bad)" stroke-dasharray="5 3"/>
+    <text x="210" y="288" font-size="10" font-family="ui-monospace,Menlo,monospace">celebrity tweets: NOT fanned out</text>
+    <text x="210" y="302" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">stored once, like approach 1</text>
+    <path d="M 88 290 L 196 290" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW6)"/>
+    <path d="M 604 200 C 560 260, 480 285, 404 290" fill="none" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrR6)"/>
+    <text x="440" y="330" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">read: mailbox + fetch celebrities, merge</text>
+  </g>
+  <defs>
+    <marker id="arrW6" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR6" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    <marker id="arrB6" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE TWO OPERATIONS</strong> Post a tweet (4.6k requests/s average, 12k/s peak) and view the home timeline — tweets from everyone you follow (300k requests/s). 12k writes/s alone would be easy. The hard part is <em>fan-out</em>: every user follows many and is followed by many.</li>
+  <li><strong>APPROACH 1 — compute on read</strong> Posting inserts one row into a global tweets table. Reading a timeline joins <code>follows</code> → <code>tweets</code> and merges by time. Twitter's first version worked this way and buckled under 300k/s of these queries.</li>
+  <li><strong>APPROACH 2 — fan out on write</strong> Keep a per-user timeline cache, a mailbox. Posting looks up the author's followers and inserts the tweet into each follower's mailbox; reading is one cheap fetch. Tweets are ~2 orders of magnitude rarer than timeline reads, so shifting work to write time pays: 4.6k × ~75 followers ≈ 345k mailbox writes/s — manageable.</li>
+  <li><strong>THE HIDDEN LOAD PARAMETER</strong> "75 followers on average" hides a wild distribution. Some accounts have 30M+ followers: one tweet becomes 30 million writes, and Twitter wants delivery within five seconds. The <em>distribution</em> of followers per user (weighted by how often they tweet) is the load parameter that actually matters.</li>
+  <li><strong>THE HYBRID</strong> Most users' tweets are fanned out on write. A small set of celebrities is exempted: their tweets are stored once and fetched at read time, then merged into the reader's mailbox — approach 1 for the few, approach 2 for the many. Consistently good performance.</li>
+  <li><strong>TAKEAWAY</strong> Scalability reasoning starts with naming the right load parameters, then choosing where to spend work (read time vs write time) based on their ratio — and watching for the long tail that averages conceal. The book revisits this system in <a class="xref fwd" href="ch12-future-of-data-systems.html" data-tip="Ch 12 · The Future of Data Systems — the timeline problem re-examined as derived data · not yet written">Chapter&nbsp;12<sup>→12</sup></a>.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · read-time vs write-time work</span>
+A newsletter can be delivered two ways. <em>Pull</em>: every reader walks to every author's house each morning and asks "anything new?" — cheap for authors, brutal for readers. <em>Push</em>: each author photocopies their letter and drops it in every subscriber's mailbox — readers just open one box. Push wins when reading is far more common than writing… until one author has thirty million subscribers, and the photocopier melts. So: push for everyone normal, pull for the handful of superstars.</div>
+
+<div class="ed2"><span class="tag">2ND EDITION · the case study, updated</span>
+The 2nd edition keeps this case study, reframed generically as a <strong>social-network home timeline</strong> rather than "Twitter," and folds in newer material such as Bluesky's deliberately <em>lossy</em> timelines — accepting that not every follower's feed must receive every post — as another point on the same trade-off curve.</div>
+
+<h3 id="describing-performance"><a class="self" href="#describing-performance">Describing Performance</a></h3>
+<span class="key-chip">describing-performance</span>
+
+<p>With load described, ask what happens when it grows — two ways: increase a load parameter with resources fixed, how does performance change? Or: increase a load parameter, how much more resource keeps performance unchanged? Both need performance numbers. For batch systems like Hadoop the number is <strong>throughput</strong> — records per second, or total job time on a dataset of a given size (see <a class="xref fwd" href="ch10-batch-processing.html" data-tip="Ch 10 · Batch Processing — throughput-oriented systems; job time is often longer than size/throughput due to skew and stragglers · not yet written">Chapter&nbsp;10<sup>→10</sup></a>). For online systems it's <strong>response time</strong> — from the client sending a request to receiving the response.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · latency vs response time — not synonyms</span>
+<strong>Response time</strong> is what the client experiences: the actual processing (<em>service time</em>) plus network delays plus queueing delays. <strong>Latency</strong> is strictly the time a request spends <em>waiting</em> to be handled — during which it is latent, awaiting service. People use them interchangeably; the book doesn't.</div>
+
+<p>Even the identical request, repeated, gets a different response time every try; in a real mix of requests it varies a lot — so response time is not a number but a <strong>distribution</strong>. Some slow requests are intrinsically expensive (more data). But even when every request "should" take the same time, randomness intrudes: a context switch to a background process, a lost packet and TCP retransmit, a garbage-collection pause, a page fault forcing a disk read, even mechanical vibration in the rack.</p>
+
+<figure class="anim" id="anim-percentiles">
+<svg viewBox="0 0 680 320" role="img" aria-label="Response times of twenty requests shown as bars: the mean is skewed by three outliers; sorting reveals the median and high percentiles, and the SLO thresholds.">
+<line x1="24" y1="250" x2="630" y2="250" stroke="currentColor" stroke-opacity=".4"/>
+<text x="24" y="280" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".55">response time in ms (log-scaled bars)</text>
+<g data-on="1-2"><text x="30" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".7">20 requests, arrival order</text></g>
+<g data-on="1-2"><rect x="30" y="228.9" width="22" height="21.1" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="41.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">120</text><rect x="60" y="224.2" width="22" height="25.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="71.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">140</text><rect x="90" y="236.0" width="22" height="14.0" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="101.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">95</text><rect x="120" y="167.7" width="22" height="82.3" rx="2" fill="var(--bad)" fill-opacity=".55" stroke="var(--bad)"/><text x="131.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">900</text><rect x="150" y="226.5" width="22" height="23.5" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="161.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">130</text><rect x="180" y="231.6" width="22" height="18.4" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="191.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">110</text><rect x="210" y="220.2" width="22" height="29.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="221.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">160</text><rect x="240" y="222.1" width="22" height="27.9" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="251.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">150</text><rect x="270" y="233.0" width="22" height="17.0" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="281.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">105</text><rect x="300" y="154.2" width="22" height="95.8" rx="2" fill="var(--bad)" fill-opacity=".55" stroke="var(--bad)"/><text x="311.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">1400</text><rect x="330" y="227.7" width="22" height="22.3" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="341.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">125</text><rect x="360" y="225.3" width="22" height="24.7" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="371.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">135</text><rect x="390" y="230.2" width="22" height="19.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="401.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">115</text><rect x="420" y="223.2" width="22" height="26.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="431.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">145</text><rect x="450" y="234.5" width="22" height="15.5" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="461.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">100</text><rect x="480" y="218.3" width="22" height="31.7" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="491.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">170</text><rect x="510" y="224.7" width="22" height="25.3" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="521.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">138</text><rect x="540" y="227.0" width="22" height="23.0" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="551.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">128</text><rect x="570" y="141.9" width="22" height="108.1" rx="2" fill="var(--bad)" fill-opacity=".55" stroke="var(--bad)"/><text x="581.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">2100</text><rect x="600" y="223.8" width="22" height="26.2" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="611.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">142</text></g>
+<g data-on="3-6"><text x="30" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".7">same 20 requests, sorted fastest → slowest</text></g>
+<g data-on="3-6"><rect x="30" y="236.0" width="22" height="14.0" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="41.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">95</text><rect x="60" y="234.5" width="22" height="15.5" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="71.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">100</text><rect x="90" y="233.0" width="22" height="17.0" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="101.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">105</text><rect x="120" y="231.6" width="22" height="18.4" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="131.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">110</text><rect x="150" y="230.2" width="22" height="19.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="161.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">115</text><rect x="180" y="228.9" width="22" height="21.1" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="191.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">120</text><rect x="210" y="227.7" width="22" height="22.3" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="221.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">125</text><rect x="240" y="227.0" width="22" height="23.0" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="251.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">128</text><rect x="270" y="226.5" width="22" height="23.5" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="281.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">130</text><rect x="300" y="225.3" width="22" height="24.7" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="311.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">135</text><rect x="330" y="224.7" width="22" height="25.3" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="341.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">138</text><rect x="360" y="224.2" width="22" height="25.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="371.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">140</text><rect x="390" y="223.8" width="22" height="26.2" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="401.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">142</text><rect x="420" y="223.2" width="22" height="26.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="431.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">145</text><rect x="450" y="222.1" width="22" height="27.9" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="461.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">150</text><rect x="480" y="220.2" width="22" height="29.8" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="491.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">160</text><rect x="510" y="218.3" width="22" height="31.7" rx="2" fill="var(--read)" fill-opacity=".55" stroke="var(--read)"/><text x="521.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">170</text><rect x="540" y="167.7" width="22" height="82.3" rx="2" fill="var(--bad)" fill-opacity=".55" stroke="var(--bad)"/><text x="551.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">900</text><rect x="570" y="154.2" width="22" height="95.8" rx="2" fill="var(--bad)" fill-opacity=".55" stroke="var(--bad)"/><text x="581.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">1400</text><rect x="600" y="141.9" width="22" height="108.1" rx="2" fill="var(--bad)" fill-opacity=".55" stroke="var(--bad)"/><text x="611.0" y="264" font-size="8" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" opacity=".7">2100</text></g>
+<g data-on="2" data-hot="2"><line x1="24" y1="198.1" x2="630" y2="198.1" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="5 3"/><text x="70" y="192.1" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" text-anchor="start">mean ≈ 330 ms — almost nobody experienced this</text></g>
+<g data-on="3-6" data-hot="3"><line x1="24" y1="225.0" x2="630" y2="225.0" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="5 3"/><text x="70" y="219.0" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" text-anchor="start">p50 (median) = 136 ms</text></g>
+<g data-on="4-6" data-hot="4"><line x1="24" y1="154.2" x2="630" y2="154.2" stroke="var(--bad)" stroke-width="1.4" stroke-dasharray="5 3"/><text x="70" y="148.2" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)" text-anchor="start">p95 = 1400 ms</text></g>
+<g data-on="4-6" data-hot="4"><line x1="24" y1="141.9" x2="630" y2="141.9" stroke="var(--bad)" stroke-width="1.4" stroke-dasharray="5 3"/><text x="70" y="135.9" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)" text-anchor="start">p99 ≈ 2100 ms (the tail)</text></g>
+<g data-on="5-6" data-hot="5"><rect x="380" y="30" width="250" height="52" rx="6" fill="none" stroke="var(--read)" stroke-dasharray="4 3"/><text x="390" y="50" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">SLO: p50 &lt; 200 ms · p99 &lt; 1 s</text><text x="390" y="68" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">"up" 99.9% of the time</text></g>
+<g data-on="6" data-hot="6"><text x="30" y="300" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">tail ≈ queueing: 1 slow request blocks the ones behind it (head-of-line blocking) → measure client-side</text></g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>A DISTRIBUTION</strong> Twenty requests to one service, in arrival order; bar height is response time. Most are fast; a few outliers are much slower. This shape — not a single number — is what "performance" means.</li>
+  <li><strong>THE MEAN LIES</strong> Reporting the average is common, but the arithmetic mean doesn't tell you how many users actually experienced that delay — three huge outliers drag it well above what most users saw. Almost nobody got the "average" response.</li>
+  <li><strong>SORT → MEDIAN (p50)</strong> Sort fastest to slowest; the halfway point is the median: half of requests are faster, half slower. The right answer to "how long do users typically wait." (Caveat: it's per <em>request</em> — a user making several requests per page has a much greater than 50% chance that at least one is slower than the median.)</li>
+  <li><strong>THE TAIL (p95, p99, p999)</strong> To see how bad outliers get, read higher percentiles: the thresholds under which 95%, 99%, 99.9% of requests fall. If p95 is 1.5 s, 5 in 100 requests take ≥ 1.5 s. These <em>tail latencies</em> directly shape experience — Amazon specifies internal services at p999 because the slowest requests belong to customers with the most data, i.e. the most valuable ones; 100 ms slower was measured as 1% fewer sales. Yet p9999 was judged too expensive to chase: the very top is dominated by random events beyond your control.</li>
+  <li><strong>SLOs AND SLAs</strong> Percentiles are how expectations get written down: "up" means median under 200 ms and p99 under 1 s, and the service must be up 99.9% of the time — a service level objective (SLO), or a contractual SLA with refunds attached.</li>
+  <li><strong>QUEUES AND MEASUREMENT</strong> High percentiles are mostly <em>queueing</em>: a server handles few things in parallel (≈ its cores), so a few slow requests hold up everything behind them — <em>head-of-line blocking</em>. Fast requests then look slow to the client, which is why you must measure on the client side. And when load-testing, the client must keep sending independently of responses; waiting for each reply artificially shortens the queues and flatters the numbers.</li>
+</ol>
+</figure>
+
+<h4 id="percentiles-in-practice">Percentiles in practice</h4>
+
+<figure>
+<svg viewBox="0 0 680 210" role="img" aria-label="Tail latency amplification: one user request fans out to five parallel backend calls; four return quickly but the whole request must wait for the one slow call.">
+  <rect x="20" y="80" width="120" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="34" y="106" font-size="11" font-family="ui-monospace,Menlo,monospace">user request</text>
+  <g stroke="var(--read)" stroke-width="1.4" fill="none">
+    <path d="M 142 102 C 180 60, 200 40, 240 40" marker-end="url(#arrR7)"/>
+    <path d="M 142 102 C 180 80, 200 70, 240 70" marker-end="url(#arrR7)"/>
+    <path d="M 142 102 L 240 100" marker-end="url(#arrR7)"/>
+    <path d="M 142 102 C 180 124, 200 130, 240 130" marker-end="url(#arrR7)"/>
+    <path d="M 142 102 C 180 144, 200 160, 240 160" marker-end="url(#arrR7)"/>
+  </g>
+  <text x="150" y="36" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">5 parallel backend calls</text>
+  <g>
+    <rect x="246" y="32" width="90" height="16" rx="3" fill="var(--read-soft)" stroke="var(--read)"/>
+    <rect x="246" y="62" width="70" height="16" rx="3" fill="var(--read-soft)" stroke="var(--read)"/>
+    <rect x="246" y="92" width="100" height="16" rx="3" fill="var(--read-soft)" stroke="var(--read)"/>
+    <rect x="246" y="122" width="80" height="16" rx="3" fill="var(--read-soft)" stroke="var(--read)"/>
+    <rect x="246" y="152" width="380" height="16" rx="3" fill="none" stroke="var(--bad)" stroke-width="1.6"/>
+    <text x="630" y="164" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">slow</text>
+  </g>
+  <line x1="626" y1="24" x2="626" y2="176" stroke="var(--bad)" stroke-dasharray="4 3"/>
+  <text x="440" y="196" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">whole request waits for the slowest call</text>
+  <text x="246" y="196" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">time →</text>
+  <defs><marker id="arrR7" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+</svg>
+<figcaption><strong>Tail latency amplification.</strong> When one end-user request needs several backend calls — even in parallel — it waits for the <em>slowest</em>. If 1% of backend calls are slow and a request makes 100 of them, about 63% of user requests hit at least one slow call. A small tail at the backend becomes a fat tail for users, which is why backend services are held to high percentiles.</figcaption>
+</figure>
+
+<p>To put percentiles on a dashboard you need them continuously — say, over a rolling 10-minute window, recomputed every minute. The naive way (keep every response time, sort each minute) may be too costly; approximation algorithms such as <strong>forward decay, t-digest, and HdrHistogram</strong> compute good percentiles at minimal CPU and memory. One trap: <strong>averaging percentiles</strong> — to coarsen time resolution or combine machines — is mathematically meaningless. Aggregate response-time data by <em>adding the histograms</em>.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · SLOs as a discipline</span>
+The 2nd edition expands the percentile treatment into a fuller account of tail latency and <strong>SLOs</strong> as an operating discipline, and updates the sketch toolbox (HdrHistogram, t-digest, and newer <strong>DDSketch</strong>-style mergeable histograms) — all in the service of the same rule: describe performance as a distribution, and add histograms, never average percentiles.</div>
+
+<h3 id="approaches-for-coping-with-load"><a class="self" href="#approaches-for-coping-with-load">Approaches for Coping with Load</a></h3>
+<span class="key-chip">approaches-for-coping-with-load</span>
+
+<p>An architecture right for one load level is unlikely to cope with 10× that load: a fast-growing service rethinks its architecture <strong>at every order of magnitude</strong> — or more often. The usual dichotomy is <strong>scaling up</strong> (vertical: a more powerful machine) versus <strong>scaling out</strong> (horizontal: many smaller machines — a <em>shared-nothing</em> architecture):</p>
+
+<figure>
+<svg viewBox="0 0 680 200" role="img" aria-label="Scaling up replaces one machine with a bigger one; scaling out distributes load across many small shared-nothing machines; real architectures mix both.">
+  <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">scale up (vertical)</text>
+  <rect x="20" y="60" width="60" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <path d="M 90 90 L 130 90" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN3)"/>
+  <rect x="140" y="36" width="120" height="120" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".8"/>
+  <text x="156" y="100" font-size="10" font-family="ui-monospace,Menlo,monospace">bigger box</text>
+  <text x="20" y="182" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">simpler · gets very expensive at the high end</text>
+
+  <line x1="330" y1="16" x2="330" y2="190" stroke="currentColor" stroke-opacity=".25"/>
+
+  <text x="360" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">scale out (horizontal, shared-nothing)</text>
+  <rect x="360" y="60" width="60" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <path d="M 430 90 L 470 90" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN3)"/>
+  <g fill="var(--panel2)" stroke="currentColor" stroke-opacity=".8">
+    <rect x="480" y="50" width="42" height="42" rx="4"/><rect x="530" y="50" width="42" height="42" rx="4"/><rect x="580" y="50" width="42" height="42" rx="4"/><rect x="630" y="50" width="42" height="42" rx="4"/>
+    <rect x="480" y="100" width="42" height="42" rx="4"/><rect x="530" y="100" width="42" height="42" rx="4"/><rect x="580" y="100" width="42" height="42" rx="4"/><rect x="630" y="100" width="42" height="42" rx="4"/>
+  </g>
+  <text x="360" y="182" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">stateless: easy · stateful data: much more complex</text>
+  <defs><marker id="arrN3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+</svg>
+<figcaption>A single machine is simpler, but high-end machines get very expensive, so intensive workloads usually can't avoid scaling out. Good architectures are pragmatic mixtures — several fairly powerful machines can be simpler and cheaper than a swarm of small VMs. Orthogonally, systems are <strong>elastic</strong> (add resources automatically on load) or <strong>manually scaled</strong>: elasticity suits unpredictable load; manual scaling is simpler with fewer surprises (see <a class="xref fwd" href="ch06-partitioning.html#rebalancing-partitions" data-tip="Ch 6 · Rebalancing Partitions — why fully automatic rebalancing can be dangerous · not yet written">rebalancing in Chapter&nbsp;6<sup>→6</sup></a>).</figcaption>
+</figure>
+
+<p>Distributing <em>stateless</em> services is straightforward; taking a <em>stateful</em> data system from one node to many adds a lot of complexity. So the common wisdom (as of the 1st edition) was: keep the database on a single node — scale up — until cost or high-availability needs force distribution. As distributed tooling improves that wisdom may flip, and distributed data systems may become the default even for modest workloads — the rest of the book judges them on ease of use and maintainability, not scalability alone.</p>
+
+<p>There is no <strong>magic scaling sauce</strong> — no generic, one-size-fits-all scalable architecture. The problem may be read volume, write volume, data volume, data complexity, response-time requirements, access patterns, or (usually) a mix. A system handling 100,000 requests/s of 1 kB each looks nothing like one handling 3 requests/minute of 2 GB each — <em>same</em> data throughput. A scalable architecture is built on assumptions about which operations are common and which rare — the load parameters — and if those assumptions are wrong, the scaling effort is wasted at best, counterproductive at worst. In an early-stage startup, iterating on product usually matters more than scaling to a hypothetical future load. Still, scalable architectures are assembled from general-purpose building blocks in familiar patterns — those blocks and patterns are what this book is about.</p>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="maintainability">
+<span class="key-chip">maintainability</span>
+<h2><a class="self" href="#maintainability">Maintainability</a></h2>
+
+<p>The majority of software cost is not initial development but ongoing maintenance: fixing bugs, keeping systems running, investigating failures, adapting to new platforms and use cases, repaying technical debt, adding features. Yet many engineers dislike maintaining "legacy" systems — other people's mistakes, outdated platforms, systems bent to purposes never intended. Every legacy system is unpleasant in its own way, so instead of general advice on living with them, the book asks how to <em>avoid creating</em> legacy software: design for three principles from the start.</p>
+
+<ul>
+<li><strong>Operability</strong> — make it easy for operations to keep the system running smoothly.</li>
+<li><strong>Simplicity</strong> — make it easy for new engineers to understand the system by removing as much complexity as possible (not the same as a simple <em>user interface</em>).</li>
+<li><strong>Evolvability</strong> — make it easy to change the system in future, adapting to unanticipated use cases as requirements change. Also called extensibility, modifiability, plasticity.</li>
+</ul>
+
+<h3 id="operability-making-life-easy-for-operations"><a class="self" href="#operability-making-life-easy-for-operations">Operability: Making Life Easy for Operations</a></h3>
+<span class="key-chip">operability-making-life-easy-for-operations</span>
+
+<p>"Good operations can often work around the limitations of bad (or incomplete) software, but good software cannot run reliably with bad operations." Automation helps, but humans set up the automation and verify it. A good operations team monitors health and restores service fast; tracks down causes of failures and degradation; keeps software and platforms patched; watches how systems affect each other so a problematic change is caught before it does damage; anticipates problems (capacity planning); establishes deployment and configuration practices and tools; performs complex maintenance like platform migrations; maintains security through configuration changes; defines processes that keep production predictable; and preserves the organization's knowledge of the system as individuals come and go.</p>
+
+<p>Good operability means <strong>making routine tasks easy</strong>, freeing the team for high-value work. Concretely, a data system can: expose its runtime behavior and internals through good monitoring; support automation and standard tools; avoid dependence on individual machines (so one can be taken down while the whole keeps running); provide good documentation and an easy-to-understand operational model ("if I do X, Y will happen"); offer good defaults while letting administrators override them; self-heal where appropriate while leaving manual control available; and behave predictably, minimizing surprises.</p>
+
+<h3 id="simplicity-managing-complexity"><a class="self" href="#simplicity-managing-complexity">Simplicity: Managing Complexity</a></h3>
+<span class="key-chip">simplicity-managing-complexity</span>
+
+<p>Small projects can be delightfully simple; large ones tend toward a <strong>big ball of mud</strong>. Symptoms of complexity: explosion of the state space, tight coupling, tangled dependencies, inconsistent naming, performance hacks, special-casing to paper over problems elsewhere. Complexity slows everyone down, blows budgets and schedules, and breeds bugs — hidden assumptions, unintended consequences, and unexpected interactions are easier to miss when the system is hard to reason about. Reducing complexity greatly improves maintainability, so simplicity should be a key goal.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · accidental complexity and the power of abstraction</span>
+Simplifying does <em>not</em> mean removing features. Moseley and Marks call complexity <strong>accidental</strong> when it isn't inherent in the problem the users see but arises only from the implementation. The best tool against it is <strong>abstraction</strong>: hide a mass of implementation detail behind a clean façade that many applications can reuse — and reuse means every quality improvement to the abstraction benefits every user of it. High-level languages hide machine code, registers, and syscalls. <strong>SQL hides on-disk and in-memory data structures, concurrent requests from other clients, and inconsistencies after crashes</strong> — you're still using machine code underneath, you just never have to think about it. The hard part is finding good abstractions: distributed systems has many good <em>algorithms</em> but far less clarity about how to package them into abstractions that keep complexity manageable — a search the book keeps up throughout.</div>
+
+<figure>
+<svg viewBox="0 0 680 190" role="img" aria-label="SQL as an abstraction: the application sees a simple declarative interface; hidden beneath it are on-disk data structures, concurrency control, and crash recovery.">
+  <rect x="20" y="20" width="640" height="40" rx="6" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+  <text x="36" y="45" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">application: SELECT … FROM … WHERE …</text>
+  <line x1="20" y1="76" x2="660" y2="76" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="6 4"/>
+  <text x="560" y="72" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".55">the abstraction boundary</text>
+  <g fill="none" stroke="currentColor" stroke-opacity=".55">
+    <rect x="20" y="90" width="200" height="80" rx="6"/><rect x="240" y="90" width="200" height="80" rx="6"/><rect x="460" y="90" width="200" height="80" rx="6"/>
+  </g>
+  <text x="34" y="114" font-size="11" font-family="ui-monospace,Menlo,monospace">storage structures</text>
+  <text x="34" y="132" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">B-trees, LSM-trees, pages,</text>
+  <text x="34" y="146" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">column files → <tspan fill="var(--read)">ch 3</tspan></text>
+  <text x="254" y="114" font-size="11" font-family="ui-monospace,Menlo,monospace">concurrency control</text>
+  <text x="254" y="132" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">other clients' requests,</text>
+  <text x="254" y="146" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">isolation → <tspan fill="var(--write)">ch 7</tspan></text>
+  <text x="474" y="114" font-size="11" font-family="ui-monospace,Menlo,monospace">crash recovery</text>
+  <text x="474" y="132" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">WAL, atomic commit,</text>
+  <text x="474" y="146" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">no half-written state → <tspan fill="var(--write)">ch 7</tspan></text>
+</svg>
+<figcaption>What one good abstraction hides. Everything below the line is real and running — you just never have to think about it. The book spends whole chapters on each hidden box: storage structures in <a class="xref fwd" href="ch03-storage-and-retrieval.html#data-structures-that-power-your-database" data-tip="Ch 3 · Data Structures That Power Your Database — logs, indexes, B-trees, LSM-trees">Chapter&nbsp;3<sup>→3</sup></a>, concurrency and crash recovery in <a class="xref fwd" href="ch07-transactions.html" data-tip="Ch 7 · Transactions — ACID, isolation levels, serializability · not yet written">Chapter&nbsp;7<sup>→7</sup></a>.</figcaption>
+</figure>
+
+<h3 id="evolvability-making-change-easy"><a class="self" href="#evolvability-making-change-easy">Evolvability: Making Change Easy</a></h3>
+<span class="key-chip">evolvability-making-change-easy</span>
+
+<p>Requirements never stay fixed: new facts, unanticipated use cases, shifting business priorities, feature requests, platform changes, legal and regulatory change, growth forcing architectural change. Organizationally, Agile patterns provide a framework for adapting, and the Agile community's technical tools — test-driven development, refactoring — help when software changes often. But those discussions work at a small scale: a few source files in one application. This book asks the same question at the scale of a whole data system of several applications and services: <em>how would you "refactor" Twitter's timeline architecture from approach 1 to approach 2?</em> Ease of modifying a data system tracks closely with its simplicity and its abstractions — simple systems are easier to change — and because the idea matters so much at this scale, it gets its own name: <strong>evolvability</strong>. <a class="xref fwd" href="ch04-encoding-and-evolution.html#modes-of-dataflow" data-tip="Ch 4 · Modes of Dataflow — schema evolution and compatibility across databases, services, and message passing · not yet written">Chapter&nbsp;4<sup>→4</sup></a> makes it concrete: how data formats evolve while old and new code coexist.</p>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Applications have functional requirements</strong> (what it should do) and <strong>nonfunctional requirements</strong> (security, reliability, compliance, scalability, compatibility, maintainability). This chapter — and the whole book — is about three of the nonfunctional ones.</li>
+<li><strong>Data-intensive apps are composites</strong> of standard building blocks (databases, caches, search indexes, stream and batch processing) glued by application code — and that glue owns the guarantees. You're a data system designer whether you meant to be or not.</li>
+<li><strong>Reliability = working correctly when things go wrong.</strong> Fault ≠ failure: a fault is a component deviating from spec; a failure is the system failing its users. Design fault-tolerance to stop faults becoming failures; you can't drive fault probability to zero.</li>
+<li><strong>Three fault families</strong>: hardware (random, uncorrelated — 10k disks ⇒ ~1 dead per day; answered by redundancy and, increasingly, software fault tolerance), software (systematic, correlated, dormant until an assumption breaks — no quick fix, many small disciplines), human (the leading cause of outages — minimize error opportunities, sandbox, test, make recovery fast, monitor, train).</li>
+<li><strong>Deliberately inject faults</strong> (Chaos Monkey): error-handling code is the least-exercised, most-buggy code you have.</li>
+<li><strong>Scalability is not a label.</strong> Ask "if load grows <em>this</em> way, what are our options?" Describe load with <strong>load parameters</strong> chosen for your architecture — and beware distributions hiding behind averages (Twitter's 75-follower mean vs 30M-follower celebrities).</li>
+<li><strong>Trade read-time work against write-time work</strong> according to their ratio: Twitter moved from compute-on-read to fan-out-on-write, then to a hybrid that exempts celebrities.</li>
+<li><strong>Performance is a distribution.</strong> Use percentiles, not means: p50 for typical experience, p95/p99/p999 for the tail that hurts your most valuable users. Tail latency amplifies across parallel backend calls; queueing (head-of-line blocking) dominates the tail, so measure client-side and load-test without waiting on responses. Add histograms; never average percentiles.</li>
+<li><strong>Coping with load</strong>: rethink architecture per order of magnitude; scale up vs scale out (shared-nothing) is a pragmatic mix, not a religion; elastic vs manual is a trade-off; stateless is easy, stateful is hard; there is no magic scaling sauce — only building blocks arranged around <em>your</em> load parameters.</li>
+<li><strong>Maintainability</strong> = operability (make routine ops easy: visibility, automation, no single-machine dependence, predictable behavior), simplicity (remove <em>accidental</em> complexity via good abstractions — SQL is the model), evolvability (make change easy; simplicity and abstraction are what make it possible).</li>
+<li><strong>2nd-edition arc</strong>: this chapter split into "Trade-Offs in Data Systems Architecture" (cloud vs self-hosting, cloud-native architectures, serverless, OLTP/OLAP up front) and "Defining Nonfunctional Requirements" (this chapter's core, deepened with metastable failures, circuit breakers, load shedding, fail-slow hardware, and SLO discipline).</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Fourteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="b">
+<p>Why does the book group databases, message queues, and caches under one term, "data systems"?</p>
+<label><input type="radio" name="q1" value="a"> Because they all use the same storage engine internally</label>
+<label><input type="radio" name="q1" value="b"> Because the category boundaries have blurred (Redis as a queue, Kafka with database-like durability) and modern applications stitch several such tools together with application code</label>
+<label><input type="radio" name="q1" value="c"> Because they are interchangeable — any one can substitute for another</label>
+<label><input type="radio" name="q1" value="d"> Because they all expose SQL</label>
+</div>
+
+<div class="q" data-a="c">
+<p>A disk in one server dies, but users notice nothing because the data was replicated. In the book's vocabulary this is:</p>
+<label><input type="radio" name="q2" value="a"> A failure that was tolerated</label>
+<label><input type="radio" name="q2" value="b"> Neither a fault nor a failure, since nothing went wrong</label>
+<label><input type="radio" name="q2" value="c"> A fault (one component deviated from spec) that fault-tolerance prevented from becoming a failure (the system stopping service to users)</label>
+<label><input type="radio" name="q2" value="d"> A cascading failure</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why does Netflix's Chaos Monkey randomly kill production processes?</p>
+<label><input type="radio" name="q3" value="a"> To reduce cloud costs by shedding idle instances</label>
+<label><input type="radio" name="q3" value="b"> To measure hardware MTTF empirically</label>
+<label><input type="radio" name="q3" value="c"> To keep engineers on call alert</label>
+<label><input type="radio" name="q3" value="d"> Because many critical bugs live in error-handling code that only runs when something has failed; inducing faults continually exercises the fault-tolerance machinery so it can be trusted when real faults occur</label>
+</div>
+
+<div class="q" data-a="a">
+<p>What distinguishes software faults from hardware faults, and why does it matter?</p>
+<label><input type="radio" name="q4" value="a"> Software faults are systematic and correlated across nodes (a bug hits every instance), so they cause far more system failures than uncorrelated, random hardware faults</label>
+<label><input type="radio" name="q4" value="b"> Software faults are rarer and therefore less important</label>
+<label><input type="radio" name="q4" value="c"> Hardware faults can't be tolerated; software faults always can</label>
+<label><input type="radio" name="q4" value="d"> Software faults only occur during deployment</label>
+</div>
+
+<div class="q" data-a="c">
+<p>According to the study the book cites, the leading cause of outages in large internet services was:</p>
+<label><input type="radio" name="q5" value="a"> Disk failures</label>
+<label><input type="radio" name="q5" value="b"> Network partitions</label>
+<label><input type="radio" name="q5" value="c"> Configuration errors by operators — hardware was involved in only 10–25% of outages</label>
+<label><input type="radio" name="q5" value="d"> Power outages</label>
+</div>
+
+<div class="q" data-a="b">
+<p>"Our system is scalable." The book would say this statement is:</p>
+<label><input type="radio" name="q6" value="a"> Meaningful if the system runs on more than one machine</label>
+<label><input type="radio" name="q6" value="b"> Meaningless — scalability isn't a one-dimensional label; the real questions are "if load grows in a particular way, what are our options?" and "how do we add resources to handle it?"</label>
+<label><input type="radio" name="q6" value="c"> Meaningful if response time is under 200 ms</label>
+<label><input type="radio" name="q6" value="d"> Meaningful if the system is elastic</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Twitter moved from computing home timelines at read time to fanning tweets out at write time. Why did that pay off, and what broke it?</p>
+<label><input type="radio" name="q7" value="a"> Writes are always cheaper than reads; nothing broke it</label>
+<label><input type="radio" name="q7" value="b"> It reduced storage cost; it broke when storage got cheaper</label>
+<label><input type="radio" name="q7" value="c"> It made tweets consistent; it broke under network partitions</label>
+<label><input type="radio" name="q7" value="d"> Timeline reads (300k/s) vastly outnumber tweets (4.6k/s), so doing more work per write and less per read wins on average — but celebrities with 30M+ followers turn one tweet into 30M writes, forcing a hybrid that fetches celebrity tweets at read time</label>
+</div>
+
+<div class="q" data-a="a">
+<p>The key load parameter for Twitter's scalability discussion turned out to be:</p>
+<label><input type="radio" name="q8" value="a"> The distribution of followers per user (weighted by how often they tweet), because it determines fan-out load</label>
+<label><input type="radio" name="q8" value="b"> The total number of registered users</label>
+<label><input type="radio" name="q8" value="c"> The average tweet length</label>
+<label><input type="radio" name="q8" value="d"> The number of datacenters</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Latency vs response time — which is correct?</p>
+<label><input type="radio" name="q9" value="a"> They are exact synonyms</label>
+<label><input type="radio" name="q9" value="b"> Latency includes network time; response time excludes it</label>
+<label><input type="radio" name="q9" value="c"> Response time is what the client sees (service time + network + queueing delays); latency is strictly the time a request waits to be handled</label>
+<label><input type="radio" name="q9" value="d"> Response time is measured on the server; latency on the client</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Why does Amazon define internal service requirements at the 99.9th percentile rather than the mean?</p>
+<label><input type="radio" name="q10" value="a"> Because the mean is hard to compute at scale</label>
+<label><input type="radio" name="q10" value="b"> Because the slowest requests belong to customers with the most data — the most valuable ones — and tail latency directly affects experience and revenue; the mean says nothing about how many users experienced a given delay</label>
+<label><input type="radio" name="q10" value="c"> Because p999 is cheaper to optimize than p50</label>
+<label><input type="radio" name="q10" value="d"> Because regulators require it</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Which statement about measuring response times is correct?</p>
+<label><input type="radio" name="q11" value="a"> Server-side timings are sufficient since queueing happens on the client</label>
+<label><input type="radio" name="q11" value="b"> Averaging percentiles across machines is the correct way to aggregate them</label>
+<label><input type="radio" name="q11" value="c"> A load-test client should wait for each response before sending the next request, to mimic real users</label>
+<label><input type="radio" name="q11" value="d"> Measure on the client side because head-of-line blocking makes fast requests look slow; keep load generators sending independently of responses; aggregate by adding histograms, never by averaging percentiles</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Tail latency amplification means:</p>
+<label><input type="radio" name="q12" value="a"> When one user request requires several backend calls, it waits for the slowest, so even a small fraction of slow backend calls makes a much larger fraction of user requests slow</label>
+<label><input type="radio" name="q12" value="b"> Percentiles grow as you add more servers</label>
+<label><input type="radio" name="q12" value="c"> Slow requests use more CPU, slowing later requests</label>
+<label><input type="radio" name="q12" value="d"> Response times double at each order of magnitude of load</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Which best captures the book's position on scaling up vs scaling out?</p>
+<label><input type="radio" name="q13" value="a"> Always scale out — shared-nothing is strictly superior</label>
+<label><input type="radio" name="q13" value="b"> Always scale up — distributed systems are too complex</label>
+<label><input type="radio" name="q13" value="c"> A pragmatic mix: single machines are simpler but pricey at the high end; stateless services distribute easily while stateful data is hard, so the (1st-edition) wisdom was to keep the database on one node until cost or availability forces distribution — and there is no generic "magic scaling sauce"</label>
+<label><input type="radio" name="q13" value="d"> Elastic autoscaling makes the choice irrelevant</label>
+</div>
+
+<div class="q" data-a="b">
+<p>"Simplicity" as a maintainability goal means:</p>
+<label><input type="radio" name="q14" value="a"> A simple user interface with few features</label>
+<label><input type="radio" name="q14" value="b"> Removing accidental complexity — complexity arising from the implementation rather than the problem — chiefly through good abstractions like SQL that hide detail behind a clean, reusable façade</label>
+<label><input type="radio" name="q14" value="c"> Using as few machines as possible</label>
+<label><input type="radio" name="q14" value="d"> Writing less code regardless of clarity</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — b.</span> Two reasons in the text: tools no longer fit neat categories (Redis, Kafka), and demanding applications compose several specialized tools, with application code keeping them in sync. Not (c): they have very different access patterns and implementations — that's precisely why you combine them.</div>
+<div class="ak"><span class="which">Q2 — c.</span> The disk deviating from spec is a fault; because replication (a fault-tolerance mechanism) absorbed it, the system never stopped serving users, so there was no failure. (a) misuses "failure" for the component event; (d) cascading failure is a fault triggering further faults.</div>
+<div class="ak"><span class="which">Q3 — d.</span> The book's argument: many critical bugs are poor error handling, and error paths are the least exercised code. Deliberately inducing faults keeps them tested, raising confidence for the natural case. It's a testing discipline, not cost-cutting.</div>
+<div class="ak"><span class="which">Q4 — a.</span> Hardware faults are (mostly) independent — one disk's death doesn't imply another's. A software bug hits every instance at once (leap-second kernel bug, 2012), a runaway process starves shared resources, cascades propagate. Correlation is what turns faults into failures.</div>
+<div class="ak"><span class="which">Q5 — c.</span> The cited study found operator configuration errors were the leading cause; hardware played a role in only 10–25%. Hence the whole section on designing for unreliable humans — sandboxes, gradual rollout, fast rollback, telemetry.</div>
+<div class="ak"><span class="which">Q6 — b.</span> The book is emphatic: "X is scalable" is meaningless. Scalability is a set of options for coping with specific kinds of growth, described via load parameters and performance metrics. Multi-machine, low latency, or elasticity are neither necessary nor sufficient.</div>
+<div class="ak"><span class="which">Q7 — d.</span> Tweets are ~2 orders of magnitude rarer than timeline reads, so fan-out on write shifts work to the cheap side. The average of 75 followers hides a huge tail; celebrity fan-out (30M writes per tweet within 5 s) forced the hybrid: fan-out for most, read-time merge for celebrities.</div>
+<div class="ak"><span class="which">Q8 — a.</span> Tweet rate alone (12k/s peak) would be easy; the follower distribution determines fan-out cost and is what makes the problem hard. Choosing the right load parameter is the first act of scalability engineering.</div>
+<div class="ak"><span class="which">Q9 — c.</span> Straight from the book's sidebar: response time includes service time, network delays, and queueing; latency is the waiting ("latent") period. (d) is a tempting mix-up — the book says to <em>measure response time</em> on the client, but that's a measurement practice, not the definition.</div>
+<div class="ak"><span class="which">Q10 — b.</span> The mean doesn't say how many users saw a given delay; high percentiles do, and Amazon's slowest requests come from its heaviest, most valuable customers. Also cited: 100 ms slower ⇒ ~1% fewer sales. Yet Amazon stopped at p999 — p9999 was too costly for the benefit.</div>
+<div class="ak"><span class="which">Q11 — d.</span> Three practices, all from the "Describing Performance" section: client-side measurement (because of head-of-line blocking at the server), open-loop load generation (closed-loop clients shorten queues artificially), and histogram addition (averaging percentiles is mathematically meaningless).</div>
+<div class="ak"><span class="which">Q12 — a.</span> Even with parallel calls, the user waits for the slowest. With p per-call slowness and n calls, P(at least one slow) = 1 − (1−p)ⁿ — 1% and 100 calls ≈ 63%. This is why backend services need tight high percentiles.</div>
+<div class="ak"><span class="which">Q13 — c.</span> The book refuses the dichotomy: good architectures mix approaches; a few powerful machines can beat many small VMs; stateful distribution is genuinely hard; and scalable architectures are application-specific — built around the load parameters — with no generic recipe.</div>
+<div class="ak"><span class="which">Q14 — b.</span> Explicitly <em>not</em> UI simplicity (a). Moseley and Marks' accidental complexity is the target; abstraction is the tool; SQL and high-level languages are the exemplars. Simpler systems are also easier to change — linking simplicity to evolvability.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="index.html">index</a>
+  <a href="ch02-data-models-query-languages.html">ch 2 · Data Models and Query Languages →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>

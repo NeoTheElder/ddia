@@ -82,94 +82,94 @@
   "thinking-about-data-systems": {
    "chapter": 1,
    "title": "Thinking About Data Systems",
-   "definition": "",
+   "definition": "Databases, caches, queues, and indexes blur together and get composed by application code \u2014 which then owns the guarantees; you become a data system designer.",
    "pdf_page": 25
   },
   "reliability": {
    "chapter": 1,
    "title": "Reliability",
-   "definition": "",
+   "definition": "Continuing to work correctly even when things go wrong; fault (component deviates) \u2260 failure (system stops serving users) \u2014 design fault tolerance so faults don't become failures.",
    "pdf_page": 27
   },
   "hardware-faults": {
    "chapter": 1,
    "title": "Hardware Faults",
-   "definition": "",
+   "definition": "Random, uncorrelated faults (10k disks \u21d2 ~1 dead/day); answered first by hardware redundancy, increasingly by software fault tolerance that survives whole-machine loss (enabling rolling upgrades).",
    "pdf_page": 28,
    "parent": "reliability"
   },
   "software-errors": {
    "chapter": 1,
    "title": "Software Errors",
-   "definition": "",
+   "definition": "Systematic, correlated faults \u2014 a bug hits every node at once, runaway processes, cascading failures \u2014 dormant until an environmental assumption breaks; no quick fix, many small disciplines.",
    "pdf_page": 29,
    "parent": "reliability"
   },
   "human-errors": {
    "chapter": 1,
    "title": "Human Errors",
-   "definition": "",
+   "definition": "Operator configuration mistakes are the leading cause of outages; mitigate with good abstractions, sandboxes, thorough testing, fast rollback and gradual rollout, telemetry, training.",
    "pdf_page": 30,
    "parent": "reliability"
   },
   "how-important-is-reliability": {
    "chapter": 1,
    "title": "How Important Is Reliability?",
-   "definition": "",
+   "definition": "Reliability matters beyond critical systems (lost revenue, legal risk, users' irreplaceable data); trade it away only consciously, e.g. for a prototype.",
    "pdf_page": 31,
    "parent": "reliability"
   },
   "scalability": {
    "chapter": 1,
    "title": "Scalability",
-   "definition": "",
+   "definition": "A system's ability to cope with increased load \u2014 not a label but a set of options: 'if load grows this way, what can we do?'",
    "pdf_page": 31
   },
   "describing-load": {
    "chapter": 1,
    "title": "Describing Load",
-   "definition": "",
+   "definition": "Load parameters chosen for your architecture (req/s, read/write ratio, fan-out\u2026); Twitter's timeline fan-out shows trading read-time work for write-time work and averages hiding long tails.",
    "pdf_page": 32,
    "parent": "scalability"
   },
   "describing-performance": {
    "chapter": 1,
    "title": "Describing Performance",
-   "definition": "",
+   "definition": "Throughput for batch, response time for online systems \u2014 as a distribution: use percentiles (p50, p95, p99, p999), not means; tail latency amplification; measure client-side; add histograms.",
    "pdf_page": 34,
    "parent": "scalability"
   },
   "approaches-for-coping-with-load": {
    "chapter": 1,
    "title": "Approaches for Coping with Load",
-   "definition": "",
+   "definition": "Rethink architecture per order of magnitude; scale up vs scale out (shared-nothing) pragmatically; elastic vs manual; stateless easy, stateful hard; no magic scaling sauce.",
    "pdf_page": 38,
    "parent": "scalability"
   },
   "maintainability": {
    "chapter": 1,
    "title": "Maintainability",
-   "definition": "",
+   "definition": "Most software cost is maintenance; design for operability, simplicity, and evolvability to avoid creating legacy systems.",
    "pdf_page": 39
   },
   "operability-making-life-easy-for-operations": {
    "chapter": 1,
    "title": "Operability: Making Life Easy for Operations",
-   "definition": "",
+   "definition": "Make routine operations easy: visibility/monitoring, automation, no single-machine dependence, clear operational model, good defaults with overrides, predictable behavior.",
    "pdf_page": 40,
    "parent": "maintainability"
   },
   "simplicity-managing-complexity": {
    "chapter": 1,
    "title": "Simplicity: Managing Complexity",
-   "definition": "",
+   "definition": "Remove accidental complexity (from the implementation, not the problem) via good abstractions \u2014 SQL and high-level languages as exemplars; avoid the big ball of mud.",
    "pdf_page": 41,
    "parent": "maintainability"
   },
   "evolvability-making-change-easy": {
    "chapter": 1,
    "title": "Evolvability: Making Change Easy",
-   "definition": "",
+   "definition": "Agility at the data-system level: how easily requirements changes can be absorbed; follows from simplicity and good abstractions.",
    "pdf_page": 42,
    "parent": "maintainability"
   },
