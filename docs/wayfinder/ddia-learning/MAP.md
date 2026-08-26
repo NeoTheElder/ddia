@@ -11,7 +11,8 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 - **Source of truth**: the book PDF at `reference/ddia-1st-edition.pdf` (gitignored). Each chapter session must Read the actual chapter's section headings from the PDF to guarantee concept coverage — never build from memory alone.
 - **2nd-edition deltas**: consult `research/02-second-edition-deltas.md` in every chapter session; fold in what changed since 2017 where relevant.
 - **Skills to consult per session**: `artifact-design` + `artifact-diagramming` + `dataviz` when building chapter pages; `frontend-design` for the template design; `/grilling` for decision tickets; `/prototype` for the pilot.
-- **Template discipline**: after the pilot (Chapter 3) locks the template, chapter sessions follow it — structural changes go back through a decision, not ad-hoc drift.
+- **Template discipline**: the template is locked (`docs/template.md`) — chapter sessions follow it; structural changes go back through a decision, not ad-hoc drift.
+- **Enrichment passes (standing)**: detailed study will surface sections wanting extra figures/steppers. Enrichments are additive, requestable on any chapter at any time, and don't reopen chapter tickets or the template.
 - **User review**: every chapter ticket ends with the user reviewing the built page before close.
 - **No Jira**: personal repo — no SCAL tickets, no co-author trailers in commits.
 
@@ -26,13 +27,14 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
 - [Bootstrap the ddia repo](tickets/01-bootstrap-repo.md) — PDF at `reference/ddia-1st-edition.pdf`; section-level TOC extracted to `reference/toc.md` (the completeness checklist); private repo pushed to https://github.com/NeoTheElder/ddia; hosting = local `file://` browsing (Pages deferred); pypdf venv at `.venv/` for chapter text extraction.
+- [Pilot: Chapter 3 (Storage and Retrieval) + template lock](tickets/04-pilot-chapter-03-template-lock.md) — chapter built and approved; template locked at `docs/template.md` (page anatomy, ember/cyan color language, stepper + quiz mechanics, build process); enrichment passes established as a standing additive workflow.
 - [Cross-reference scheme (concept anchor registry)](tickets/03-crossref-scheme.md) — anchors are `chNN-<slug>.html#<concept-slug>`; registry `concepts.json` pre-seeded with all 169 concepts (definitions filled per chapter build); stub pages hold every chapter's final URL so links never 404; inline refs with hover-definition tooltips.
 - [Research: 2nd-edition deltas per 1st-edition chapter](tickets/02-research-2nd-edition-deltas.md) — 2nd ed is 14 chapters/4 parts (Ch 1 and Ch 12 split; middle chapters map one-to-one, shifted +1); Partitioning renamed Sharding; MapReduce demoted to teaching device (Spark/Flink + object storage replace it); cloud-native, vector-index/AI, and sync-engine/CRDT material added; findings with per-chapter detail in `research/02-second-edition-deltas.md`.
 
 ## Not yet specified
 
 - **Shared animation library** — after 2–3 chapters exist, decide whether to extract common click-through-animation JS/CSS into a shared file (breaks strict self-containment) or keep duplicating inline.
-- **Quiz sizing & depth calibration** — how many MCQs per chapter and how deep the explanations go; calibrated by user feedback on the pilot.
+- **Ch 3 enrichment backlog** — sections the user's detailed study flags for extra figures/steppers; first suspected candidate: "B-tree optimizations". Graduates to concrete enrichment work as study proceeds.
 - **Revision workflow** — whether the repo later grows re-study aids (progress tracking on the index, re-quiz mode). Depends on how the reference gets used once several chapters exist.
 
 ## Out of scope

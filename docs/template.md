@@ -1,4 +1,10 @@
-# Chapter template (DRAFT — locks when the Chapter 3 pilot is approved)
+# Chapter template (LOCKED 2026-08-26 — structural changes go through a map decision)
+
+**Enrichment passes are a standing workflow**: studying a chapter in detail will surface
+sections that need extra figures or steppers (first flagged candidate: ch 3 "B-tree
+optimizations"). Enrichments are *additive* — new figures/steppers/Feynman boxes inside the
+locked structure — and any chapter accepts them at any time on request. They never change
+the template itself; if one seems to require a structural change, that's a map decision.
 
 Every chapter is one self-contained HTML file at `chapters/chNN-<slug>.html`. No external
 requests of any kind: all CSS/JS inline, figures are hand-authored inline SVG, fonts are
