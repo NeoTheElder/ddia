@@ -25,11 +25,10 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5** closed on the map. **6 built and pushed, awaiting user
-review** — ticket `09-chapter-06-partitioning.md` is claimed and open. User's pattern so far:
-"close it, do the next chapter."
+Built chapters: **3 (pilot), 1, 2, 4, 5, 6** all closed on the map. Nothing is claimed or
+awaiting review. User's pattern so far: "close it, do the next chapter."
 
-Remaining frontier after 6 closes: chapters 7–12 (tickets 10–15, in book order; user may name
+Remaining frontier: chapters 7–12 (tickets 10–15, in book order; user may name
 a different one) and the **index page** (ticket 16 — `index.html` doesn't exist yet; stubs and
 chapter footers already link to it).
 
