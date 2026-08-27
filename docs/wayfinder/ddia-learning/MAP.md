@@ -26,6 +26,9 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
+- [Chapter 5: Replication](tickets/08-chapter-05-replication.md) — built to template and approved; Part II intro folded in as framing; 6 steppers (sync/async, failover, lag anomalies, write conflict, quorums, shopping-cart merge), 13 figures, 15-question quiz; ch 5 definitions filled.
+- [Chapter 4: Encoding and Evolution](tickets/07-chapter-04-encoding-and-evolution.md) — built to template and approved; 6 steppers (rolling upgrade, binary bytes, field tags, Avro resolution, lost field, RPC), 7 figures, 14-question quiz; ch 4 definitions filled.
+
 - [Bootstrap the ddia repo](tickets/01-bootstrap-repo.md) — PDF at `reference/ddia-1st-edition.pdf`; section-level TOC extracted to `reference/toc.md` (the completeness checklist); private repo pushed to https://github.com/NeoTheElder/ddia; hosting = local `file://` browsing (Pages deferred); pypdf venv at `.venv/` for chapter text extraction.
 - [Chapter 2: Data Models and Query Languages](tickets/06-chapter-02-data-models-query-languages.md) — built to template and approved; 6 steppers (résumé, model history, declarative, MapReduce, Cypher, Datalog), 14-question quiz; ch 2 definitions filled.
 - [Chapter 1: Reliable, Scalable, and Maintainable Applications](tickets/05-chapter-01-reliable-scalable-maintainable.md) — built to template and approved; Twitter fan-out and percentiles steppers, 5 figures, 14-question quiz; ch 1 definitions filled.
