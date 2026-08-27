@@ -176,102 +176,102 @@
   "relational-model-versus-document-model": {
    "chapter": 2,
    "title": "Relational Model Versus Document Model",
-   "definition": "",
+   "definition": "Codd's relations of tuples with joins vs JSON-shaped self-contained documents; the choice hinges on the shape of your relationships (trees vs many-to-many).",
    "pdf_page": 49
   },
   "the-birth-of-nosql": {
    "chapter": 2,
    "title": "The Birth of NoSQL",
-   "definition": "",
+   "definition": "A 2009 hashtag turned movement: driven by scalability, open source, specialized queries, and schema frustration; the likely outcome is polyglot persistence, not replacement.",
    "pdf_page": 50,
    "parent": "relational-model-versus-document-model"
   },
   "the-object-relational-mismatch": {
    "chapter": 2,
    "title": "The Object-Relational Mismatch",
-   "definition": "",
+   "definition": "The impedance mismatch between application objects and tables/rows; ORMs reduce boilerplate, documents reduce the gap for tree-shaped data like a r\u00e9sum\u00e9.",
    "pdf_page": 50,
    "parent": "relational-model-versus-document-model"
   },
   "many-to-one-and-many-to-many-relationships": {
    "chapter": 2,
    "title": "Many-to-One and Many-to-Many Relationships",
-   "definition": "",
+   "definition": "Store meaningful text once and refer by an ID that never changes (normalization); many-to-one/many-to-many need joins, which document databases support poorly.",
    "pdf_page": 54,
    "parent": "relational-model-versus-document-model"
   },
   "are-document-databases-repeating-history": {
    "chapter": 2,
    "title": "Are Document Databases Repeating History?",
-   "definition": "",
+   "definition": "IMS's hierarchical model \u2248 documents; CODASYL's network model used hand-navigated pointer access paths; the relational model won with the automatic query optimizer; documents nest like IMS but reference by ID like relational.",
    "pdf_page": 57,
    "parent": "relational-model-versus-document-model"
   },
   "relational-versus-document-databases-today": {
    "chapter": 2,
    "title": "Relational Versus Document Databases Today",
-   "definition": "",
+   "definition": "Documents: schema flexibility, locality, closeness to app objects. Relational: joins and many-to-many. Schema-on-read vs schema-on-write; locality only pays when you need most of the document; the models are converging.",
    "pdf_page": 59,
    "parent": "relational-model-versus-document-model"
   },
   "query-languages-for-data": {
    "chapter": 2,
    "title": "Query Languages for Data",
-   "definition": "",
+   "definition": "Declarative (SQL, relational algebra) states the result pattern and leaves the how to the optimizer \u2014 concise, implementation-hiding, parallelizable; imperative fixes order and steps.",
    "pdf_page": 63
   },
   "declarative-queries-on-the-web": {
    "chapter": 2,
    "title": "Declarative Queries on the Web",
-   "definition": "",
+   "definition": "CSS selectors vs imperative DOM manipulation show the same advantages as SQL over CODASYL cursors: automatic un-application and vendor optimizations without rewriting code.",
    "pdf_page": 65,
    "parent": "query-languages-for-data"
   },
   "mapreduce-querying": {
    "chapter": 2,
    "title": "MapReduce Querying",
-   "definition": "",
+   "definition": "Map emits key\u2013value pairs, the framework groups by key, reduce folds each group; functions must be pure. Two coordinated functions are harder than one query, so MongoDB added the declarative aggregation pipeline.",
    "pdf_page": 67,
    "parent": "query-languages-for-data"
   },
   "graph-like-data-models": {
    "chapter": 2,
    "title": "Graph-Like Data Models",
-   "definition": "",
+   "definition": "Vertices and edges for data where anything may relate to anything; homogeneous (social, web, road) or heterogeneous (Facebook's single graph); property graphs and triple-stores.",
    "pdf_page": 70
   },
   "property-graphs": {
    "chapter": 2,
    "title": "Property Graphs",
-   "definition": "",
+   "definition": "Vertices (id, in/out edges, properties) and edges (id, tail, head, label, properties); any vertex connects to any other; efficient traversal both ways; labels keep one graph clean; good for evolvability.",
    "pdf_page": 71,
    "parent": "graph-like-data-models"
   },
   "the-cypher-query-language": {
    "chapter": 2,
    "title": "The Cypher Query Language",
-   "definition": "",
+   "definition": "Neo4j's declarative property-graph language: arrow patterns in MATCH, variable-length paths with *0.., optimizer chooses forward or backward execution.",
    "pdf_page": 73,
    "parent": "graph-like-data-models"
   },
   "graph-queries-in-sql": {
    "chapter": 2,
    "title": "Graph Queries in SQL",
-   "definition": "",
+   "definition": "Variable-length traversals need recursive common table expressions (WITH RECURSIVE) \u2014 ~29 lines to Cypher's 4; data models fit different uses.",
    "pdf_page": 74,
    "parent": "graph-like-data-models"
   },
   "triple-stores-and-sparql": {
    "chapter": 2,
    "title": "Triple-Stores and SPARQL",
-   "definition": "",
+   "definition": "Everything as (subject, predicate, object): literal objects are properties, vertex objects are edges. Turtle/RDF syntax, the semantic web's overhyped history, and SPARQL's property paths.",
    "pdf_page": 76,
    "parent": "graph-like-data-models"
   },
   "the-foundation-datalog": {
    "chapter": 2,
    "title": "The Foundation: Datalog",
-   "definition": "",
+   "definition": "predicate(subject, object) facts plus rules that derive new predicates, recursively; the academic foundation later graph languages build on (Datomic, Cascalog); rules compose and reuse.",
    "pdf_page": 81,
    "parent": "graph-like-data-models"
   },

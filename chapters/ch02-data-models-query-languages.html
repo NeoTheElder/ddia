@@ -1,16 +1,1215 @@
-<title>DDIA Ch 2: Data Models and Query Languages</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 2 — Data Models and Query Languages</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#relational-model-versus-document-model">relational-vs-document</a>
+  <a href="#the-birth-of-nosql">birth-of-nosql</a>
+  <a href="#the-object-relational-mismatch">object-relational-mismatch</a>
+  <a href="#many-to-one-and-many-to-many-relationships">many-to-one/many</a>
+  <a href="#are-document-databases-repeating-history">repeating-history</a>
+  <a href="#relational-versus-document-databases-today">relational-vs-doc-today</a>
+  <a class="l1" href="#query-languages-for-data">query-languages</a>
+  <a href="#declarative-queries-on-the-web">declarative-on-the-web</a>
+  <a href="#mapreduce-querying">mapreduce-querying</a>
+  <a class="l1" href="#graph-like-data-models">graph-models</a>
+  <a href="#property-graphs">property-graphs</a>
+  <a href="#the-cypher-query-language">cypher</a>
+  <a href="#graph-queries-in-sql">graph-queries-in-sql</a>
+  <a href="#triple-stores-and-sparql">triple-stores-sparql</a>
+  <a href="#the-foundation-datalog">datalog</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 2: Data Models and Query Languages</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;02</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;03</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Data Models and Query Languages</h1>
+  <p class="epigraph">The limits of my language mean the limits of my world.
+  <span class="attr">— Ludwig Wittgenstein, Tractatus Logico-Philosophicus (1922)</span></p>
+</header>
+
+<p>Data models may be the most important part of developing software: they shape not only how the code is written but how you <em>think about the problem</em>. Every application stacks data models in layers, and at each layer the question is the same — <strong>how is this represented in terms of the layer below?</strong></p>
+
+<figure>
+<svg viewBox="0 0 680 230" role="img" aria-label="Four layers of data models: application objects, a general-purpose model such as documents, tables or graphs, the database's bytes in memory and on disk, and the hardware's electrical and magnetic representation — each layer hiding the one beneath.">
+  <g fill="none" stroke="currentColor" stroke-opacity=".55">
+    <rect x="40" y="16" width="600" height="42" rx="6"/><rect x="40" y="68" width="600" height="42" rx="6" fill="var(--read-soft)" stroke="var(--read)"/><rect x="40" y="120" width="600" height="42" rx="6"/><rect x="40" y="172" width="600" height="42" rx="6"/>
+  </g>
+  <text x="56" y="34" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">1 · application</text><text x="56" y="50" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">real world → objects, data structures, APIs specific to your app</text>
+  <text x="56" y="86" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700" fill="var(--read)">2 · general-purpose data model  ← this chapter</text><text x="56" y="102" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">JSON/XML documents · relational tables · graphs</text>
+  <text x="56" y="138" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">3 · database internals  → ch 3</text><text x="56" y="154" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">bytes in memory, on disk, on the network; indexes for query &amp; search</text>
+  <text x="56" y="190" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">4 · hardware</text><text x="56" y="206" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">bytes → electrical currents, pulses of light, magnetic fields</text>
+  <text x="560" y="34" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".5">each layer hides</text><text x="560" y="46" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".5">the one below</text>
+</svg>
+<figcaption>The layer cake. Each layer hides the complexity of those beneath by offering a clean data model, which is what lets a database vendor's engineers and an application developer work together without meeting. This chapter lives on layer 2 — relational, document, and graph models and their query languages; <a class="xref fwd" href="ch03-storage-and-retrieval.html#data-structures-that-power-your-database" data-tip="Ch 3 · Data Structures That Power Your Database — how layer 2 is implemented on disk">Chapter&nbsp;3<sup>→3</sup></a> descends to layer 3.</figcaption>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Every data model is a bet about <strong>what shape your relationships have</strong>. If your data is a tree — one thing owning many sub-things, always loaded together — the <em>document</em> model fits like a glove. If many things point at many other things and you need to slice them from any angle, the <em>relational</em> model's joins are the tool. If <em>everything</em> may relate to everything, you want a <em>graph</em>. Pick the wrong shape and you'll spend your life writing code to fight the model. And the second theme: <em>declarative</em> query languages ("what I want") beat <em>imperative</em> ones ("how to get it") because they leave the database free to get smarter without changing your queries. Book-wide colors: <span style="color:var(--write);font-weight:600">ember = writes</span>, <span style="color:var(--read);font-weight:600">cyan = reads</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="relational-model-versus-document-model">
+<span class="key-chip">relational-model-versus-document-model</span>
+<h2><a class="self" href="#relational-model-versus-document-model">Relational Model Versus Document Model</a></h2>
+
+<p>The best-known model is SQL's, built on Edgar Codd's 1970 <strong>relational model</strong>: data is organized into <em>relations</em> (tables), each an unordered collection of <em>tuples</em> (rows). It began as a theoretical proposal many doubted could be implemented efficiently; by the mid-1980s RDBMSes and SQL were the default for anything with regular structure — a dominance lasting 25–30 years, an eternity in computing. Its roots are mundane 1960s–70s mainframe business processing: transaction processing (sales, banking, airline reservations, stock-keeping) and batch processing (invoicing, payroll, reporting). Its purpose was radical for the time: other databases made developers think hard about the internal representation of data; the relational model <strong>hid that behind a cleaner interface</strong>.</p>
+
+<p>Challengers came and went — the network and hierarchical models (1970s–80s), object databases (late 80s–early 90s), XML databases (early 2000s, niche). Each generated hype; none lasted. Meanwhile relational databases generalized astonishingly well beyond business data to power most of the web: publishing, discussion, social networking, e-commerce, games, SaaS.</p>
+
+<h3 id="the-birth-of-nosql"><a class="self" href="#the-birth-of-nosql">The Birth of NoSQL</a></h3>
+<span class="key-chip">the-birth-of-nosql</span>
+
+<p>The 2010s challenger. The name is an accident — a catchy Twitter hashtag for a 2009 meetup on open source, distributed, nonrelational databases — retroactively reinterpreted as <em>Not Only SQL</em>. The driving forces: a need for greater <strong>scalability</strong> than relational databases easily offer (very large datasets, very high write throughput); a preference for <strong>free and open source</strong> software over commercial products; <strong>specialized query operations</strong> the relational model supports poorly; and frustration with <strong>restrictive schemas</strong>, wanting a more dynamic, expressive model. Since requirements differ, the likely future is relational databases used <em>alongside</em> a variety of nonrelational stores — <strong>polyglot persistence</strong>.</p>
+
+<h3 id="the-object-relational-mismatch"><a class="self" href="#the-object-relational-mismatch">The Object-Relational Mismatch</a></h3>
+<span class="key-chip">the-object-relational-mismatch</span>
+
+<p>Most application code is object-oriented, so a common complaint about SQL: an awkward translation layer between objects in code and tables/rows/columns — the <strong>impedance mismatch</strong> (borrowed from electronics: mismatched impedances between circuits cause reflections and losses). ORMs like ActiveRecord and Hibernate cut the boilerplate but can't erase the gap. The book's running example is a résumé — a LinkedIn profile:</p>
+
+<figure class="anim" id="anim-resume">
+<svg viewBox="0 0 680 360" role="img" aria-label="A résumé as application data, then shredded across relational tables joined by foreign keys, then as one self-contained JSON document, then extended with many-to-one references to regions and many-to-many references to organizations and recommenders that break the tree.">
+  <!-- app object -->
+  <g data-on="1">
+    <rect x="200" y="40" width="280" height="200" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="216" y="66" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">user 251 · Bill Gates</text>
+    <text x="216" y="92" font-size="10" font-family="ui-monospace,Menlo,monospace">first_name, last_name, summary  (×1)</text>
+    <text x="216" y="118" font-size="10" font-family="ui-monospace,Menlo,monospace">positions      [Co-chair @ Gates Fdn, Co-founder @ Microsoft]</text>
+    <text x="216" y="144" font-size="10" font-family="ui-monospace,Menlo,monospace">education      [Harvard 1973–75, Lakeside School]</text>
+    <text x="216" y="170" font-size="10" font-family="ui-monospace,Menlo,monospace">contact_info   {blog, twitter}</text>
+    <text x="216" y="206" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">one-to-many: user → positions, education, contacts</text>
+    <text x="216" y="222" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">⇒ a tree</text>
+  </g>
+
+  <!-- relational shredding -->
+  <g data-on="2">
+    <rect x="20" y="40" width="160" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="30" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">users</text>
+    <text x="30" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">251 │ Bill │ Gates │ …</text>
+    <rect x="240" y="20" width="200" height="70" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="250" y="40" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">positions</text>
+    <text x="250" y="58" font-size="9" font-family="ui-monospace,Menlo,monospace">458 │ <tspan fill="var(--write)">user_id 251</tspan> │ Co-chair │ …</text>
+    <text x="250" y="74" font-size="9" font-family="ui-monospace,Menlo,monospace">457 │ <tspan fill="var(--write)">user_id 251</tspan> │ Co-founder │ …</text>
+    <rect x="240" y="110" width="200" height="70" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="250" y="130" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">education</text>
+    <text x="250" y="148" font-size="9" font-family="ui-monospace,Menlo,monospace">807 │ <tspan fill="var(--write)">user_id 251</tspan> │ Harvard │ 1973</text>
+    <text x="250" y="164" font-size="9" font-family="ui-monospace,Menlo,monospace">806 │ <tspan fill="var(--write)">user_id 251</tspan> │ Lakeside │ null</text>
+    <rect x="240" y="200" width="200" height="52" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="250" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">contact_info</text>
+    <text x="250" y="238" font-size="9" font-family="ui-monospace,Menlo,monospace">155 │ <tspan fill="var(--write)">user_id 251</tspan> │ blog │ …</text>
+    <g stroke="var(--write)" stroke-width="1.2" fill="none">
+      <path d="M 182 68 C 210 68, 220 50, 238 50"/><path d="M 182 70 C 210 70, 220 140, 238 140"/><path d="M 182 72 C 210 72, 220 226, 238 226"/>
+    </g>
+    <text x="470" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">to read one profile:</text>
+    <text x="470" y="76" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">4 queries, or a</text>
+    <text x="470" y="92" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">multi-way join</text>
+    <text x="20" y="300" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">normalized (pre-SQL:1999 style): every one-to-many becomes a table + foreign key — "shredding"</text>
+  </g>
+
+  <!-- document -->
+  <g data-on="3">
+    <rect x="200" y="30" width="300" height="230" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.4"/>
+    <text x="214" y="52" font-size="10" font-family="ui-monospace,Menlo,monospace">{ "user_id": 251, "first_name": "Bill",</text>
+    <text x="214" y="70" font-size="10" font-family="ui-monospace,Menlo,monospace">  "region_id": "us:91", "industry_id": 131,</text>
+    <text x="214" y="88" font-size="10" font-family="ui-monospace,Menlo,monospace">  "positions": [</text>
+    <text x="214" y="106" font-size="10" font-family="ui-monospace,Menlo,monospace">    {"job_title": "Co-chair", "organization": "…"},</text>
+    <text x="214" y="124" font-size="10" font-family="ui-monospace,Menlo,monospace">    {"job_title": "Co-founder", "organization": "…"} ],</text>
+    <text x="214" y="142" font-size="10" font-family="ui-monospace,Menlo,monospace">  "education": [ {"school_name": "Harvard", …}, … ],</text>
+    <text x="214" y="160" font-size="10" font-family="ui-monospace,Menlo,monospace">  "contact_info": { "blog": "…", "twitter": "…" }</text>
+    <text x="214" y="178" font-size="10" font-family="ui-monospace,Menlo,monospace">}</text>
+    <text x="214" y="216" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">one document = one read; tree is explicit</text>
+    <text x="214" y="234" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">storage locality: all of it in one place on disk</text>
+    <path d="M 120 140 L 196 140" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR8)"/>
+    <text x="40" y="136" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">fetch(251)</text>
+  </g>
+
+  <!-- many-to-one -->
+  <g data-on="4">
+    <rect x="60" y="60" width="240" height="120" rx="8" fill="var(--read-soft)" stroke="var(--read)"/>
+    <text x="74" y="84" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">user 251 document</text>
+    <text x="74" y="110" font-size="10" font-family="ui-monospace,Menlo,monospace">"region_id":   <tspan fill="var(--write)" font-weight="700">"us:91"</tspan>  — not "Greater Seattle Area"</text>
+    <text x="74" y="130" font-size="10" font-family="ui-monospace,Menlo,monospace">"industry_id": <tspan fill="var(--write)" font-weight="700">131</tspan>      — not "Philanthropy"</text>
+    <rect x="420" y="40" width="220" height="60" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="432" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">regions</text>
+    <text x="432" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">us:91 │ Greater Seattle Area │ in: WA</text>
+    <rect x="420" y="120" width="220" height="60" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="432" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">industries</text>
+    <text x="432" y="160" font-size="9" font-family="ui-monospace,Menlo,monospace">131 │ Philanthropy</text>
+    <path d="M 302 106 L 416 70" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW8)"/>
+    <path d="M 302 126 L 416 150" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW8)"/>
+    <text x="60" y="230" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">many users → one region: a many-to-one relationship. The human-readable name</text>
+    <text x="60" y="246" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">lives in ONE place (normalization); the ID never has to change.</text>
+    <text x="60" y="280" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">relational: trivial join · document DB: weak/no joins → the app emulates the join</text>
+  </g>
+
+  <!-- many-to-many -->
+  <g data-on="5-6">
+    <rect x="40" y="50" width="180" height="90" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-dasharray="5 3"/>
+    <text x="52" y="72" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">user 251</text>
+    <text x="52" y="92" font-size="9" font-family="ui-monospace,Menlo,monospace">positions → org <tspan fill="var(--write)">#ref</tspan></text>
+    <text x="52" y="108" font-size="9" font-family="ui-monospace,Menlo,monospace">education → school <tspan fill="var(--write)">#ref</tspan></text>
+    <text x="52" y="124" font-size="9" font-family="ui-monospace,Menlo,monospace">recommendations → user <tspan fill="var(--write)">#ref</tspan></text>
+    <rect x="300" y="30" width="150" height="50" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="5 3"/>
+    <text x="312" y="50" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">organization</text>
+    <text x="312" y="66" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">Microsoft · logo, page…</text>
+    <rect x="300" y="100" width="150" height="50" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="5 3"/>
+    <text x="312" y="120" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">school</text>
+    <text x="312" y="136" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">Harvard</text>
+    <rect x="300" y="170" width="150" height="50" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-dasharray="5 3"/>
+    <text x="312" y="190" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">user 512</text>
+    <text x="312" y="206" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">recommender · photo</text>
+    <rect x="500" y="100" width="150" height="50" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-dasharray="5 3"/>
+    <text x="512" y="120" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">user 733</text>
+    <text x="512" y="136" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">also worked at Microsoft</text>
+    <g stroke="var(--write)" stroke-width="1.3" fill="none">
+      <path d="M 222 88 C 260 80, 270 58, 296 56" marker-end="url(#arrW8)"/>
+      <path d="M 222 104 C 260 110, 270 124, 296 124" marker-end="url(#arrW8)"/>
+      <path d="M 222 120 C 260 150, 270 190, 296 194" marker-end="url(#arrW8)"/>
+      <path d="M 498 118 C 480 100, 470 60, 452 56" marker-end="url(#arrW8)"/>
+      <path d="M 452 200 C 470 200, 480 150, 498 130" marker-end="url(#arrW8)" stroke-dasharray="3 3"/>
+    </g>
+    <text x="40" y="262" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">many-to-many: users ↔ organizations, users ↔ users. Dotted boxes = documents;</text>
+    <text x="40" y="278" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">the arrows are references that must be resolved with joins at read time.</text>
+  </g>
+  <g data-on="6" data-hot="6">
+    <text x="40" y="316" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">if a recommender changes their photo, every recommendation must show the new one ⇒ reference, don't copy</text>
+    <text x="40" y="340" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">tree → document · many-to-one/many → relational · everything-connected → graph</text>
+  </g>
+  <defs>
+    <marker id="arrW8" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR8" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE DATA</strong> A profile: fields that occur once (name, summary) plus <em>one-to-many</em> collections — several positions, several education entries, several contacts. One-to-many relationships form a <strong>tree</strong>.</li>
+  <li><strong>RELATIONAL (SHREDDED)</strong> The traditional normalized form: positions, education, and contact_info become separate tables with a <code>user_id</code> foreign key. Fetching one profile means several queries or a multi-way join. (Later SQL added structured/XML/JSON column types as a middle path; a third option is a JSON blob in a text column the database can't query into.)</li>
+  <li><strong>DOCUMENT</strong> The same profile as one JSON document. The tree is explicit, everything is in one place (<strong>locality</strong>: one read), and it maps onto application objects with less impedance mismatch. MongoDB, RethinkDB, CouchDB, Espresso work this way. But — see <a class="xref fwd" href="ch04-encoding-and-evolution.html#formats-for-encoding-data" data-tip="Ch 4 · Formats for Encoding Data — JSON's weaknesses as an encoding (numbers, binary, schemas) · not yet written">Chapter&nbsp;4<sup>→4</sup></a> — JSON has its own problems as an encoding.</li>
+  <li><strong>MANY-TO-ONE</strong> Why <code>region_id: "us:91"</code> rather than the text "Greater Seattle Area"? Standardized lists give consistent spelling, no ambiguity, one place to update a renamed city, localization, and better search (the region list knows Seattle is in Washington). Storing an ID means the human-meaningful text lives once — the essence of <strong>normalization</strong>. But many-to-one needs a <em>join</em>: trivial in relational databases, weak or absent in document databases, so the work shifts into application code.</li>
+  <li><strong>MANY-TO-MANY</strong> Data grows more interconnected as features arrive: organizations and schools become entities with their own pages; recommendations reference the recommender's profile. Each dotted box can still be one document, but the references between them require joins when queried — the tree has become a web.</li>
+  <li><strong>TAKEAWAY</strong> Reference, don't copy, when the referenced thing can change (a recommender's photo). The shape of your relationships picks your model: trees suit documents; many-to-one/many-to-many suit relational; when anything relates to everything, graphs.</li>
+</ol>
+</figure>
+
+<div class="ed2"><span class="tag">2ND EDITION · normalization for analytics, and ordering</span>
+The 2nd edition (this is Chapter&nbsp;3 there) extends the modeling discussion with analytics-side trade-offs — star schema vs <strong>"one big table" (OBT)</strong> denormalization — and practical modeling problems the 1st edition skipped, such as <strong>fractional indexing</strong> for user-defined ordering (how to store a reorderable list without rewriting every position). It also treats <strong>dataframes, matrices, and arrays</strong> as a data model in their own right, for analytics and ML training data.</div>
+
+<h3 id="many-to-one-and-many-to-many-relationships"><a class="self" href="#many-to-one-and-many-to-many-relationships">Many-to-One and Many-to-Many Relationships</a></h3>
+<span class="key-chip">many-to-one-and-many-to-many-relationships</span>
+
+<p>The stepper's steps 4–6 are this section's argument in pictures; the principle in words: <strong>whether you store an ID or a string is a question of duplication.</strong> An ID has no human meaning and therefore never needs to change; the meaningful text lives in exactly one place. Anything humans care about may need to change someday — and if it's duplicated, every copy must be updated: write overhead, plus the risk that some copies get missed and the data goes inconsistent. Removing that duplication is normalization. (The literature distinguishes several normal forms; the practical rule: if you're duplicating values that could live in one place, you're not normalized.) DBAs and developers love arguing normalization vs denormalization; the book suspends judgment until <a class="xref fwd" href="ch12-future-of-data-systems.html#combining-specialized-tools-by-deriving-data" data-tip="Ch 12 · Combining Specialized Tools by Deriving Data — systematic ways to handle caching, denormalization, and derived data · not yet written">Part III<sup>→12</sup></a> treats caching, denormalization, and derived data systematically.</p>
+
+<h3 id="are-document-databases-repeating-history"><a class="self" href="#are-document-databases-repeating-history">Are Document Databases Repeating History?</a></h3>
+<span class="key-chip">are-document-databases-repeating-history</span>
+
+<p>NoSQL reopened a debate that is older than most programmers: how to represent many-to-many relationships. The 1970s' best-selling business database — IBM's <strong>IMS</strong>, built for Apollo-program stock-keeping, released 1968, still running on mainframes today — used a <strong>hierarchical model</strong> remarkably like JSON: all data a tree of records nested in records. Like document databases, it handled one-to-many well, struggled with many-to-many, and had no joins; developers chose between duplicating data and manually resolving references. Two rival fixes were proposed, and "the great debate" between them consumed the 1970s:</p>
+
+<figure class="anim" id="anim-history">
+<svg viewBox="0 0 680 320" role="img" aria-label="The evolution of data models: IMS's hierarchical tree, CODASYL's network of pointers navigated by access paths, the relational model's flat tables with an automatic query optimizer, and document databases which nest one-to-many but reference many-to-many by ID.">
+  <!-- hierarchical -->
+  <g data-on="1">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">1968 · IMS · hierarchical model</text>
+    <rect x="280" y="50" width="120" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="300" y="70" font-size="10" font-family="ui-monospace,Menlo,monospace">user Lucy</text>
+    <rect x="120" y="120" width="120" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="132" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace">position</text>
+    <rect x="280" y="120" width="120" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="292" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace">education</text>
+    <rect x="440" y="120" width="120" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="452" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace">region: "Seattle"</text>
+    <g stroke="currentColor" stroke-opacity=".5"><line x1="340" y1="80" x2="180" y2="120"/><line x1="340" y1="80" x2="340" y2="120"/><line x1="340" y1="80" x2="500" y2="120"/></g>
+    <rect x="440" y="190" width="120" height="30" rx="5" fill="none" stroke="var(--bad)"/><text x="452" y="210" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">region: "Seattle"</text>
+    <text x="440" y="240" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">(duplicated under user Alain)</text>
+    <text x="20" y="290" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">every record has exactly one parent · one-to-many easy · many-to-many: duplicate, or resolve references by hand · no joins</text>
+  </g>
+  <!-- network -->
+  <g data-on="2">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">1970s · CODASYL · network model</text>
+    <rect x="120" y="50" width="120" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="140" y="70" font-size="10" font-family="ui-monospace,Menlo,monospace">user Lucy</text>
+    <rect x="440" y="50" width="120" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="460" y="70" font-size="10" font-family="ui-monospace,Menlo,monospace">user Alain</text>
+    <rect x="280" y="150" width="120" height="30" rx="5" fill="var(--write-soft)" stroke="var(--write)"/><text x="292" y="170" font-size="10" font-family="ui-monospace,Menlo,monospace">region: Seattle</text>
+    <g stroke="var(--write)" stroke-width="1.4" fill="none"><path d="M 180 82 C 200 120, 240 140, 276 160" marker-end="url(#arrW9)"/><path d="M 500 82 C 480 120, 440 140, 404 160" marker-end="url(#arrW9)"/></g>
+    <text x="150" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">pointer</text>
+    <text x="470" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">pointer</text>
+    <path d="M 40 230 L 120 230 L 180 82" fill="none" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#arrR9)"/>
+    <text x="30" y="250" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">cursor follows an ACCESS PATH from a root record</text>
+    <text x="20" y="290" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">records can have many parents; links are disk pointers · the programmer navigates paths by hand ("an n-dimensional data space")</text>
+    <text x="20" y="306" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">efficient on 1970s tape drives · query/update code complicated, inflexible; changing the model meant rewriting the paths</text>
+  </g>
+  <!-- relational -->
+  <g data-on="3">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">1970 → 1980s · relational model</text>
+    <rect x="40" y="50" width="200" height="80" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="52" y="70" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">users</text>
+    <text x="52" y="90" font-size="9" font-family="ui-monospace,Menlo,monospace">Lucy  │ region_id 91</text>
+    <text x="52" y="106" font-size="9" font-family="ui-monospace,Menlo,monospace">Alain │ region_id 91</text>
+    <rect x="300" y="50" width="200" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="312" y="70" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">regions</text>
+    <text x="312" y="90" font-size="9" font-family="ui-monospace,Menlo,monospace">91 │ Greater Seattle Area</text>
+    <rect x="200" y="170" width="280" height="60" rx="8" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="216" y="192" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">query optimizer</text>
+    <text x="216" y="210" font-size="9" font-family="ui-monospace,Menlo,monospace">picks the access path (indexes, join order) automatically</text>
+    <path d="M 340 168 L 340 114" stroke="var(--read)" stroke-width="1.4" marker-end="url(#arrR9)"/>
+    <path d="M 300 168 C 240 160, 200 140, 180 134" stroke="var(--read)" stroke-width="1.4" fill="none" marker-end="url(#arrR9)"/>
+    <text x="20" y="270" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">all data in the open: tables of rows, any row readable by any condition, joins on foreign keys at query time</text>
+    <text x="20" y="286" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">need a new query? add an index — no query rewrites. Build the optimizer ONCE; every application benefits.</text>
+  </g>
+  <!-- document -->
+  <g data-on="4">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">2010s · document databases</text>
+    <rect x="60" y="50" width="240" height="120" rx="8" fill="var(--read-soft)" stroke="var(--read)"/>
+    <text x="74" y="72" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">{ user: Lucy,</text>
+    <text x="74" y="92" font-size="10" font-family="ui-monospace,Menlo,monospace">  positions: [ … ],     ← nested (like IMS)</text>
+    <text x="74" y="112" font-size="10" font-family="ui-monospace,Menlo,monospace">  education: [ … ],</text>
+    <text x="74" y="132" font-size="10" font-family="ui-monospace,Menlo,monospace">  region_id: <tspan fill="var(--write)" font-weight="700">91</tspan> }        ← reference by ID</text>
+    <rect x="420" y="80" width="200" height="50" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="432" y="100" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">region 91</text>
+    <text x="432" y="118" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">Greater Seattle Area</text>
+    <path d="M 302 128 L 416 106" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW9)"/>
+    <text x="320" y="150" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">resolved at READ time</text>
+    <text x="320" y="164" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">(join or follow-up query)</text>
+    <text x="20" y="230" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">reverted to hierarchical in ONE respect: one-to-many nested inside the parent.</text>
+    <text x="20" y="246" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">for many-to-one / many-to-many: same as relational — a unique ID ("document reference" ≈ foreign key),</text>
+    <text x="20" y="262" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">resolved when read. Document databases have NOT gone the way of CODASYL's pointer paths.</text>
+  </g>
+  <!-- convergence -->
+  <g data-on="5">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">today · convergence</text>
+    <rect x="40" y="60" width="260" height="110" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="54" y="84" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">relational databases</text>
+    <text x="54" y="106" font-size="9" font-family="ui-monospace,Menlo,monospace">+ XML since mid-2000s (query &amp; index inside)</text>
+    <text x="54" y="122" font-size="9" font-family="ui-monospace,Menlo,monospace">+ JSON: PostgreSQL 9.3, MySQL 5.7, DB2 10.5</text>
+    <text x="54" y="150" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">(Codd's 1970 paper already allowed nested "nonsimple domains")</text>
+    <rect x="380" y="60" width="260" height="110" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="394" y="84" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">document databases</text>
+    <text x="394" y="106" font-size="9" font-family="ui-monospace,Menlo,monospace">+ RethinkDB: relational-style joins</text>
+    <text x="394" y="122" font-size="9" font-family="ui-monospace,Menlo,monospace">+ MongoDB drivers: auto-resolve references</text>
+    <text x="394" y="138" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".65">  (client-side join: extra round-trips, slower)</text>
+    <path d="M 304 115 L 376 115" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN9)"/>
+    <path d="M 376 125 L 304 125" stroke="currentColor" stroke-opacity=".6" stroke-width="1.6" marker-end="url(#arrN9)"/>
+    <text x="20" y="220" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">the models complement each other; a hybrid is the good route forward</text>
+  </g>
+  <defs>
+    <marker id="arrW9" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR9" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    <marker id="arrN9" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>HIERARCHICAL (IMS, 1968)</strong> Everything is a tree of records nested in records — structurally JSON, forty years early. One-to-many is natural; many-to-many forces you to duplicate (denormalize) or hand-resolve references; no joins. The 1970s' problems were today's document-database problems.</li>
+  <li><strong>NETWORK (CODASYL)</strong> A generalization: a record may have multiple parents, so one "Greater Seattle Area" record can be linked from every resident — many-to-one and many-to-many, solved. But links were disk pointers, and the <em>only</em> way to reach a record was to follow an <strong>access path</strong> from a root, moving a cursor record by record. With multiple paths to the same record, the programmer tracked them all in their head. Efficient on tape drives; the code was complicated, inflexible, and any change to the data model meant rewriting handwritten path-following code.</li>
+  <li><strong>RELATIONAL</strong> Lay everything out in the open: a table is just a collection of rows. No nesting, no paths; read any rows matching any condition, look up by key, insert into any table without worrying about relationships. The access path still exists — but the <strong>query optimizer</strong> chooses it, automatically. Want to query a new way? Declare an index; queries pick it up unchanged. Optimizers are complicated beasts — but you build one <em>once</em>, and every application benefits. That's why the general solution won.</li>
+  <li><strong>DOCUMENT</strong> Document databases reverted to the hierarchical model in one respect — nesting one-to-many records inside the parent. For many-to-one and many-to-many they are <em>not</em> CODASYL: like relational databases they reference by unique ID (a <em>document reference</em> ≈ foreign key), resolved at read time with a join or follow-up query.</li>
+  <li><strong>CONVERGENCE</strong> Relational databases gained XML and then JSON columns with indexing and in-document queries; document databases gained joins (RethinkDB) and reference resolution (MongoDB drivers, client-side). The models complement each other; hybrids that handle document-like data <em>and</em> relational queries on it are the good route forward.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · why the optimizer was the real invention</span>
+CODASYL asked every programmer to be a navigator, memorizing routes through the data. The relational model hired one professional navigator — the query optimizer — and gave it a map (indexes, statistics). Hand-picking a route for one trip is easier than building a navigator; but you make a million trips, and the roads keep changing. The general-purpose navigator wins in the long run, and everyone gets it for free.</div>
+
+<h3 id="relational-versus-document-databases-today"><a class="self" href="#relational-versus-document-databases-today">Relational Versus Document Databases Today</a></h3>
+<span class="key-chip">relational-versus-document-databases-today</span>
+
+<p>Beyond data models, the two families also differ in fault tolerance (<a class="xref fwd" href="ch05-replication.html" data-tip="Ch 5 · Replication — how databases keep copies and what guarantees they give · not yet written">Chapter&nbsp;5<sup>→5</sup></a>) and concurrency (<a class="xref fwd" href="ch07-transactions.html" data-tip="Ch 7 · Transactions — isolation and concurrency control · not yet written">Chapter&nbsp;7<sup>→7</sup></a>); here, data model only. The document model's case: <strong>schema flexibility, locality, closeness to application data structures</strong>. The relational case: <strong>joins, many-to-one and many-to-many</strong>.</p>
+
+<h4>Which model gives simpler application code?</h4>
+<p>If your data is document-shaped — a tree of one-to-many relationships, typically loaded whole — the document model is probably right; <em>shredding</em> it across tables makes cumbersome schemas and complicated code. The document model's own limits: you can't point directly at a nested item ("the second position of user 251" — an access path in miniature), tolerable while nesting is shallow; and weak joins may not matter (an analytics app logging events may never need many-to-many). But <strong>if you do have many-to-many relationships, documents get ugly</strong>: denormalize and keep copies consistent in application code, or emulate joins with multiple requests — more complex code and worse performance than a database join. No general answer exists; it depends on the relationships in your data. For highly interconnected data: document awkward, relational acceptable, graph most natural.</p>
+
+<h4 id="schema-flexibility">Schema flexibility in the document model</h4>
+<p>Document databases (and JSON columns) enforce no schema; anything can be written, and readers get no guarantees about fields. "Schemaless" is misleading — the <em>code</em> that reads the data assumes a structure, so there's an implicit schema the database doesn't enforce. Better terms: <strong>schema-on-read</strong> (structure implicit, interpreted when read) vs <strong>schema-on-write</strong> (explicit schema, enforced on every write). The analogy: dynamic vs static type checking — and equally contentious, with no right answer.</p>
+
+<div class="tablewrap"><table>
+<tr><th>splitting <code>name</code> into <code>first_name</code> + <code>last_name</code></th><th>schema-on-read (document)</th><th>schema-on-write (relational)</th></tr>
+<tr><td>How</td><td>Start writing new documents with the new field; reading code handles old ones:<br><code>if (user &amp;&amp; user.name &amp;&amp; !user.first_name) user.first_name = user.name.split(" ")[0];</code></td><td>Migrate: <code>ALTER TABLE users ADD COLUMN first_name text;</code> then <code>UPDATE users SET first_name = split_part(name,' ',1);</code></td></tr>
+<tr><td>Cost</td><td>Nothing up front; every reader carries the compatibility branch forever (or until backfilled)</td><td><code>ALTER TABLE</code> is milliseconds on most databases (MySQL is the exception: it copies the whole table — hence tools like pt-online-schema-change, gh-ost). The <code>UPDATE</code> rewrites every row and is slow anywhere — so leave it NULL and fill on read, document-style, if needed</td></tr>
+<tr><td>Best when</td><td>Data is heterogeneous: many object types that shouldn't each get a table; structure dictated by external systems you don't control</td><td>All records share a structure: the schema documents and enforces it</td></tr>
+</table></div>
+
+<p>Schemas and their evolution get the full treatment in <a class="xref fwd" href="ch04-encoding-and-evolution.html#the-merits-of-schemas" data-tip="Ch 4 · The Merits of Schemas — why explicit schemas help, and how they evolve compatibly · not yet written">Chapter&nbsp;4<sup>→4</sup></a>.</p>
+
+<h4 id="data-locality">Data locality for queries</h4>
+<p>A document is stored as one continuous string (JSON, XML, or a binary variant like BSON). If you usually need the whole document — rendering a page — that <strong>locality</strong> wins: multi-table data requires several index lookups and disk seeks. But locality only pays if you need <em>most</em> of the document: the database loads all of it even for a small piece, and updates usually rewrite the whole thing — only same-size changes can happen in place. Hence the advice: keep documents small, avoid writes that grow them. Note that locality isn't document-exclusive: Spanner interleaves child rows within a parent table in a relational schema; Oracle has multi-table index cluster tables; Bigtable's column families (Cassandra, HBase) serve the same purpose — see <a class="xref fwd" href="ch03-storage-and-retrieval.html#column-oriented-storage" data-tip="Ch 3 · Column-Oriented Storage — including why Bigtable 'column families' are really row-oriented locality groups">Chapter&nbsp;3<sup>→3</sup></a>.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · the debate declared settled, and migrations matured</span>
+The 2nd edition treats relational-vs-NoSQL as a <strong>convergence that already happened</strong>, citing Stonebraker and Pavlo's 2024 sequel <em>"What Goes Around Comes Around… And Around…"</em> — the argument that the relational model absorbed each challenger's good ideas. Schema-on-read vs schema-on-write remains the framing, now paired with modern <strong>online schema-migration tooling</strong> (gh-ost, pgroll) that removes much of the old "schema changes need downtime" fear.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="query-languages-for-data">
+<span class="key-chip">query-languages-for-data</span>
+<h2><a class="self" href="#query-languages-for-data">Query Languages for Data</a></h2>
+
+<p>The relational model brought not just a new data model but a new way of asking: SQL is <strong>declarative</strong>, where IMS and CODASYL were queried with <strong>imperative</strong> code. Imperative code tells the computer which operations to perform in which order; a declarative query states the <em>pattern</em> of the data you want — conditions, transformations (sort, group, aggregate) — and leaves the <em>how</em> to the optimizer:</p>
+
+<figure class="anim" id="anim-declarative">
+<svg viewBox="0 0 680 300" role="img" aria-label="Imperative code loops over animals in storage order to collect sharks, while the declarative query states only the pattern; when the database reorders records the imperative code may break and the declarative query cannot, and only the declarative query can be split across cores.">
+  <rect x="20" y="20" width="300" height="130" rx="6" fill="var(--code-bg)"/>
+  <text x="32" y="42" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">imperative</text>
+  <text x="32" y="62" font-size="10" font-family="ui-monospace,Menlo,monospace">var sharks = [];</text>
+  <text x="32" y="78" font-size="10" font-family="ui-monospace,Menlo,monospace">for (i = 0; i &lt; animals.length; i++)</text>
+  <text x="32" y="94" font-size="10" font-family="ui-monospace,Menlo,monospace">  if (animals[i].family === "Sharks")</text>
+  <text x="32" y="110" font-size="10" font-family="ui-monospace,Menlo,monospace">    sharks.push(animals[i]);</text>
+  <text x="32" y="126" font-size="10" font-family="ui-monospace,Menlo,monospace">return sharks;</text>
+  <rect x="360" y="20" width="300" height="130" rx="6" fill="var(--code-bg)"/>
+  <text x="372" y="42" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">declarative</text>
+  <text x="372" y="70" font-size="11" font-family="ui-monospace,Menlo,monospace">sharks = σ<tspan font-size="8" baseline-shift="sub">family = "Sharks"</tspan>(animals)</text>
+  <text x="372" y="100" font-size="11" font-family="ui-monospace,Menlo,monospace">SELECT * FROM animals</text>
+  <text x="372" y="116" font-size="11" font-family="ui-monospace,Menlo,monospace">WHERE family = 'Sharks';</text>
+  <!-- storage rows -->
+  <text x="20" y="180" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".6">animals, storage order:</text>
+  <g data-on="1-2">
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="190" width="70" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="26" y="204">tiger shark</text>
+      <rect x="96" y="190" width="70" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="102" y="204">blue whale</text>
+      <rect x="172" y="190" width="70" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="178" y="204">hammerhead</text>
+      <rect x="248" y="190" width="70" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="254" y="204">fin whale</text>
+    </g>
+  </g>
+  <g data-on="1" data-hot="1">
+    <path d="M 20 226 L 320 226" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR10)"/>
+    <text x="20" y="244" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">loop visits records one by one, in this order</text>
+  </g>
+  <g data-on="2" data-hot="2">
+    <text x="360" y="204" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">"the ones where family = Sharks" — no order, no steps</text>
+    <text x="360" y="224" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">optimizer decides: which index, which join method, what order</text>
+  </g>
+  <g data-on="3">
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="190" width="70" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="204">fin whale</text>
+      <rect x="96" y="190" width="70" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="102" y="204">hammerhead</text>
+      <rect x="172" y="190" width="70" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="178" y="204">tiger shark</text>
+      <rect x="248" y="190" width="70" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="254" y="204">blue whale</text>
+    </g>
+    <text x="20" y="232" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">database compacts disk space → records move → order changes</text>
+    <text x="20" y="252" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">imperative: did the code rely on the order? the DB can't know</text>
+    <text x="360" y="252" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">declarative: no ordering promised → safe to move</text>
+  </g>
+  <g data-on="4">
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="360" y="190" width="140" height="20" rx="3" fill="var(--read-soft)" stroke="var(--read)"/><text x="366" y="204">core 1: rows 1–500k</text>
+      <rect x="510" y="190" width="150" height="20" rx="3" fill="var(--read-soft)" stroke="var(--read)"/><text x="516" y="204">core 2: rows 500k–1M</text>
+    </g>
+    <text x="360" y="232" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">declarative: only the result pattern is specified → the DB may run it in parallel</text>
+    <text x="20" y="204" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">imperative: "instructions in this order" → hard to split across cores/machines</text>
+    <text x="20" y="280" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">CPUs get faster by adding cores, not clock speed — the declarative bet keeps paying off</text>
+  </g>
+  <defs><marker id="arrR10" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>IMPERATIVE</strong> Step through the list in storage order, test each record, push matches. You can picture it executing line by line — and that picture <em>is</em> the specification: order, variables, control flow, all fixed.</li>
+  <li><strong>DECLARATIVE</strong> Relational algebra's σ (selection) and SQL state the pattern only: rows where <code>family = 'Sharks'</code>. Concise, easier to work with — and the database decides indexes, join methods, and execution order.</li>
+  <li><strong>WHY IT MATTERS: HIDING IMPLEMENTATION</strong> The database wants to reclaim disk space and move records, changing their order. The SQL query promised no ordering, so nothing breaks. The imperative code <em>might</em> depend on order — the database can never be sure — so it's stuck. SQL's <em>limited</em> expressiveness is exactly what gives the engine room to optimize without changing your queries.</li>
+  <li><strong>WHY IT MATTERS: PARALLELISM</strong> CPUs now get faster by adding cores, not clock speed. Imperative code specifies an order and resists parallelization across cores and machines; a declarative query specifies only the result, so the database is free to compute it in parallel.</li>
+</ol>
+</figure>
+
+<h3 id="declarative-queries-on-the-web"><a class="self" href="#declarative-queries-on-the-web">Declarative Queries on the Web</a></h3>
+<span class="key-chip">declarative-queries-on-the-web</span>
+
+<p>The same advantage shows up far from databases. In a web page about ocean animals, the currently selected navigation item is marked <code>&lt;li class="selected"&gt;</code>; you want its title <code>&lt;p&gt;</code> highlighted blue. CSS says it declaratively — <code>li.selected &gt; p { background-color: blue; }</code> — a pattern: every <code>&lt;p&gt;</code> whose direct parent is an <code>&lt;li&gt;</code> with class <code>selected</code>. XSL does the same with an XPath pattern (<code>li[@class='selected']/p</code>). The imperative alternative — JavaScript walking <code>getElementsByTagName("li")</code>, checking classes, walking child nodes, calling <code>setAttribute("style", …)</code> — is longer, harder to read, and has real bugs: when the <code>selected</code> class moves, the blue stays (CSS removes it automatically the moment the rule stops matching); and if a faster API appears (<code>getElementsByClassName</code>, <code>document.evaluate()</code>), you must rewrite the code — whereas browser vendors speed up CSS and XPath under you without breaking anything. Declarative CSS beats imperative DOM manipulation for exactly the reasons SQL beat CODASYL's COBOL cursors.</p>
+
+<h3 id="mapreduce-querying"><a class="self" href="#mapreduce-querying">MapReduce Querying</a></h3>
+<span class="key-chip">mapreduce-querying</span>
+
+<p><strong>MapReduce</strong> is Google's programming model for bulk processing across many machines (the full story is <a class="xref fwd" href="ch10-batch-processing.html#mapreduce-and-distributed-filesystems" data-tip="Ch 10 · MapReduce and Distributed Filesystems — the batch-processing model in full · not yet written">Chapter&nbsp;10<sup>→10</sup></a>); MongoDB and CouchDB support a limited form for read-only queries across documents. It sits <em>between</em> declarative and imperative: the query logic is snippets of code the framework calls repeatedly — the <code>map</code> (collect) and <code>reduce</code> (fold/inject) functions from functional programming. The example: a marine biologist logs sightings and wants sharks seen per month.</p>
+
+<figure class="anim" id="anim-mapreduce">
+<svg viewBox="0 0 680 320" role="img" aria-label="MapReduce over observation documents: a declarative filter keeps sharks, map emits a year-month key with the animal count, emitted pairs are grouped by key, reduce sums each group, and the aggregation pipeline expresses the same query declaratively.">
+  <!-- docs -->
+  <g data-on="1-5">
+    <text x="20" y="20" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">observations</text>
+    <rect x="20" y="28" width="190" height="46" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="28" y="46" font-size="9" font-family="ui-monospace,Menlo,monospace">1995-12-25 · Sharks</text><text x="28" y="62" font-size="9" font-family="ui-monospace,Menlo,monospace">Carcharodon carcharias · 3</text>
+    <rect x="20" y="82" width="190" height="46" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="28" y="100" font-size="9" font-family="ui-monospace,Menlo,monospace">1995-12-12 · Sharks</text><text x="28" y="116" font-size="9" font-family="ui-monospace,Menlo,monospace">Carcharias taurus · 4</text>
+    <rect x="20" y="136" width="190" height="46" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="28" y="154" font-size="9" font-family="ui-monospace,Menlo,monospace">1996-01-03 · Sharks</text><text x="28" y="170" font-size="9" font-family="ui-monospace,Menlo,monospace">Sphyrna mokarran · 2</text>
+  </g>
+  <g data-on="1">
+    <rect x="20" y="190" width="190" height="46" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="28" y="208" font-size="9" font-family="ui-monospace,Menlo,monospace">1995-12-30 · Whales</text><text x="28" y="224" font-size="9" font-family="ui-monospace,Menlo,monospace">Balaenoptera musculus · 1</text>
+  </g>
+  <g data-on="2" data-hot="2">
+    <rect x="20" y="190" width="190" height="46" rx="5" fill="none" stroke="var(--bad)" stroke-dasharray="4 3"/>
+    <text x="28" y="208" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".4">1995-12-30 · Whales</text>
+    <text x="28" y="224" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">dropped by query: {family: "Sharks"}</text>
+    <text x="230" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">declarative filter first</text>
+    <text x="230" y="76" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">(MongoDB extension to MapReduce)</text>
+  </g>
+  <!-- map -->
+  <g data-on="3-5" data-hot="3">
+    <rect x="250" y="28" width="150" height="154" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="262" y="48" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">map(doc)</text>
+    <text x="262" y="66" font-size="9" font-family="ui-monospace,Menlo,monospace">emit(year+"-"+month,</text>
+    <text x="262" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">     numAnimals)</text>
+    <text x="262" y="112" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">("1995-12", 3)</text>
+    <text x="262" y="134" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">("1995-12", 4)</text>
+    <text x="262" y="156" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">("1996-1", 2)</text>
+    <g stroke="var(--write)" stroke-width="1.2" fill="none"><path d="M 212 51 L 246 51" marker-end="url(#arrW11)"/><path d="M 212 105 L 246 105" marker-end="url(#arrW11)"/><path d="M 212 159 L 246 159" marker-end="url(#arrW11)"/></g>
+    <text x="262" y="176" font-size="8" font-family="ui-monospace,Menlo,monospace" opacity=".6">called once per matching doc</text>
+  </g>
+  <!-- group -->
+  <g data-on="4-5" data-hot="4">
+    <rect x="430" y="28" width="110" height="154" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="440" y="48" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">group by key</text>
+    <text x="440" y="90" font-size="10" font-family="ui-monospace,Menlo,monospace">"1995-12"</text>
+    <text x="440" y="106" font-size="10" font-family="ui-monospace,Menlo,monospace">  → [3, 4]</text>
+    <text x="440" y="146" font-size="10" font-family="ui-monospace,Menlo,monospace">"1996-1"</text>
+    <text x="440" y="162" font-size="10" font-family="ui-monospace,Menlo,monospace">  → [2]</text>
+    <path d="M 402 120 L 426 100" stroke="currentColor" stroke-opacity=".6" stroke-width="1.2" marker-end="url(#arrN11)"/>
+    <path d="M 402 130 L 426 150" stroke="currentColor" stroke-opacity=".6" stroke-width="1.2" marker-end="url(#arrN11)"/>
+  </g>
+  <!-- reduce -->
+  <g data-on="5" data-hot="5">
+    <rect x="560" y="28" width="110" height="154" rx="6" fill="var(--read-soft)" stroke="var(--read)"/>
+    <text x="570" y="48" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">reduce(k, vs)</text>
+    <text x="570" y="64" font-size="9" font-family="ui-monospace,Menlo,monospace">Array.sum(vs)</text>
+    <text x="570" y="100" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">1995-12: 7</text>
+    <text x="570" y="156" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">1996-1: 2</text>
+    <path d="M 542 100 L 556 100" stroke="var(--read)" stroke-width="1.2" marker-end="url(#arrR11)"/>
+    <path d="M 542 156 L 556 156" stroke="var(--read)" stroke-width="1.2" marker-end="url(#arrR11)"/>
+    <text x="250" y="212" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".75">→ written to collection monthlySharkReport. map/reduce must be PURE: no side effects,</text>
+    <text x="250" y="226" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".75">no extra queries — so the DB may run them anywhere, in any order, and rerun on failure.</text>
+  </g>
+  <!-- pipeline -->
+  <g data-on="6">
+    <rect x="20" y="20" width="310" height="180" rx="6" fill="var(--code-bg)"/>
+    <text x="32" y="42" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">SQL (PostgreSQL)</text>
+    <text x="32" y="64" font-size="9" font-family="ui-monospace,Menlo,monospace">SELECT date_trunc('month', observation_timestamp)</text>
+    <text x="32" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">         AS observation_month,</text>
+    <text x="32" y="96" font-size="9" font-family="ui-monospace,Menlo,monospace">       sum(num_animals) AS total_animals</text>
+    <text x="32" y="112" font-size="9" font-family="ui-monospace,Menlo,monospace">FROM observations</text>
+    <text x="32" y="128" font-size="9" font-family="ui-monospace,Menlo,monospace">WHERE family = 'Sharks'</text>
+    <text x="32" y="144" font-size="9" font-family="ui-monospace,Menlo,monospace">GROUP BY observation_month;</text>
+    <rect x="350" y="20" width="320" height="180" rx="6" fill="var(--code-bg)"/>
+    <text x="362" y="42" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">MongoDB aggregation pipeline (2.2+)</text>
+    <text x="362" y="64" font-size="9" font-family="ui-monospace,Menlo,monospace">db.observations.aggregate([</text>
+    <text x="362" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">  { $match: { family: "Sharks" } },</text>
+    <text x="362" y="96" font-size="9" font-family="ui-monospace,Menlo,monospace">  { $group: {</text>
+    <text x="362" y="112" font-size="9" font-family="ui-monospace,Menlo,monospace">      _id: { year:  { $year:  "$observationTimestamp" },</text>
+    <text x="362" y="128" font-size="9" font-family="ui-monospace,Menlo,monospace">             month: { $month: "$observationTimestamp" } },</text>
+    <text x="362" y="144" font-size="9" font-family="ui-monospace,Menlo,monospace">      totalAnimals: { $sum: "$numAnimals" } } }</text>
+    <text x="362" y="160" font-size="9" font-family="ui-monospace,Menlo,monospace">]);</text>
+    <text x="20" y="240" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">same expressiveness, JSON syntax instead of English-sentence syntax</text>
+    <text x="20" y="262" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">moral: a NoSQL system may find itself accidentally reinventing SQL, in disguise</text>
+  </g>
+  <defs>
+    <marker id="arrW11" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR11" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    <marker id="arrN11" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE DATA</strong> One observation document per sighting: timestamp, family, species, number of animals. Goal: sharks sighted per calendar month.</li>
+  <li><strong>FILTER</strong> MongoDB lets the filter (<code>query: {family: "Sharks"}</code>) be declared up front — the whale record is never seen by the code that follows.</li>
+  <li><strong>MAP</strong> The JavaScript <code>map</code> runs once per matching document with <code>this</code> bound to it, and <em>emits</em> a key–value pair: the key <code>"1995-12"</code> (year-month), the value <code>numAnimals</code>.</li>
+  <li><strong>GROUP</strong> The framework groups all emitted pairs by key: <code>"1995-12" → [3, 4]</code>, <code>"1996-1" → [2]</code>.</li>
+  <li><strong>REDUCE</strong> <code>reduce(key, values)</code> is called once per key and sums the values: 7 and 2, written to the output collection. Map and reduce must be <strong>pure functions</strong> — input only, no extra queries, no side effects — which is what lets the database run them anywhere, in any order, and rerun them after failures.</li>
+  <li><strong>THE MORAL</strong> Writing two carefully coordinated functions is harder than one query, and a declarative language gives the optimizer far more to work with — so MongoDB 2.2 added the <strong>aggregation pipeline</strong>: <code>$match</code>, <code>$group</code>, <code>$sum</code> — SQL's expressiveness in JSON clothing. (SQL itself isn't single-machine bound, and MapReduce has no monopoly on distributed execution; higher-level languages can compile to it, as Chapter 10 shows.)</li>
+</ol>
+</figure>
+
+<div class="ed2"><span class="tag">2ND EDITION · MapReduce querying is gone; GraphQL arrives</span>
+Consistent with the book-wide demotion of MapReduce, the 2nd edition drops this MongoDB MapReduce section — the aggregation pipeline is the story now. In its place among query languages: <strong>GraphQL</strong>, treated as a query language for the application/API layer, with its critiques.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="graph-like-data-models">
+<span class="key-chip">graph-like-data-models</span>
+<h2><a class="self" href="#graph-like-data-models">Graph-Like Data Models</a></h2>
+
+<p>Mostly one-to-many (trees) or no relationships? Document model. Many-to-many everywhere? The relational model handles the simple cases, but as connections get complex it becomes natural to model data as a <strong>graph</strong>: <em>vertices</em> (nodes, entities) and <em>edges</em> (relationships, arcs). Homogeneous examples: social graphs (people, who-knows-whom), the web graph (pages, links — PageRank), road and rail networks (junctions, roads — shortest path). But graphs are equally powerful for <em>heterogeneous</em> data in one store: Facebook's single graph holds people, locations, events, checkins, comments, with edges for friendship, checkin-at-location, commented-on, attended.</p>
+
+<p>The book's example graph: <strong>Lucy</strong> from Idaho and <strong>Alain</strong> from Beaune, France — married, living in London. Two related models (<em>property graph</em>: Neo4j, Titan, InfiniteGraph; <em>triple-store</em>: Datomic, AllegroGraph) and three declarative query languages (Cypher, SPARQL, Datalog); imperative graph languages (Gremlin) and graph processing frameworks (Pregel, <a class="xref fwd" href="ch10-batch-processing.html#graphs-and-iterative-processing" data-tip="Ch 10 · Graphs and Iterative Processing — Pregel-style bulk synchronous graph algorithms · not yet written">Chapter&nbsp;10<sup>→10</sup></a>) exist too.</p>
+
+<h3 id="property-graphs"><a class="self" href="#property-graphs">Property Graphs</a></h3>
+<span class="key-chip">property-graphs</span>
+
+<p>Each <strong>vertex</strong>: a unique ID, outgoing edges, incoming edges, and properties (key–value pairs). Each <strong>edge</strong>: a unique ID, the <em>tail</em> vertex (start), the <em>head</em> vertex (end), a <em>label</em> naming the relationship, and properties. You can picture the whole store as two relational tables:</p>
+
+<pre><code>CREATE TABLE vertices (vertex_id integer PRIMARY KEY, properties json);
+CREATE TABLE edges (
+    edge_id     integer PRIMARY KEY,
+    tail_vertex integer REFERENCES vertices (vertex_id),
+    head_vertex integer REFERENCES vertices (vertex_id),
+    label       text,
+    properties  json
+);
+CREATE INDEX edges_tails ON edges (tail_vertex);
+CREATE INDEX edges_heads ON edges (head_vertex);</code></pre>
+
+<p>Three properties make the model flexible: (1) <strong>any vertex may connect to any other</strong> — no schema restricts what associates with what; (2) given a vertex you can efficiently find incoming <em>and</em> outgoing edges and so traverse forward and backward (hence indexes on both columns); (3) <strong>labels</strong> let one graph hold many kinds of relationship cleanly. The example graph shows what a relational schema would strain at: different regional structures per country (France's départements and régions vs US counties and states), a country within a country, and varying granularity (Lucy lives in a city but was born "in Idaho"). Add allergens as vertices and food-contains edges, and "what can each person safely eat" is a query. <strong>Graphs are good for evolvability</strong> — new features extend the graph without restructuring it.</p>
+
+<h3 id="the-cypher-query-language"><a class="self" href="#the-cypher-query-language">The Cypher Query Language</a></h3>
+<span class="key-chip">the-cypher-query-language</span>
+
+<p><strong>Cypher</strong> is Neo4j's declarative language for property graphs (named for a <em>Matrix</em> character, nothing to do with ciphers). Creating data uses an arrow notation: <code>(Idaho) -[:WITHIN]-&gt; (USA)</code> makes a WITHIN edge from tail Idaho to head USA. Querying uses the same arrows as <em>patterns</em> in a <code>MATCH</code> clause. The book's question: <em>find everyone who emigrated from the United States to Europe</em>.</p>
+
+<figure class="anim" id="anim-graph">
+<svg viewBox="0 0 680 380" role="img" aria-label="A property graph of Lucy and Alain with location hierarchies; a Cypher query matches people born within the United States who live within Europe by following BORN_IN, LIVES_IN, and variable-length WITHIN edges; the optimizer may equally start from the location vertices and work backward.">
+  <!-- vertices -->
+  <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="20" width="96" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="30" y="37">North America</text>
+    <rect x="30" y="80" width="86" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="40" y="97">United States</text>
+    <rect x="46" y="140" width="60" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="60" y="157">Idaho</text>
+    <rect x="290" y="20" width="70" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="306" y="37">Europe</text>
+    <rect x="240" y="80" width="60" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="248" y="97">England</text>
+    <rect x="250" y="140" width="60" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="262" y="157">London</text>
+    <rect x="400" y="80" width="60" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="410" y="97">France</text>
+    <rect x="390" y="140" width="80" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="396" y="157">Bourgogne</text>
+    <rect x="400" y="200" width="60" height="26" rx="13" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="410" y="217">Beaune</text>
+    <rect x="80" y="250" width="70" height="30" rx="6" fill="var(--panel2)" stroke="currentColor"/><text x="98" y="269" font-weight="700">Lucy</text>
+    <rect x="330" y="290" width="70" height="30" rx="6" fill="var(--panel2)" stroke="currentColor"/><text x="346" y="309" font-weight="700">Alain</text>
+  </g>
+  <!-- edges -->
+  <g stroke="currentColor" stroke-opacity=".5" fill="none" stroke-width="1.2">
+    <path d="M 74 80 L 70 46"/><path d="M 76 140 L 74 106"/>
+    <path d="M 275 80 L 310 46"/><path d="M 278 140 L 272 106"/>
+    <path d="M 420 80 L 340 46"/><path d="M 430 140 L 430 106"/><path d="M 430 200 L 430 166"/>
+    <path d="M 100 250 L 78 166"/><path d="M 140 252 L 254 166"/>
+    <path d="M 390 290 L 428 226"/><path d="M 330 292 L 290 166"/>
+    <path d="M 152 265 L 328 300"/>
+  </g>
+  <g font-size="7" font-family="ui-monospace,Menlo,monospace" opacity=".6">
+    <text x="78" y="66">WITHIN</text><text x="82" y="126">WITHIN</text><text x="286" y="66">WITHIN</text><text x="282" y="126">WITHIN</text><text x="370" y="60">WITHIN</text><text x="434" y="126">WITHIN</text><text x="434" y="186">WITHIN</text>
+    <text x="52" y="214">BORN_IN</text><text x="190" y="200">LIVES_IN</text><text x="404" y="262">BORN_IN</text><text x="288" y="236">LIVES_IN</text><text x="220" y="290">MARRIED_TO</text>
+  </g>
+  <!-- query -->
+  <g data-on="2-6">
+    <rect x="490" y="20" width="180" height="112" rx="6" fill="var(--code-bg)"/>
+    <text x="498" y="38" font-size="8" font-family="ui-monospace,Menlo,monospace" font-weight="700">MATCH</text>
+    <text x="498" y="52" font-size="7.5" font-family="ui-monospace,Menlo,monospace">(person) -[:BORN_IN]-&gt; ()</text>
+    <text x="498" y="64" font-size="7.5" font-family="ui-monospace,Menlo,monospace">  -[:WITHIN*0..]-&gt; (us {name:'United States'}),</text>
+    <text x="498" y="80" font-size="7.5" font-family="ui-monospace,Menlo,monospace">(person) -[:LIVES_IN]-&gt; ()</text>
+    <text x="498" y="92" font-size="7.5" font-family="ui-monospace,Menlo,monospace">  -[:WITHIN*0..]-&gt; (eu {name:'Europe'})</text>
+    <text x="498" y="112" font-size="8" font-family="ui-monospace,Menlo,monospace" font-weight="700">RETURN person.name</text>
+  </g>
+  <!-- forward: Lucy born -->
+  <g data-on="3-4" data-hot="3">
+    <path d="M 100 250 L 78 166" stroke="var(--read)" stroke-width="2.4" fill="none"/>
+    <path d="M 76 140 L 74 106" stroke="var(--read)" stroke-width="2.4" fill="none"/>
+    <rect x="30" y="80" width="86" height="26" rx="13" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.6"/>
+    <text x="40" y="97" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">United States ✓</text>
+  </g>
+  <g data-on="3">
+    <text x="20" y="340" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">Lucy -BORN_IN→ Idaho -WITHIN→ United States  ✓ (WITHIN* matched 1 hop)</text>
+  </g>
+  <!-- forward: Lucy lives -->
+  <g data-on="4" data-hot="4">
+    <path d="M 140 252 L 254 166" stroke="var(--read)" stroke-width="2.4" fill="none"/>
+    <path d="M 278 140 L 272 106" stroke="var(--read)" stroke-width="2.4" fill="none"/>
+    <path d="M 275 80 L 310 46" stroke="var(--read)" stroke-width="2.4" fill="none"/>
+    <rect x="290" y="20" width="70" height="26" rx="13" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.6"/>
+    <text x="306" y="37" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">Europe ✓</text>
+    <text x="20" y="340" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">Lucy -LIVES_IN→ London -WITHIN→ England -WITHIN→ Europe  ✓ (2 hops)  ⇒ RETURN "Lucy"</text>
+    <text x="20" y="360" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">Alain: BORN_IN Beaune → Bourgogne → France → Europe — never reaches United States ✗</text>
+  </g>
+  <!-- backward -->
+  <g data-on="5" data-hot="5">
+    <rect x="30" y="80" width="86" height="26" rx="13" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.6"/>
+    <rect x="290" y="20" width="70" height="26" rx="13" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.6"/>
+    <g stroke="var(--write)" stroke-width="2.2" fill="none" stroke-dasharray="5 3">
+      <path d="M 74 106 L 76 140"/><path d="M 78 166 L 100 250"/>
+      <path d="M 310 46 L 275 80"/><path d="M 272 106 L 278 140"/><path d="M 254 166 L 140 252"/>
+      <path d="M 340 46 L 420 80"/><path d="M 430 106 L 430 140"/><path d="M 430 166 L 430 200"/><path d="M 428 226 L 390 290"/><path d="M 290 166 L 330 292"/>
+    </g>
+    <text x="20" y="340" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">alternative plan: index lookup on name → US and Europe vertices; follow INCOMING WITHIN edges to</text>
+    <text x="20" y="356" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">enumerate all their locations; then incoming BORN_IN / LIVES_IN to find people; intersect. Same answer.</text>
+  </g>
+  <g data-on="6">
+    <text x="20" y="340" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">Cypher: 4 lines · SPARQL: 4 lines · SQL with WITH RECURSIVE: 29 lines</text>
+    <text x="20" y="358" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">you never specify the plan — the optimizer picks forward, backward, or something else</text>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE GRAPH</strong> Vertices are people and locations; labeled edges express BORN_IN, LIVES_IN, MARRIED_TO, and WITHIN (the location hierarchy). Note the irregularities a relational schema would resist: England → Europe skips a "country" level the French side has, and Lucy's birthplace is a state while her residence is a city.</li>
+  <li><strong>THE QUERY</strong> <code>MATCH</code> uses the same arrow notation to describe a <em>pattern</em>: a <code>person</code> with a BORN_IN edge to some vertex from which a chain of zero or more WITHIN edges (<code>*0..</code>, like a regex <code>*</code>) reaches the vertex named "United States"; and a LIVES_IN edge whose WITHIN chain reaches "Europe". Return their names.</li>
+  <li><strong>FORWARD EXECUTION, PART 1</strong> One way to run it: scan people. Lucy: BORN_IN → Idaho, WITHIN → United States. First condition satisfied after one hop.</li>
+  <li><strong>FORWARD EXECUTION, PART 2</strong> Lucy: LIVES_IN → London, WITHIN → England, WITHIN → Europe — two hops this time; <code>*0..</code> absorbs the difference. Both conditions hold: return "Lucy". Alain's BORN_IN chain ends in Europe, not the US: no match.</li>
+  <li><strong>BACKWARD EXECUTION</strong> Equally valid: if <code>name</code> is indexed, find the US and Europe vertices directly, follow <em>incoming</em> WITHIN edges to enumerate every location inside each, then incoming BORN_IN / LIVES_IN edges to reach people, and intersect. This is why property graphs index both tail and head.</li>
+  <li><strong>DECLARATIVE PAYOFF</strong> You write the pattern; the optimizer chooses the strategy predicted to be cheapest. The same question takes 4 lines in Cypher or SPARQL and 29 in SQL — not because SQL is bad, but because data models are built for different uses.</li>
+</ol>
+</figure>
+
+<h3 id="graph-queries-in-sql"><a class="self" href="#graph-queries-in-sql">Graph Queries in SQL</a></h3>
+<span class="key-chip">graph-queries-in-sql</span>
+
+<p>Graph data fits in relational tables — can SQL query it? Yes, with difficulty. In a relational query you normally know in advance which joins you need; a graph traversal may cross a <em>variable</em> number of edges — a LIVES_IN edge may point at a street, city, region, or country, each nested WITHIN others to different depths. Cypher's <code>:WITHIN*0..</code> says "zero or more" in six characters. Since SQL:1999 the same idea is expressible via <strong>recursive common table expressions</strong> (<code>WITH RECURSIVE</code>): build the set <code>in_usa</code> starting from the vertex named "United States" and repeatedly adding the tail vertices of incoming <code>within</code> edges until nothing new appears; likewise <code>in_europe</code>; then <code>born_in_usa</code> and <code>lives_in_europe</code> by following the incoming <code>born_in</code>/<code>lives_in</code> edges; finally join the two people-sets. Supported in PostgreSQL, DB2, Oracle, SQL Server — and about 29 lines to Cypher's 4. The lesson isn't that SQL loses; it's that <strong>a data model suited to your application saves you from fighting the language</strong>.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · graph querying got a standard</span>
+Graph query languages are converging on standards the 1st edition predates: <strong>GQL</strong>, the ISO graph query language, and <strong>SQL/PGQ</strong> (property-graph queries inside SQL, closing much of the 29-lines-vs-4 gap). Example systems modernize too: Facebook's <strong>TAO</strong>, LinkedIn's <strong>LIquid</strong>, embedded <strong>KùzuDB</strong>, Amazon Neptune, and knowledge graphs as a use case.</div>
+
+<h3 id="triple-stores-and-sparql"><a class="self" href="#triple-stores-and-sparql">Triple-Stores and SPARQL</a></h3>
+<span class="key-chip">triple-stores-and-sparql</span>
+
+<p>The <strong>triple-store</strong> model is mostly the property graph in different words, worth knowing for its tools. Everything is a three-part statement <strong>(subject, predicate, object)</strong>: (Jim, likes, bananas). The subject is a vertex. The object is either a <em>primitive value</em> — then predicate + object are a property: (lucy, age, 33) ≈ vertex lucy with <code>{"age": 33}</code> — or <em>another vertex</em> — then the predicate is an edge label, subject the tail, object the head: (lucy, marriedTo, alain).</p>
+
+<figure>
+<svg viewBox="0 0 680 170" role="img" aria-label="Triple-store to property-graph correspondence: a triple whose object is a literal is a vertex property; a triple whose object is another subject is a labeled edge.">
+  <text x="20" y="26" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">(_:lucy, :age, 33)</text>
+  <path d="M 190 22 L 250 22" stroke="currentColor" stroke-opacity=".6" stroke-width="1.4" marker-end="url(#arrN12)"/>
+  <rect x="260" y="8" width="130" height="30" rx="15" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="272" y="27" font-size="10" font-family="ui-monospace,Menlo,monospace">lucy {age: 33}</text>
+  <text x="410" y="26" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">object is a literal ⇒ property</text>
+  <text x="20" y="96" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">(_:lucy, :marriedTo, _:alain)</text>
+  <path d="M 250 92 L 290 92" stroke="currentColor" stroke-opacity=".6" stroke-width="1.4" marker-end="url(#arrN12)"/>
+  <rect x="300" y="78" width="60" height="30" rx="15" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="316" y="97" font-size="10" font-family="ui-monospace,Menlo,monospace">lucy</text>
+  <path d="M 362 93 L 448 93" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW12)"/>
+  <text x="370" y="86" font-size="8" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">marriedTo</text>
+  <rect x="452" y="78" width="60" height="30" rx="15" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="466" y="97" font-size="10" font-family="ui-monospace,Menlo,monospace">alain</text>
+  <text x="530" y="96" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">object is a vertex ⇒ edge</text>
+  <text x="20" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">Turtle syntax: _:lucy a :Person; :name "Lucy"; :bornIn _:idaho.   (semicolons: several statements, one subject)</text>
+  <defs>
+    <marker id="arrN12" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+    <marker id="arrW12" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+  </defs>
+</svg>
+<figcaption>Triples ↔ property graph. In <strong>Turtle</strong> (a subset of Notation3), vertices are written <code>_:name</code> — labels meaningful only within the file, so triples about the same vertex can be grouped; semicolons let you state several things about one subject on one line. <strong>RDF/XML</strong> says the same thing far more verbosely; Apache Jena converts between formats.</figcaption>
+</figure>
+
+<h4>The semantic web (briefly)</h4>
+<p>Triple-stores are independent of the <strong>semantic web</strong> — Datomic is a triple-store (technically 5-tuples, with versioning metadata) with no such ambitions — but the two are entangled in people's minds. The idea is reasonable: sites publish text for humans; why not machine-readable data too? <strong>RDF</strong> (Resource Description Framework) was to be the consistent format, letting data from many sites combine into an internet-wide "database of everything." Overhyped in the early 2000s, never realized, drowned in acronyms and hubris — yet good work came out of it, and triples are a fine <em>internal</em> data model even if you publish nothing. RDF's quirk: subjects, predicates, and objects are often URIs (<code>&lt;http://my-company.com/namespace#within&gt;</code>) so that your <code>within</code> and someone else's don't collide when data is combined; the URL needn't resolve — it's a namespace, declared once with a <code>@prefix</code> and then forgotten.</p>
+
+<h4>SPARQL</h4>
+<p><strong>SPARQL</strong> ("sparkle": SPARQL Protocol and RDF Query Language) queries RDF triple-stores and predates Cypher — Cypher's pattern matching is borrowed from it, so they look alike. The emigration query is even shorter:</p>
+<pre><code>PREFIX : &lt;urn:example:&gt;
+SELECT ?personName WHERE {
+  ?person :name ?personName.
+  ?person :bornIn  / :within* / :name "United States".
+  ?person :livesIn / :within* / :name "Europe".
+}</code></pre>
+<p>Variables start with <code>?</code>; <code>:bornIn / :within*</code> is a property path equal to Cypher's <code>-[:BORN_IN]-&gt; () -[:WITHIN*0..]-&gt;</code>. And because RDF doesn't distinguish properties from edges — both are predicates — the same syntax matches properties: <code>?usa :name "United States".</code> ≈ Cypher's <code>(usa {name:'United States'})</code>. A nice language, semantic web or no.</p>
+
+<h4 id="graph-vs-network-model">Graph databases compared to the network model</h4>
+<p>Is the graph model CODASYL's second coming? No — four differences:</p>
+<div class="tablewrap"><table>
+<tr><th></th><th>CODASYL (network model)</th><th>graph databases</th></tr>
+<tr><td>Schema</td><td>Specified which record types could nest within which</td><td>None: any vertex may have an edge to any other — flexibility for changing requirements</td></tr>
+<tr><td>Reaching a record</td><td>Only by traversing an access path</td><td>Directly by unique ID, or via an index on a property value</td></tr>
+<tr><td>Ordering</td><td>Children were an ordered set; storage had to maintain it and inserts had to place records</td><td>Vertices and edges are unordered; sort only in query results</td></tr>
+<tr><td>Queries</td><td>All imperative, hard to write, broken by schema changes</td><td>Imperative traversal possible, but high-level declarative languages (Cypher, SPARQL) are the norm</td></tr>
+</table></div>
+
+<h3 id="the-foundation-datalog"><a class="self" href="#the-foundation-datalog">The Foundation: Datalog</a></h3>
+<span class="key-chip">the-foundation-datalog</span>
+
+<p><strong>Datalog</strong> is far older — studied intensively by academics in the 1980s — and less known to engineers, but it's the foundation later query languages build on. In practice it powers Datomic's query language and Cascalog (Datalog over Hadoop). Its data model generalizes triples: instead of <em>(subject, predicate, object)</em> write <em>predicate(subject, object)</em>: <code>name(lucy, 'Lucy')</code>, <code>born_in(lucy, idaho)</code>, <code>within(idaho, usa)</code>. Where Cypher and SPARQL jump straight to SELECT, Datalog takes small steps: you define <strong>rules</strong> that derive new predicates from existing facts and other rules — and rules can call each other, even recursively, like functions.</p>
+
+<figure class="anim" id="anim-datalog">
+<svg viewBox="0 0 680 330" role="img" aria-label="Datalog rules firing: rule 1 turns a name fact into a within_recursive fact; rule 2 propagates it down the within chain from North America to the United States to Idaho; rule 3 combines born_in and lives_in chains to derive that Lucy migrated from the United States to Europe.">
+  <rect x="20" y="16" width="300" height="118" rx="6" fill="var(--code-bg)"/>
+  <text x="30" y="34" font-size="9" font-family="ui-monospace,Menlo,monospace" font-weight="700">rules</text>
+  <text x="30" y="52" font-size="8.5" font-family="ui-monospace,Menlo,monospace">1  within_recursive(Loc, Name) :- name(Loc, Name).</text>
+  <text x="30" y="68" font-size="8.5" font-family="ui-monospace,Menlo,monospace">2  within_recursive(Loc, Name) :- within(Loc, Via),</text>
+  <text x="30" y="80" font-size="8.5" font-family="ui-monospace,Menlo,monospace">                                  within_recursive(Via, Name).</text>
+  <text x="30" y="98" font-size="8.5" font-family="ui-monospace,Menlo,monospace">3  migrated(Name, BornIn, LivingIn) :- name(P, Name),</text>
+  <text x="30" y="110" font-size="8.5" font-family="ui-monospace,Menlo,monospace">     born_in(P, BL), within_recursive(BL, BornIn),</text>
+  <text x="30" y="122" font-size="8.5" font-family="ui-monospace,Menlo,monospace">     lives_in(P, LL), within_recursive(LL, LivingIn).</text>
+  <rect x="340" y="16" width="330" height="118" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+  <text x="350" y="34" font-size="9" font-family="ui-monospace,Menlo,monospace" font-weight="700">facts</text>
+  <text x="350" y="52" font-size="8.5" font-family="ui-monospace,Menlo,monospace">name(namerica, 'North America').  within(usa, namerica).</text>
+  <text x="350" y="68" font-size="8.5" font-family="ui-monospace,Menlo,monospace">name(usa, 'United States').       within(idaho, usa).</text>
+  <text x="350" y="84" font-size="8.5" font-family="ui-monospace,Menlo,monospace">name(idaho, 'Idaho').  name(lucy, 'Lucy').  born_in(lucy, idaho).</text>
+  <text x="350" y="100" font-size="8.5" font-family="ui-monospace,Menlo,monospace">lives_in(lucy, london). within(london, england). within(england, europe).</text>
+  <text x="350" y="116" font-size="8.5" font-family="ui-monospace,Menlo,monospace">name(europe, 'Europe'). …</text>
+  <!-- derivations -->
+  <text x="20" y="160" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".65">derived facts (as if added to the database):</text>
+  <g data-on="2-5" data-hot="2">
+    <text x="20" y="184" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">rule 1 ← name(namerica,'North America')     ⇒ within_recursive(namerica, 'North America')</text>
+  </g>
+  <g data-on="3-5" data-hot="3">
+    <text x="20" y="206" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">rule 2 ← within(usa, namerica) + line above  ⇒ within_recursive(usa, 'North America')</text>
+  </g>
+  <g data-on="4-5" data-hot="4">
+    <text x="20" y="228" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">rule 2 ← within(idaho, usa) + line above     ⇒ within_recursive(idaho, 'North America')</text>
+    <text x="20" y="248" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".7">…and likewise within_recursive(idaho,'United States'), within_recursive(london,'Europe'), for every name in the chain</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <rect x="20" y="266" width="640" height="52" rx="6" fill="var(--read-soft)" stroke="var(--read)"/>
+    <text x="30" y="286" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">?- migrated(Who, 'United States', 'Europe').</text>
+    <text x="30" y="306" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">Who = 'Lucy'.   ← rule 3: name(lucy,'Lucy'), born_in(lucy,idaho), within_recursive(idaho,'United States'), lives_in(lucy,london), within_recursive(london,'Europe')</text>
+  </g>
+  <g data-on="1">
+    <text x="20" y="184" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".6">(none yet)</text>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">Uppercase words are variables. A rule fires when every predicate on the right of :- can be matched;</text>
+    <text x="20" y="236" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">then the left side, with variables filled in, behaves like a new fact.</text>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>RULES AND FACTS</strong> Facts are predicates over constants. Rules define new predicates: <code>within_recursive</code> and <code>migrated</code> aren't stored — they're derived. Uppercase identifiers are variables; a rule applies when the system can match everything to the right of <code>:-</code>, and then the left-hand side (variables substituted) is as good as a fact in the database.</li>
+  <li><strong>RULE 1 FIRES</strong> <code>name(namerica, 'North America')</code> exists, so rule 1 matches with Loc = namerica, Name = 'North America' and generates <code>within_recursive(namerica, 'North America')</code>. Base case: a location is trivially "within" itself by name.</li>
+  <li><strong>RULE 2 FIRES</strong> <code>within(usa, namerica)</code> exists and the previous step produced <code>within_recursive(namerica, 'North America')</code>, so rule 2 derives <code>within_recursive(usa, 'North America')</code>. The recursion climbs one level.</li>
+  <li><strong>RULE 2 AGAIN</strong> <code>within(idaho, usa)</code> plus the new fact gives <code>within_recursive(idaho, 'North America')</code>. Repeated application enumerates every location within any named location — the same closure <code>WITH RECURSIVE</code> and <code>:WITHIN*</code> compute.</li>
+  <li><strong>RULE 3 ANSWERS THE QUERY</strong> Ask <code>migrated(Who, 'United States', 'Europe')</code> with Who unbound: rule 3 needs a person with a name, a birthplace within 'United States', and a residence within 'Europe' — Lucy. Datalog demands different thinking and is clumsier for one-off queries, but its rules <strong>compose and reuse</strong> across queries, which pays off as data gets complex.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · Datalog is "define your own verbs"</span>
+Cypher and SPARQL hand you a fixed vocabulary of arrows and let you draw a pattern. Datalog lets you invent new verbs — <em>within_recursive</em>, <em>migrated</em> — by saying what they mean in terms of verbs you already have, including themselves. Once defined, a verb is reusable in any later question, like a function in a library. Small steps, big compounding.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Data models are layered</strong> (application objects → general-purpose model → bytes → hardware), and each layer's clean abstraction is what lets teams cooperate. The model you choose shapes how you think about the problem.</li>
+<li><strong>Relational</strong> (Codd, 1970): relations of unordered tuples, all data in the open, joins on foreign keys, an automatic query optimizer choosing the access path. It hid storage details and generalized far beyond business processing; it has out-lasted every challenger for 25–30 years.</li>
+<li><strong>NoSQL</strong> (a 2009 hashtag): driven by scalability, open source, specialized queries, and schema frustration; expect <em>polyglot persistence</em>, not replacement.</li>
+<li><strong>Document model</strong>: JSON-shaped trees. Wins on schema flexibility, locality (one read, one write), and closeness to application objects — when the data is a self-contained tree loaded whole. Weak joins make many-to-one and many-to-many painful: work moves into application code.</li>
+<li><strong>Normalization is about duplication</strong>: store human-meaningful text once and refer to it by an ID that never has to change. Reference, don't copy, anything that may change.</li>
+<li><strong>History rhymes</strong>: IMS's hierarchical model (1968) ≈ documents; CODASYL's network model solved many-to-many with pointer access paths the programmer navigated by hand; the relational model won by making the optimizer navigate. Document databases nest one-to-many like IMS but reference by ID like relational — they are <em>not</em> CODASYL. The two families are converging (JSON in SQL; joins in document stores).</li>
+<li><strong>Schema-on-read vs schema-on-write</strong> — not "schemaless": the reading code always assumes a structure. Like dynamic vs static typing: no universal answer; on-read for heterogeneous or externally-dictated data, on-write when records share structure.</li>
+<li><strong>Locality</strong> pays only when you need most of the document; documents are loaded and rewritten whole, so keep them small and avoid growth. Relational systems (Spanner interleaving, Oracle cluster tables, Bigtable column families) offer locality too.</li>
+<li><strong>Declarative beats imperative</strong>: state the pattern, not the steps. It's more concise, it hides implementation so the engine can optimize and reorganize without breaking queries, and it parallelizes. CSS vs DOM-walking JavaScript is the same lesson outside databases.</li>
+<li><strong>MapReduce querying</strong> (map emits key–values; group; reduce folds) sits between declarative and imperative; the functions must be pure. Two coordinated functions are harder than one query and optimize worse — so MongoDB reinvented SQL as the aggregation pipeline.</li>
+<li><strong>Graphs</strong> for many-to-many-everywhere: property graphs (vertices, labeled edges, properties on both) and triple-stores (subject–predicate–object) are the same idea in two vocabularies; declarative languages Cypher, SPARQL, and Datalog express variable-length traversal in a few lines where SQL needs <code>WITH RECURSIVE</code>. Graph DBs beat CODASYL on schema freedom, direct access by ID/index, no forced ordering, and declarative queries.</li>
+<li><strong>Datalog</strong> is the foundation: rules derive new predicates from facts and other rules, recursively; harder for one-offs, powerful for complex data because rules compose and reuse.</li>
+<li><strong>2nd-edition arc</strong>: relational-vs-NoSQL treated as settled convergence ("What Goes Around Comes Around… And Around", 2024); GraphQL added, MapReduce querying removed; dataframes/arrays as a data model; GQL and SQL/PGQ standardize graph querying; online schema migration (gh-ost, pgroll) defuses the schema-change fear.</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Fourteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="c">
+<p>The relational model's original purpose, as the book frames it, was to:</p>
+<label><input type="radio" name="q1" value="a"> Maximize write throughput on mainframes</label>
+<label><input type="radio" name="q1" value="b"> Support object-oriented programming</label>
+<label><input type="radio" name="q1" value="c"> Hide the database's internal data representation behind a cleaner interface, unlike contemporaries that forced developers to think about it</label>
+<label><input type="radio" name="q1" value="d"> Enable distributed execution across many machines</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why does the résumé example store <code>region_id: "us:91"</code> instead of the string "Greater Seattle Area"?</p>
+<label><input type="radio" name="q2" value="a"> Strings can't be indexed efficiently</label>
+<label><input type="radio" name="q2" value="b"> JSON doesn't support long strings</label>
+<label><input type="radio" name="q2" value="c"> IDs compress better</label>
+<label><input type="radio" name="q2" value="d"> It removes duplication: the human-meaningful name lives in one place, enabling consistent spelling, disambiguation, one-place updates, localization, and richer search — and an ID never needs to change</label>
+</div>
+
+<div class="q" data-a="b">
+<p>The document model's biggest weakness, according to the chapter, is:</p>
+<label><input type="radio" name="q3" value="a"> It can't represent one-to-many relationships</label>
+<label><input type="radio" name="q3" value="b"> Poor support for joins, so many-to-one and many-to-many relationships push denormalization or join emulation into application code — more complexity, worse performance</label>
+<label><input type="radio" name="q3" value="c"> It requires a rigid schema</label>
+<label><input type="radio" name="q3" value="d"> It cannot store nested data</label>
+</div>
+
+<div class="q" data-a="a">
+<p>How did the relational model differ from CODASYL's network model in handling "access paths"?</p>
+<label><input type="radio" name="q4" value="a"> CODASYL programmers followed hand-chosen pointer paths from a root record; in the relational model the query optimizer chooses the access path automatically, so new indexes speed up queries without rewriting them</label>
+<label><input type="radio" name="q4" value="b"> CODASYL had no access paths; the relational model introduced them</label>
+<label><input type="radio" name="q4" value="c"> Both required manual path selection, but SQL made it terser</label>
+<label><input type="radio" name="q4" value="d"> The relational model stored explicit pointers on disk; CODASYL used foreign keys</label>
+</div>
+
+<div class="q" data-a="c">
+<p>In what sense did document databases "revert to the hierarchical model," and in what sense did they not?</p>
+<label><input type="radio" name="q5" value="a"> They adopted CODASYL-style pointer navigation but dropped nesting</label>
+<label><input type="radio" name="q5" value="b"> They reverted entirely — IMS and MongoDB are the same model</label>
+<label><input type="radio" name="q5" value="c"> They nest one-to-many records inside the parent like IMS, but represent many-to-one/many-to-many by unique ID (a document reference ≈ foreign key) resolved at read time, like the relational model — not by CODASYL pointer paths</label>
+<label><input type="radio" name="q5" value="d"> They reverted to imperative-only querying</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why is "schemaless" a misleading description of document databases?</p>
+<label><input type="radio" name="q6" value="a"> Because they all enforce JSON Schema</label>
+<label><input type="radio" name="q6" value="b"> Because documents can't have optional fields</label>
+<label><input type="radio" name="q6" value="c"> Because the storage engine requires fixed-width fields</label>
+<label><input type="radio" name="q6" value="d"> Because the code that reads the data assumes a structure — the schema is implicit and interpreted on read (schema-on-read) rather than enforced on write; it's dynamic vs static typing, not schema vs none</label>
+</div>
+
+<div class="q" data-a="b">
+<p>When does document locality actually help performance?</p>
+<label><input type="radio" name="q7" value="a"> Always — one document is always faster than a join</label>
+<label><input type="radio" name="q7" value="b"> When you need most of the document at once; otherwise you pay to load (and on update, rewrite) the whole document for a small part — hence "keep documents small, avoid growing writes"</label>
+<label><input type="radio" name="q7" value="c"> Only for read-only workloads</label>
+<label><input type="radio" name="q7" value="d"> Only if the document is stored in a relational column</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Why can a database safely reorganize records on disk under a SQL query but not under equivalent imperative code?</p>
+<label><input type="radio" name="q8" value="a"> SQL promises no particular ordering and states only the result pattern, so the engine knows reordering is safe; imperative code may silently depend on iteration order, and the database can't tell</label>
+<label><input type="radio" name="q8" value="b"> SQL queries are compiled to machine code</label>
+<label><input type="radio" name="q8" value="c"> Imperative code runs on the client, SQL on the server</label>
+<label><input type="radio" name="q8" value="d"> It can't — both break when records move</label>
+</div>
+
+<div class="q" data-a="c">
+<p>The CSS vs JavaScript example illustrates that declarative styling:</p>
+<label><input type="radio" name="q9" value="a"> Is faster to type but otherwise equivalent</label>
+<label><input type="radio" name="q9" value="b"> Requires a query optimizer in the browser</label>
+<label><input type="radio" name="q9" value="c"> Automatically stops applying when the pattern stops matching (the highlight disappears when <code>selected</code> moves), and lets browser vendors improve performance without breaking pages — advantages imperative DOM code lacks</label>
+<label><input type="radio" name="q9" value="d"> Only works for XML documents</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why must MapReduce's map and reduce functions be pure?</p>
+<label><input type="radio" name="q10" value="a"> JavaScript can't perform I/O</label>
+<label><input type="radio" name="q10" value="b"> To keep the output collection small</label>
+<label><input type="radio" name="q10" value="c"> Purity is a stylistic convention only</label>
+<label><input type="radio" name="q10" value="d"> So the database can run them anywhere, in any order, and rerun them after failures without changing the result — no side effects, no extra queries, input only</label>
+</div>
+
+<div class="q" data-a="b">
+<p>MongoDB added the aggregation pipeline because:</p>
+<label><input type="radio" name="q11" value="a"> MapReduce couldn't express filtering</label>
+<label><input type="radio" name="q11" value="b"> Two coordinated JavaScript functions are harder to write than one query, and a declarative language gives the optimizer more room — effectively reinventing (a subset of) SQL in JSON syntax</label>
+<label><input type="radio" name="q11" value="c"> JavaScript was removed from MongoDB</label>
+<label><input type="radio" name="q11" value="d"> SQL is required by law for analytics</label>
+</div>
+
+<div class="q" data-a="a">
+<p>What does Cypher's <code>-[:WITHIN*0..]-&gt;</code> express, and why is it hard in plain SQL?</p>
+<label><input type="radio" name="q12" value="a"> Follow a WITHIN edge zero or more times — a variable-length traversal; SQL normally fixes the number of joins in advance, so it needs recursive common table expressions (<code>WITH RECURSIVE</code>), which are far more verbose</label>
+<label><input type="radio" name="q12" value="b"> Exactly one WITHIN edge; SQL can't express single joins</label>
+<label><input type="radio" name="q12" value="c"> A property lookup; SQL lacks property access</label>
+<label><input type="radio" name="q12" value="d"> An index hint; SQL has no index hints</label>
+</div>
+
+<div class="q" data-a="c">
+<p>In a triple-store, what determines whether a triple represents a property or an edge?</p>
+<label><input type="radio" name="q13" value="a"> The predicate's name</label>
+<label><input type="radio" name="q13" value="b"> Whether the subject is a URI</label>
+<label><input type="radio" name="q13" value="c"> The object: a primitive value (string, number) makes predicate+object a property of the subject vertex; another vertex makes the predicate an edge label from subject (tail) to object (head)</label>
+<label><input type="radio" name="q13" value="d"> Whether it's written in Turtle or RDF/XML</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Which is NOT one of the book's stated differences between graph databases and CODASYL?</p>
+<label><input type="radio" name="q14" value="a"> Graph databases have no schema restricting which vertices may connect; CODASYL specified which record types could nest in which</label>
+<label><input type="radio" name="q14" value="b"> Graph vertices are reachable directly by ID or index; CODASYL records only via access paths</label>
+<label><input type="radio" name="q14" value="c"> Graph vertices and edges are unordered; CODASYL children were ordered sets</label>
+<label><input type="radio" name="q14" value="d"> Graph databases store data as triples; CODASYL stored tables</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — c.</span> The chapter's framing: other 1960s–70s databases made developers think about internal representation; Codd's goal was a cleaner interface hiding those details. Distributed execution (d) and OO support (b) came decades later and weren't the motivation.</div>
+<div class="ak"><span class="which">Q2 — d.</span> The book lists five benefits of standardized lists, then generalizes: an ID vs text is a question of duplication. IDs have no human meaning so they never change; duplicated meaningful text must be updated everywhere (write overhead, inconsistency risk). That's normalization's core idea.</div>
+<div class="ak"><span class="which">Q3 — b.</span> Documents excel at one-to-many trees (a is backwards) and are schema-flexible (c is backwards). Their weakness is joins: many-to-one and many-to-many require denormalizing (and keeping copies consistent) or emulating joins with multiple round-trips — complexity and slowness the book explicitly warns about.</div>
+<div class="ak"><span class="which">Q4 — a.</span> CODASYL's "programmer as navigator" tracked access paths by hand; the relational model's key insight was to build the optimizer once so every application benefits — declare a new index and queries use it unchanged. (d) inverts the two: CODASYL used pointers, relational uses foreign keys resolved at query time.</div>
+<div class="ak"><span class="which">Q5 — c.</span> One aspect reverted (nesting one-to-many inside the parent record); for many-to-one/many-to-many, document references work like foreign keys, resolved at read time. The book states plainly that document databases "have not followed the path of CODASYL."</div>
+<div class="ak"><span class="which">Q6 — d.</span> No schema is enforced, but the application code assumes one — an implicit schema. The accurate terms are schema-on-read vs schema-on-write, with the dynamic-vs-static typing analogy and the same "no right answer" verdict.</div>
+<div class="ak"><span class="which">Q7 — b.</span> Locality wins when the whole document is needed (rendering a page). The database loads the entire document regardless, and updates rewrite it unless the encoded size is unchanged — so large documents and growing writes are costly. Hence the advice to keep documents small.</div>
+<div class="ak"><span class="which">Q8 — a.</span> The book's example: reclaiming disk space moves records and changes their order. SQL guarantees no order, so it's safe; imperative code might rely on order and the database can't know. SQL's limited functionality is precisely what buys automatic optimization.</div>
+<div class="ak"><span class="which">Q9 — c.</span> Two concrete problems with the imperative DOM code: the highlight persists after the class is removed (CSS un-applies automatically), and adopting a faster API means rewriting code (CSS/XPath get faster for free). Same reasons SQL beat CODASYL's cursors.</div>
+<div class="ak"><span class="which">Q10 — d.</span> Purity — input-only, no additional queries, no side effects — is what lets the framework run the functions anywhere, in any order, and rerun them on failure. Within those limits they're still powerful (parsing, library calls, calculations).</div>
+<div class="ak"><span class="which">Q11 — b.</span> The usability problem (two coordinated functions) plus the optimizer argument led to <code>$match</code>/<code>$group</code>/<code>$sum</code> — a subset of SQL's expressiveness in JSON syntax. The book's moral: a NoSQL system may accidentally reinvent SQL in disguise.</div>
+<div class="ak"><span class="which">Q12 — a.</span> A LIVES_IN edge may point at any level of the location hierarchy, so the traversal depth is unknown — like a regex <code>*</code>. SQL:1999's <code>WITH RECURSIVE</code> builds the closure iteratively; the book's version is 29 lines vs Cypher's 4, illustrating fit-to-purpose, not superiority.</div>
+<div class="ak"><span class="which">Q13 — c.</span> (lucy, age, 33) is a property because 33 is a literal; (lucy, marriedTo, alain) is an edge because alain is a vertex. RDF doesn't distinguish the two — both are predicates — which is why SPARQL uses one syntax for both.</div>
+<div class="ak"><span class="which">Q14 — d.</span> The four real differences are schema freedom, direct access by ID/index, no maintained ordering, and declarative query languages. Triples vs tables is not among them — property graphs (the model compared) aren't triple-stores, and CODASYL wasn't tabular either.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch01-reliable-scalable-maintainable.html">← ch 1 · Reliable, Scalable, and Maintainable Applications</a>
+  <a href="index.html">index</a>
+  <a href="ch03-storage-and-retrieval.html">ch 3 · Storage and Retrieval →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>
