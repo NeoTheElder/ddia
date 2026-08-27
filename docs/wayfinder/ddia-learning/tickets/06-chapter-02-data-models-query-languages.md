@@ -1,7 +1,7 @@
 # Chapter 02: Data Models and Query Languages
 
 - **Type**: wayfinder:task (AFK build, user review)
-- **Status**: open
+- **Status**: closed (2026-08-26)
 - **Assignee**: yagyesh (session, 2026-08-26)
 - **Blocked by**: [04-pilot-chapter-03-template-lock](04-pilot-chapter-03-template-lock.md)
 
@@ -11,4 +11,4 @@ Build `chapters/ch02-data-models-query-languages.html` to the locked template (`
 
 ## Resolution
 
-_(recorded on close)_
+Built and user-approved: [chapters/ch02-data-models-query-languages.html](../../../chapters/ch02-data-models-query-languages.html) (129KB). All 15 TOC sections; 6 steppers (résumé shredding vs document, data-model history IMS→CODASYL→relational→document, declarative vs imperative, MapReduce, Cypher graph traversal, Datalog rule firing); 2 static figures + 2 comparison tables; 2e asides (convergence settled, GraphQL/MapReduce swap, GQL & SQL/PGQ, dataframes, online migrations); xrefs to ch 3/4/5/7/10/12; 13 takeaways; 14-question quiz + key. Ch 2 definitions filled.
