@@ -1,16 +1,1372 @@
-<title>DDIA Ch 6: Partitioning</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 6 — Partitioning</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#partitioning-and-replication">partitioning+replication</a>
+  <a class="l1" href="#partitioning-of-key-value-data">key-value-partitioning</a>
+  <a href="#partitioning-by-key-range">by-key-range</a>
+  <a href="#partitioning-by-hash-of-key">by-hash</a>
+  <a href="#skewed-workloads-and-relieving-hot-spots">hot-spots</a>
+  <a class="l1" href="#partitioning-and-secondary-indexes">secondary-indexes</a>
+  <a href="#partitioning-secondary-indexes-by-document">by-document (local)</a>
+  <a href="#partitioning-secondary-indexes-by-term">by-term (global)</a>
+  <a class="l1" href="#rebalancing-partitions">rebalancing</a>
+  <a href="#strategies-for-rebalancing">strategies</a>
+  <a href="#operations-automatic-or-manual-rebalancing">auto-vs-manual</a>
+  <a class="l1" href="#request-routing">request-routing</a>
+  <a href="#parallel-query-execution">parallel-queries</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 6: Partitioning</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;06</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;07&nbsp;(Sharding)</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Partitioning</h1>
+  <p class="epigraph">Clearly, we must break away from the sequential and not limit the computers. We must state definitions and provide for priorities and descriptions of data. We must state relationships, not procedures.
+  <span class="attr">— Grace Murray Hopper, Management and the Computer of the Future (1962)</span></p>
+</header>
+
+<p><a class="xref back" href="ch05-replication.html#leaders-and-followers" data-tip="Ch 5 · Leaders and Followers — one replica accepts all writes and streams a replication log to followers; reads may go to any replica">Chapter&nbsp;5<sup>←5</sup></a> kept a full copy of the database on every node. That stops working when the dataset outgrows one disk or the query load outgrows one machine's CPUs. The remedy is to <strong>break the database into pieces</strong> — <em>partitions</em>, also called <em>shards</em> — and put different pieces on different nodes. Each record, row, or document belongs to exactly one partition, so each partition is a small database of its own, and a shared-nothing cluster can spread the data over many disks and the query load over many processors. Single-partition queries scale by adding nodes; big queries can be parallelized across nodes, which is harder.</p>
+
+<p>The vocabulary is a mess and the book warns you up front. A <em>partition</em> here is a <em>shard</em> in MongoDB, Elasticsearch, and SolrCloud; a <em>region</em> in HBase; a <em>tablet</em> in Bigtable; a <em>vnode</em> in Cassandra and Riak; a <em>vBucket</em> in Couchbase. And it has <strong>nothing to do with network partitions</strong> (netsplits), the fault studied in <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#unreliable-networks" data-tip="Ch 8 · Unreliable Networks — packets can be lost, delayed, or duplicated; a network partition is a fault that cuts the cluster in two · not yet written">Chapter&nbsp;8<sup>→8</sup></a>. Partitioned databases were pioneered in the 1980s (Teradata, Tandem NonStop SQL), then rediscovered by NoSQL stores and Hadoop-based warehouses; the OLTP/analytics split from <a class="xref back" href="ch03-storage-and-retrieval.html#transaction-processing-or-analytics" data-tip="Ch 3 · Transaction Processing or Analytics? — OLTP (few records by key) vs OLAP (scan millions) — the fork that splits storage engine design">Chapter&nbsp;3<sup>←3</sup></a> changes the tuning, not the fundamentals.</p>
+
+<p>The chapter asks four questions in order: how do you decide <em>which record goes where</em> (key-value partitioning)? What happens to <em>secondary indexes</em>, which don't map neatly onto partitions? How do you <em>rebalance</em> when nodes join or leave? And when a client has a key in hand, how does it find the <em>right node</em> (request routing)?</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+A library outgrows one room, so the books are spread across many rooms. Every question in this chapter is a librarian's question. <strong>Which room does each book go in?</strong> By first letter of title (key range — browsing a shelf is easy, but every new bestseller starting with "The" lands in one room) or by a scrambled number stamped on the spine (hash — rooms fill evenly, but "all titles from Ha to Hu" is now a tour of every room). <strong>Where does the card catalog live?</strong> A catalog per room (fast to update, but "every red book" means visiting every room) or one alphabetized catalog split across rooms (one visit to read, but shelving a book means updating cards in several rooms). <strong>What happens when you open a new room?</strong> Move whole shelves, not individual books, and never renumber everything. <strong>How does a visitor know which room?</strong> Ask any librarian, ask the front desk, or carry your own map — and someone has to keep the map current. Colors as always: <span style="color:var(--write);font-weight:600">ember = writes</span>, <span style="color:var(--read);font-weight:600">cyan = reads</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="partitioning-and-replication">
+<span class="key-chip">partitioning-and-replication</span>
+<h2><a class="self" href="#partitioning-and-replication">Partitioning and Replication</a></h2>
+
+<p>Partitioning is almost always combined with replication: each partition's data is copied onto several nodes for fault tolerance. So a record belongs to exactly one partition, yet lives on several nodes. Under the leader–follower model of <a class="xref back" href="ch05-replication.html#leaders-and-followers" data-tip="Ch 5 · Leaders and Followers — one leader accepts all writes and streams a replication log to followers">Chapter&nbsp;5<sup>←5</sup></a>, each partition has its own leader on one node and followers on others — and <strong>each node is leader for some partitions and follower for others</strong>. That is the book's Figure 6-1:</p>
+
+<figure>
+<svg viewBox="0 0 680 230" role="img" aria-label="Figure 6-1 redrawn: four nodes, each holding several partitions; each partition has one leader (on one node) and two followers (on other nodes), so every node is a leader for some partitions and a follower for others.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <g id="p61-nodes">
+      <rect x="20" y="30" width="150" height="150" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="30" y="48" font-weight="700">node 1</text>
+      <rect x="185" y="30" width="150" height="150" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="195" y="48" font-weight="700">node 2</text>
+      <rect x="350" y="30" width="150" height="150" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="360" y="48" font-weight="700">node 3</text>
+      <rect x="515" y="30" width="150" height="150" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="525" y="48" font-weight="700">node 4</text>
+    </g>
+    <!-- node 1: P1 leader, P3 follower, P4 follower -->
+    <rect x="30" y="60" width="130" height="28" rx="4" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="38" y="78" fill="var(--write)" font-weight="700">partition 1 · leader</text>
+    <rect x="30" y="98" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="38" y="116" opacity=".8">partition 3 · follower</text>
+    <rect x="30" y="136" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="38" y="154" opacity=".8">partition 4 · follower</text>
+    <!-- node 2: P2 leader, P1 follower, P3 follower -->
+    <rect x="195" y="60" width="130" height="28" rx="4" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="203" y="78" fill="var(--write)" font-weight="700">partition 2 · leader</text>
+    <rect x="195" y="98" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="203" y="116" opacity=".8">partition 1 · follower</text>
+    <rect x="195" y="136" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="203" y="154" opacity=".8">partition 3 · follower</text>
+    <!-- node 3: P3 leader, P2 follower, P4 follower -->
+    <rect x="360" y="60" width="130" height="28" rx="4" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="368" y="78" fill="var(--write)" font-weight="700">partition 3 · leader</text>
+    <rect x="360" y="98" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="368" y="116" opacity=".8">partition 2 · follower</text>
+    <rect x="360" y="136" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="368" y="154" opacity=".8">partition 4 · follower</text>
+    <!-- node 4: P4 leader, P1 follower, P2 follower -->
+    <rect x="525" y="60" width="130" height="28" rx="4" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="533" y="78" fill="var(--write)" font-weight="700">partition 4 · leader</text>
+    <rect x="525" y="98" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="533" y="116" opacity=".8">partition 1 · follower</text>
+    <rect x="525" y="136" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="533" y="154" opacity=".8">partition 2 · follower</text>
+    <!-- replication arrows for partition 1 -->
+    <path d="M160 74 C 178 74, 178 112, 195 112" stroke="var(--write)" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#a61-w)"/>
+    <path d="M95 60 C 95 12, 590 12, 590 96" stroke="var(--write)" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#a61-w)"/>
+    <text x="230" y="16" font-size="9" fill="var(--write)">partition 1's replication log → its followers</text>
+    <text x="20" y="206" font-size="9" opacity=".75">4 partitions × 3 replicas = 12 slots on 4 nodes · every node leads one partition and follows two</text>
+    <text x="20" y="220" font-size="9" opacity=".75">the partitioning scheme and the replication scheme are chosen independently — this chapter ignores replication from here on</text>
+    <defs><marker id="a61-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>Partitioning and replication stacked. Down a node: different partitions (different data). Across the cluster: the same partition on three nodes (same data), one of them the leader. Everything Chapter 5 said about replicating a database applies to replicating one partition, so the choice of partitioning scheme is mostly independent of the choice of replication scheme — which is why the rest of this chapter pretends each partition has one copy.</figcaption>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · two orthogonal knobs</span>
+Replication answers "how many copies?"; partitioning answers "how many pieces?". A node is just a shelf that happens to hold the master copy of some pieces and photocopies of others. You can turn either knob without touching the other — which is exactly why the book can study them in separate chapters. The one place they meet is failure: when a node dies you lose one leader and a couple of followers <em>of different partitions</em>, so failover (Chapter 5) has to happen per partition.</div>
+
+<div class="ed2"><span class="tag">2ND EDITION · "Partitioning" becomes "Sharding" — and do you need it at all?</span>
+The 2nd edition renames this chapter <strong>Sharding</strong> (its Chapter 7) and uses <em>shard</em> throughout — presumably to match industry usage and to stop the collision with network partitions and SQL's partitioned tables. The structure survives (key-value sharding, secondary indexes, rebalancing, request routing) and a new section on <strong>sharding for multitenancy</strong> is listed (one shard per customer as an isolation and data-residency tool). Kleppmann has also softened the <em>need</em> to shard: with much bigger machines and managed cloud services, most teams no longer must shard early, and the chapter reads more as "when you eventually have to." <em>[section list from the O'Reilly TOC; the rest inferred from the 2nd-edition references repo and interviews]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="partitioning-of-key-value-data">
+<span class="key-chip">partitioning-of-key-value-data</span>
+<h2><a class="self" href="#partitioning-of-key-value-data">Partitioning of Key-Value Data</a></h2>
+
+<p>You have a lot of data and want to spread it. <em>Which records go on which nodes?</em> The goal is to spread both the <strong>data</strong> and the <strong>query load</strong> evenly: with a fair split, 10 nodes should hold 10× the data and serve 10× the throughput of one. If the split is unfair — some partitions hold more data or take more queries — it is <strong>skewed</strong>, and skew wrecks the whole point: in the extreme, all the load lands on one partition, 9 of 10 nodes idle, and the busy node is your ceiling. A partition with disproportionately high load is a <strong>hot spot</strong>.</p>
+
+<p>The naive fix for hot spots is to assign records to nodes <em>at random</em>. That spreads data beautifully and destroys reads: to find a particular item you'd have no idea where it is, so you'd have to ask every node in parallel. We can do better, and the rest of this section assumes the simplest data model — a key-value store where every record is accessed by primary key, like an encyclopedia entry looked up by its title.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the encyclopedia on the shelf</span>
+A paper encyclopedia is a partitioned database. Twelve volumes, each covering a range of titles, spines labeled "A–B", "C–D", … "T–Z". You know which book to pull because the ranges are printed on the spines (the partition boundaries), and inside each volume entries are alphabetical so "everything between <em>Hopper</em> and <em>Hornet</em>" is a single flip of pages. Notice the spines are <em>not</em> evenly spaced: "T–Z" covers six letters because those letters are rarer. The whole art of key-range partitioning is choosing the spine labels so every volume is roughly the same thickness.</div>
+
+<h3 id="partitioning-by-key-range"><a class="self" href="#partitioning-by-key-range">Partitioning by Key Range</a></h3>
+<span class="key-chip">partitioning-by-key-range</span>
+
+<p>Assign each partition a <strong>continuous range of keys</strong>, from some minimum to some maximum. Knowing the boundaries tells you which partition holds a key; knowing which node holds which partition lets you go straight to it — pick the right volume off the shelf. Because real keys aren't uniformly distributed, the boundaries must <em>adapt to the data</em> (one volume per two letters would make some volumes huge). They may be set by an administrator or chosen automatically by the database (see <a href="#rebalancing-partitions">Rebalancing</a>). Bigtable, its open-source equivalent HBase, RethinkDB, and MongoDB before 2.4 partition this way.</p>
+
+<figure class="anim" id="anim-keyrange">
+<svg viewBox="0 0 680 300" role="img" aria-label="Key-range partitioning: a sorted key space cut into uneven ranges, each a partition; a point lookup goes straight to one partition; a range scan stays within one partition; but with timestamp keys every write of the current day lands on one partition (a hot spot), fixed by prefixing the key with a sensor name at the cost of one range query per sensor.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- key axis -->
+    <path d="M30 60 H 650" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="30" y="40" font-size="9" opacity=".7">sorted key space →</text>
+    <!-- partitions as uneven volumes -->
+    <g>
+      <rect x="30" y="70" width="90" height="70" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="42" y="98" font-weight="700">A – B</text><text x="42" y="114" font-size="8" opacity=".7">partition 1</text>
+      <rect x="126" y="70" width="70" height="70" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="136" y="98" font-weight="700">C – D</text><text x="136" y="114" font-size="8" opacity=".7">partition 2</text>
+      <rect x="202" y="70" width="130" height="70" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="220" y="98" font-weight="700">E – G</text><text x="220" y="114" font-size="8" opacity=".7">partition 3</text>
+      <rect x="338" y="70" width="100" height="70" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="352" y="98" font-weight="700">H – K</text><text x="352" y="114" font-size="8" opacity=".7">partition 4</text>
+      <rect x="444" y="70" width="120" height="70" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="458" y="98" font-weight="700">L – S</text><text x="458" y="114" font-size="8" opacity=".7">partition 5</text>
+      <rect x="570" y="70" width="80" height="70" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="580" y="98" font-weight="700">T – Z</text><text x="580" y="114" font-size="8" opacity=".7">partition 6</text>
+    </g>
+    <g data-on="1"><text x="30" y="170" font-size="9" opacity=".8">boundaries are uneven on purpose: "T–Z" spans six letters because those keys are rare — thickness is equalized, not letters</text></g>
+    <!-- step 2: point lookup -->
+    <g data-on="2" data-hot="2">
+      <text x="300" y="196" font-size="9" fill="var(--read)" font-weight="700">get("Hopper")</text>
+      <path d="M340 186 L 380 144" stroke="var(--read)" stroke-width="2" marker-end="url(#a6k-r)"/>
+      <text x="30" y="170" font-size="9" opacity=".8">"Hopper" ≥ H and &lt; L ⇒ partition 4, and only partition 4 — one node contacted</text>
+    </g>
+    <!-- step 3: range scan -->
+    <g data-on="3" data-hot="3">
+      <rect x="352" y="120" width="70" height="14" rx="2" fill="var(--read-soft)" stroke="var(--read)"/>
+      <text x="356" y="131" font-size="8" fill="var(--read)">Ho…Hu sorted</text>
+      <text x="300" y="196" font-size="9" fill="var(--read)" font-weight="700">scan("Hopper" … "Hume")</text>
+      <path d="M340 186 L 380 144" stroke="var(--read)" stroke-width="2" marker-end="url(#a6k-r)"/>
+      <text x="30" y="170" font-size="9" opacity=".8">keys inside a partition are kept sorted (SSTable-style) ⇒ a range scan is one sequential read on one partition</text>
+    </g>
+    <!-- step 4: timestamp hot spot -->
+    <g data-on="4" data-hot="4">
+      <text x="30" y="170" font-size="9" opacity=".8">key = timestamp ⇒ partitions are time ranges; all sensors write "now" ⇒ one partition</text>
+      <rect x="570" y="70" width="80" height="70" rx="4" fill="var(--write-soft)" stroke="var(--write)" stroke-width="2"/>
+      <text x="580" y="98" font-weight="700" fill="var(--write)">today</text><text x="580" y="114" font-size="8" fill="var(--write)">HOT SPOT</text>
+      <path d="M520 230 L 600 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M560 240 L 605 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M600 245 L 610 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M640 240 L 615 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <text x="500" y="262" font-size="9" fill="var(--write)">sensor writes, all at once</text>
+      <text x="40" y="200" font-size="9" opacity=".7">partitions 1–5 = past days: idle</text>
+    </g>
+    <!-- step 5: prefix with sensor name -->
+    <g data-on="5"><text x="30" y="170" font-size="9" opacity=".8">fix: key = (sensor_name, timestamp). Partitioned by sensor first — many sensors ⇒ writes spread across partitions</text></g>
+    <g data-on="5-6" data-hot="5">
+      <path d="M60 240 L 75 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M150 240 L 160 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M260 240 L 268 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M380 240 L 388 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M500 240 L 505 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <path d="M610 240 L 612 146" stroke="var(--write)" stroke-width="2" marker-end="url(#a6k-w)"/>
+      <text x="40" y="262" font-size="9" fill="var(--write)">alpha-01</text><text x="130" y="262" font-size="9" fill="var(--write)">cam-7</text><text x="236" y="262" font-size="9" fill="var(--write)">furnace</text><text x="356" y="262" font-size="9" fill="var(--write)">hvac-2</text><text x="476" y="262" font-size="9" fill="var(--write)">pump-3</text><text x="586" y="262" font-size="9" fill="var(--write)">wind-9</text>
+    </g>
+    <!-- step 6: the price -->
+    <g data-on="6" data-hot="6">
+      <rect x="30" y="150" width="620" height="30" rx="4" fill="var(--hot)"/>
+      <text x="36" y="170" font-size="9" fill="var(--read)" font-weight="700">"all sensors, last hour" = one range query PER sensor, one per partition — read convenience traded for write balance</text>
+      <path d="M75 230 L 75 146" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6k-r)"/>
+      <path d="M160 230 L 160 146" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6k-r)"/>
+      <path d="M268 230 L 268 146" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6k-r)"/>
+      <path d="M388 230 L 388 146" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6k-r)"/>
+      <path d="M505 230 L 505 146" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6k-r)"/>
+      <path d="M612 230 L 612 146" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6k-r)"/>
+      <text x="260" y="250" font-size="9" fill="var(--read)">six queries, six partitions, merge client-side</text>
+    </g>
+    <defs>
+      <marker id="a6k-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a6k-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE SHELF</strong> A sorted key space cut into six contiguous ranges — six partitions, like encyclopedia volumes. The boundaries are deliberately uneven so each partition holds about the same amount of data; even letter-splits would make some volumes fat and others thin.</li>
+  <li><strong>POINT LOOKUP</strong> Knowing the boundaries, a client (or router) computes that "Hopper" belongs to partition 4 and sends the request there and nowhere else. Cheap routing is the first gift of key-range partitioning.</li>
+  <li><strong>RANGE SCAN</strong> Inside each partition keys are kept sorted (think SSTables), so "everything from Hopper to Hume" is one sequential read on one partition. The key can even act as a concatenated index — e.g. (year, month, day, hour, minute, second) for sensor readings, so "all readings in March" is a single range.</li>
+  <li><strong>THE HOT SPOT</strong> The same sortedness bites when the key is a timestamp: partitions become ranges of time, and because sensors write <em>now</em>, every write goes to today's partition while yesterday's sit idle. One partition's write capacity becomes the cluster's.</li>
+  <li><strong>REORDER THE KEY</strong> Put something else first: key = (sensor name, timestamp). Partitioning is now by sensor, then time. With many active sensors the writes fan out across all partitions.</li>
+  <li><strong>THE PRICE</strong> The time range is no longer contiguous across sensors. "All sensors in the last hour" becomes one range query per sensor, hitting every partition, merged by the client. Key design is a trade between write balance and read convenience — a theme that returns with hashing.</li>
+</ol>
+</figure>
+
+<p>Two things to keep from the stepper: sorted keys within a partition (the <a class="xref back" href="ch03-storage-and-retrieval.html#sstables-and-lsm-trees" data-tip="Ch 3 · SSTables and LSM-Trees — sorted segment files fed by a memtable, merged by compaction">SSTable<sup>←3</sup></a> idea from Chapter 3) make range scans cheap and let the key act as a <a class="xref back" href="ch03-storage-and-retrieval.html#other-indexing-structures" data-tip="Ch 3 · Other Indexing Structures — secondary, concatenated (multi-column), and multi-dimensional indexes">concatenated index<sup>←3</sup></a>; and <em>access patterns</em>, not data volume, are what create hot spots — timestamp keys are the textbook case (the Google App Engine advice "monotonically increasing values are bad" is the cited source).</p>
+
+<h3 id="partitioning-by-hash-of-key"><a class="self" href="#partitioning-by-hash-of-key">Partitioning by Hash of Key</a></h3>
+<span class="key-chip">partitioning-by-hash-of-key</span>
+
+<p>Because of that skew risk, many distributed stores put a <strong>hash function</strong> between the key and the partition. A good hash takes skewed input and produces uniformly distributed output: a 32-bit hash maps any string to a seemingly random number in 0…2³²−1, and near-identical strings land far apart. It need not be cryptographic — Cassandra and MongoDB use MD5, Voldemort uses Fowler–Noll–Vo — but it must be <em>stable across processes</em>: Java's <code>Object.hashCode()</code> and Ruby's <code>Object#hash</code> can give the same key different values in different processes, which would scatter one key across partitions (Kleppmann's own "Java's hashCode is not safe for distributed systems" is the reference). With a suitable hash, each partition owns a <strong>range of hashes</strong> instead of a range of keys.</p>
+
+<figure class="anim" id="anim-hash">
+<svg viewBox="0 0 680 310" role="img" aria-label="Hash partitioning: clustered keys are passed through a hash function that scatters them uniformly across the hash space, which is cut into ranges owned by partitions; this balances load but destroys key order, so a range query must visit every partition; Cassandra's compound primary key hashes only the first column and sorts by the rest, recovering range scans within one hash-partition.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- keys -->
+    <text x="20" y="30" font-size="9" opacity=".7">keys (clustered)</text>
+    <g>
+      <rect x="20" y="40" width="110" height="18" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="26" y="53" font-size="9">2024-03-01 09:00</text>
+      <rect x="20" y="64" width="110" height="18" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="26" y="77" font-size="9">2024-03-01 09:01</text>
+      <rect x="20" y="88" width="110" height="18" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="26" y="101" font-size="9">2024-03-01 09:02</text>
+      <rect x="20" y="112" width="110" height="18" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="26" y="125" font-size="9">2024-03-01 09:03</text>
+    </g>
+    <!-- hash box -->
+    <g data-on="2-6" data-hot="2">
+      <rect x="170" y="60" width="80" height="50" rx="6" fill="var(--panel)" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="184" y="82" font-weight="700">hash()</text><text x="180" y="98" font-size="8" opacity=".7">MD5 / FNV</text>
+      <path d="M130 49 L 166 74" stroke="currentColor" stroke-opacity=".6" marker-end="url(#a6h-i)"/>
+      <path d="M130 73 L 166 82" stroke="currentColor" stroke-opacity=".6" marker-end="url(#a6h-i)"/>
+      <path d="M130 97 L 166 90" stroke="currentColor" stroke-opacity=".6" marker-end="url(#a6h-i)"/>
+      <path d="M130 121 L 166 98" stroke="currentColor" stroke-opacity=".6" marker-end="url(#a6h-i)"/>
+    </g>
+    <!-- hash space axis -->
+    <g data-on="2-6">
+      <path d="M300 130 H 660" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="300" y="150" font-size="8" opacity=".7">0</text><text x="620" y="150" font-size="8" opacity=".7">2³² − 1</text>
+      <text x="420" y="150" font-size="8" opacity=".7">hash space (uniform)</text>
+    </g>
+    <!-- scattered hash outputs -->
+    <g data-on="2-6" data-hot="2">
+      <path d="M250 74 C 300 74, 330 100, 345 126" stroke="currentColor" stroke-opacity=".7" fill="none" marker-end="url(#a6h-i)"/>
+      <path d="M250 80 C 350 80, 500 100, 598 126" stroke="currentColor" stroke-opacity=".7" fill="none" marker-end="url(#a6h-i)"/>
+      <path d="M250 86 C 320 86, 400 110, 455 126" stroke="currentColor" stroke-opacity=".7" fill="none" marker-end="url(#a6h-i)"/>
+      <path d="M250 92 C 340 92, 470 112, 528 126" stroke="currentColor" stroke-opacity=".7" fill="none" marker-end="url(#a6h-i)"/>
+      <text x="336" y="122" font-size="8">09:00</text><text x="588" y="122" font-size="8">09:01</text><text x="446" y="122" font-size="8">09:02</text><text x="518" y="122" font-size="8">09:03</text>
+    </g>
+    <!-- partitions as hash ranges -->
+    <g data-on="3-6" data-hot="3">
+      <rect x="300" y="160" width="90" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="306" y="180" font-size="9">p0 [0, b0)</text>
+      <rect x="390" y="160" width="90" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="396" y="180" font-size="9">p1 [b0, b1)</text>
+      <rect x="480" y="160" width="90" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="486" y="180" font-size="9">p2 [b1, b2)</text>
+      <rect x="570" y="160" width="90" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="576" y="180" font-size="9">p3 [b2, 2³²)</text>
+      <text x="300" y="210" font-size="9" opacity=".8">partitions own <tspan font-style="italic">hash</tspan> ranges; boundaries even or pseudorandom</text>
+    </g>
+    <g data-on="3-6"><text x="300" y="30" font-size="9" opacity=".8">4 adjacent minutes → 4 different partitions: the hot spot is gone</text></g>
+    <!-- step 4: range query pain -->
+    <g data-on="4" data-hot="4">
+      <text x="20" y="240" font-size="9" fill="var(--read)" font-weight="700">scan(09:00 … 09:03)</text>
+      <path d="M150 236 L 340 194" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6h-r)"/>
+      <path d="M150 238 L 430 194" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6h-r)"/>
+      <path d="M150 240 L 520 194" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6h-r)"/>
+      <path d="M150 242 L 610 194" stroke="var(--read)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a6h-r)"/>
+      <text x="20" y="262" font-size="9" opacity=".8">adjacent keys are scattered — sort order is lost — so a range query must be sent to ALL partitions</text>
+      <text x="20" y="278" font-size="9" opacity=".7">MongoDB hashed: range query → all shards. Riak, Couchbase, Voldemort: no PK range queries</text>
+    </g>
+    <!-- step 5: compound key -->
+    <g data-on="5-6" data-hot="5">
+      <rect x="20" y="226" width="270" height="44" rx="5" fill="var(--panel)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+      <text x="28" y="243" font-size="9" font-weight="700">Cassandra compound primary key</text>
+      <text x="28" y="259" font-size="9">(<tspan fill="var(--write)" font-weight="700">user_id</tspan>, <tspan fill="var(--read)" font-weight="700">update_timestamp</tspan>)</text>
+      <text x="300" y="243" font-size="9"><tspan fill="var(--write)" font-weight="700">first column</tspan> → hashed → picks the partition</text>
+      <text x="300" y="259" font-size="9"><tspan fill="var(--read)" font-weight="700">remaining columns</tspan> → sort order inside that partition</text>
+    </g>
+    <!-- step 6: payoff -->
+    <g data-on="6" data-hot="6">
+      <rect x="480" y="160" width="90" height="30" rx="4" fill="var(--read-soft)" stroke="var(--read)" stroke-width="2"/>
+      <text x="486" y="180" font-size="9" fill="var(--read)" font-weight="700">user 42's row</text>
+      <text x="20" y="290" font-size="9" fill="var(--read)">"user 42's updates from March, newest first" = one partition, one sorted range scan</text>
+      <text x="20" y="304" font-size="9" opacity=".7">but "all users' updates from March" = every partition. You cannot range-scan the hashed column.</text>
+    </g>
+    <defs>
+      <marker id="a6h-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+      <marker id="a6h-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SKEWED INPUT</strong> Four keys that are consecutive timestamps — exactly the kind of clustered, monotonically increasing keys that made one partition hot under key-range partitioning.</li>
+  <li><strong>SCATTER</strong> Each key goes through a hash function (MD5 in Cassandra and MongoDB, FNV in Voldemort — not cryptographic, but stable across processes). Near-identical inputs come out far apart, spread uniformly over 0…2³²−1.</li>
+  <li><strong>HASH RANGES = PARTITIONS</strong> The hash space is cut into ranges and each partition owns one. Boundaries can be evenly spaced or chosen pseudorandomly. Four adjacent minutes now live on four different partitions — load is balanced.</li>
+  <li><strong>WHAT WE LOST</strong> Keys that were neighbors are strangers now. A range query over the original key has no idea where its members went and must fan out to every partition. MongoDB hashed sharding does exactly that; Riak, Couchbase, and Voldemort simply don't offer primary-key range queries.</li>
+  <li><strong>CASSANDRA'S COMPROMISE</strong> Declare a compound primary key. Only the <em>first</em> column is hashed to choose the partition; the other columns are a concatenated index that sorts rows inside the partition's SSTables.</li>
+  <li><strong>ONE-TO-MANY, FOR FREE</strong> With (user_id, update_timestamp), one user's updates are on one partition, ordered by time: "user 42's posts in March" is a single sorted scan. Different users are spread by hash. What you can't do is range over the hashed column itself.</li>
+</ol>
+</figure>
+
+<h4>Consistent hashing — the confusing term</h4>
+<p>When hash-range boundaries are chosen pseudorandomly the scheme is sometimes called <strong>consistent hashing</strong>. The term comes from Karger et al. (1997), who designed it for internet-scale caches like a CDN: random boundaries avoid the need for central control or distributed consensus. <em>Consistent</em> here has nothing to do with replica consistency (Chapter 5) or ACID consistency (<a class="xref fwd" href="ch07-transactions.html#the-meaning-of-acid" data-tip="Ch 7 · The Meaning of ACID — atomicity, consistency, isolation, durability — and how loosely each is used · not yet written">Chapter&nbsp;7<sup>→7</sup></a>); it just names a particular approach to rebalancing. The book's verdict: that approach doesn't work well for databases (we'll see why under <a href="#strategies-for-rebalancing">Strategies for Rebalancing</a>), it is rarely used, and database docs that say "consistent hashing" are often inaccurate — so <strong>avoid the term and say hash partitioning</strong>.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · newer hashing algorithms</span>
+The 2nd edition treats consistent hashing more generously, covering the newer algorithms that achieve the "move as little as possible when N changes" property with far less metadata than a ring of random boundaries: Google's <strong>jump consistent hash</strong> (Lamping &amp; Veach — the 1st edition's reference [8]) and <strong>random slicing</strong>. The 1st edition's advice to say "hash partitioning" stands; what changes is that the low-metadata algorithms are now first-class rebalancing options rather than a footnote. <em>[inferred from the 2nd-edition references repo]</em></div>
+
+<h3 id="skewed-workloads-and-relieving-hot-spots"><a class="self" href="#skewed-workloads-and-relieving-hot-spots">Skewed Workloads and Relieving Hot Spots</a></h3>
+<span class="key-chip">skewed-workloads-and-relieving-hot-spots</span>
+
+<p>Hashing spreads <em>different</em> keys. It does nothing for the case where every request is for the <em>same</em> key: the hash of one ID is one number, so all of that key's traffic lands on one partition. Unusual, but real — a celebrity with millions of followers does something, and a storm of writes hits their user ID or the ID of the post being commented on (the reference is "3% of Twitter's servers dedicated to Justin Bieber"). Most data systems cannot compensate automatically, so <strong>the application must reduce the skew</strong>:</p>
+
+<figure>
+<svg viewBox="0 0 680 220" role="img" aria-label="Relieving a hot key: writes to one celebrity key all hit one partition; appending a two-digit random suffix spreads them over 100 sub-keys on different partitions, but every read must now fetch and combine all 100 sub-keys, and the system must track which keys are split.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="22" font-weight="700">before</text>
+    <rect x="20" y="70" width="160" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="2"/>
+    <text x="30" y="92" fill="var(--write)" font-weight="700">user:bieber</text>
+    <path d="M60 150 L 80 108" stroke="var(--write)" stroke-width="2" marker-end="url(#a6s-w)"/>
+    <path d="M100 160 L 100 108" stroke="var(--write)" stroke-width="2" marker-end="url(#a6s-w)"/>
+    <path d="M140 150 L 120 108" stroke="var(--write)" stroke-width="2" marker-end="url(#a6s-w)"/>
+    <text x="30" y="180" font-size="9" fill="var(--write)">millions of writes, one key,</text>
+    <text x="30" y="194" font-size="9" fill="var(--write)">one hash, one partition</text>
+    <text x="20" y="52" font-size="9" opacity=".7">hash("user:bieber") is always the same number</text>
+
+    <text x="240" y="22" font-weight="700">after: append a random 00–99</text>
+    <g>
+      <rect x="240" y="70" width="90" height="26" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="246" y="88" font-size="9" fill="var(--write)">bieber·00</text>
+      <rect x="340" y="70" width="90" height="26" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="346" y="88" font-size="9" fill="var(--write)">bieber·01</text>
+      <text x="440" y="88" font-size="9" opacity=".7">…</text>
+      <rect x="460" y="70" width="90" height="26" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="466" y="88" font-size="9" fill="var(--write)">bieber·98</text>
+      <rect x="560" y="70" width="90" height="26" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="566" y="88" font-size="9" fill="var(--write)">bieber·99</text>
+    </g>
+    <path d="M270 140 L 280 100" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a6s-w)"/>
+    <path d="M380 140 L 385 100" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a6s-w)"/>
+    <path d="M500 140 L 505 100" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a6s-w)"/>
+    <path d="M610 140 L 605 100" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a6s-w)"/>
+    <text x="240" y="52" font-size="9" opacity=".7">100 distinct keys ⇒ 100 different hashes ⇒ spread over the partitions</text>
+    <text x="240" y="158" font-size="9" fill="var(--write)">each write picks a random suffix — 1% of the load per sub-key</text>
+    <!-- read side -->
+    <path d="M285 66 L 420 30" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none"/>
+    <path d="M385 66 L 430 32" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none"/>
+    <path d="M505 66 L 450 32" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none"/>
+    <path d="M605 66 L 460 30" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none"/>
+    <text x="240" y="186" font-size="9" fill="var(--read)">every READ must fetch all 100 sub-keys and combine them</text>
+    <text x="240" y="202" font-size="9" opacity=".8">+ bookkeeping: only split the few hot keys, so you need a record of which keys are split</text>
+    <defs><marker id="a6s-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>The book's one hot-key technique: append (or prepend) a small random number to a known-hot key. Two decimal digits split the writes across 100 keys, which the hash then spreads across partitions. The cost lands on the read path — 100 fetches and a merge — and on bookkeeping, because you only want to do this for the handful of hot keys, so you must track which ones are split. Kleppmann's 2017 forecast: "perhaps in the future, data systems will be able to automatically detect and compensate for skewed workloads; but for now, you need to think through the trade-offs."</figcaption>
+</figure>
+
+<div class="ed2"><span class="tag">2ND EDITION · the "perhaps in the future" arrived, partly</span>
+The 2nd edition's examples include systems that do detect and react to hot partitions: <strong>DynamoDB adaptive capacity</strong> (which shifts throughput toward hot partitions and splits them), and <strong>S3's</strong> internal sharding of the key namespace, where the old "randomize your key prefixes" advice was retired once the service handled skew itself. Application-side key salting remains the general-purpose tool; the change is that managed services now absorb the common cases. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="partitioning-and-secondary-indexes">
+<span class="key-chip">partitioning-and-secondary-indexes</span>
+<h2><a class="self" href="#partitioning-and-secondary-indexes">Partitioning and Secondary Indexes</a></h2>
+
+<p>Everything so far assumed records are reached only by primary key, so the key alone routes every read and write. <strong>Secondary indexes</strong> break that assumption. A secondary index (recall <a class="xref back" href="ch03-storage-and-retrieval.html#other-indexing-structures" data-tip="Ch 3 · Other Indexing Structures — secondary indexes; heap files vs clustered vs covering indexes; concatenated and multi-dimensional indexes">Chapter&nbsp;3<sup>←3</sup></a>) usually doesn't identify a record uniquely — it finds <em>occurrences of a value</em>: all actions by user 123, all articles containing "hogwash", all red cars. They are the bread and butter of relational databases, common in document databases, the whole reason search servers like Solr and Elasticsearch exist — and some key-value stores (HBase, Voldemort) avoided them because of the implementation complexity, while others (Riak) added them because they're so useful. The trouble is that <strong>a secondary index doesn't map neatly onto partitions</strong>: the value you're searching by has no relationship to the key that decided where the record lives. There are two ways to partition an index: <em>by document</em> and <em>by term</em>.</p>
+
+<p><small>Footnote worth keeping: if your store only offers key-value access, you may be tempted to build a secondary index yourself as a value→IDs mapping in application code. Do that and you own its consistency — race conditions and partial write failures will happily desynchronize it from the data, which is one of the reasons <a class="xref fwd" href="ch07-transactions.html#single-object-and-multi-object-operations" data-tip="Ch 7 · Single-Object and Multi-Object Operations — why several writes (e.g. a record and its index entry) need to succeed or fail together · not yet written">multi-object transactions<sup>→7</sup></a> exist.</small></p>
+
+<div class="feynman"><span class="tag">FEYNMAN · where does the card catalog live?</span>
+The books are already spread across rooms by ID. Now readers want "all the red books." Option one: each room keeps its <em>own</em> catalog of the books in that room. Shelving a book means updating one catalog — the one in its room. But finding all red books means walking into every room and checking every catalog. Option two: <em>one</em> catalog for the whole library, itself split alphabetically across rooms (colors A–R in room 0, S–Z in room 1). Now "red" is one visit. But shelving a book means running to the "color" catalog room <em>and</em> the "make" catalog room to add cards — and if a runner is slow, the catalog lags behind the shelves. Local index: cheap writes, expensive reads. Global index: expensive writes, cheap reads.</div>
+
+<h3 id="partitioning-secondary-indexes-by-document"><a class="self" href="#partitioning-secondary-indexes-by-document">Partitioning Secondary Indexes by Document</a></h3>
+<span class="key-chip">partitioning-secondary-indexes-by-document</span>
+
+<p>The book's example: a used-car website. Each listing has a unique <em>document ID</em>, and the database is partitioned by it (IDs 0–499 in partition 0, 500–999 in partition 1, …). Users filter by color and make, so those fields are indexed. In the document-partitioned approach, <strong>each partition keeps its own secondary indexes covering only its own documents</strong> — it neither knows nor cares what other partitions hold. Whenever a red car is added to partition 0, that partition appends its ID to its own <code>color:red</code> list. The stepper walks both approaches on the same data:</p>
+
+<figure class="anim" id="anim-secidx">
+<svg viewBox="0 0 680 330" role="img" aria-label="Two partitions of car listings by document ID. Document-partitioned (local) index: each partition indexes only its own cars; a write touches one partition; a read for color:red must scatter to every partition and gather. Term-partitioned (global) index: the index is partitioned by term (colors a–r vs s–z); a read goes to one index partition; a write must update index partitions on other nodes, typically asynchronously.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- two data partitions -->
+    <rect x="20" y="40" width="300" height="130" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="30" y="58" font-weight="700">partition 0 · doc IDs 0–499</text>
+    <rect x="360" y="40" width="300" height="130" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="370" y="58" font-weight="700">partition 1 · doc IDs 500–999</text>
+    <g font-size="9">
+      <text x="30" y="78">191 · red · Honda</text>
+      <text x="30" y="92">214 · silver · Ford</text>
+      <text x="30" y="106">306 · red · Ford</text>
+      <text x="370" y="78">515 · silver · Audi</text>
+      <text x="370" y="92">768 · red · Volvo</text>
+      <text x="370" y="106">893 · black · Ford</text>
+    </g>
+    <!-- LOCAL INDEX (steps 1-4) -->
+    <g data-on="1-4">
+      <rect x="164" y="66" width="150" height="96" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="170" y="80" font-size="8" opacity=".7">local index (own docs only)</text>
+      <text x="170" y="110" font-size="8">color:silver → [214]</text>
+      <text x="170" y="124" font-size="8">make:Ford → [214, 306]</text>
+      <text x="170" y="138" font-size="8">make:Honda → [191]</text>
+      <rect x="504" y="66" width="150" height="96" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="510" y="80" font-size="8" opacity=".7">local index (own docs only)</text>
+      <text x="510" y="96" font-size="8">color:red → [768]</text>
+      <text x="510" y="110" font-size="8">color:silver → [515]</text>
+      <text x="510" y="124" font-size="8">color:black → [893]</text>
+      <text x="510" y="138" font-size="8">make:Ford → [893]</text>
+    </g>
+    <g data-on="1"><text x="170" y="96" font-size="8">color:red → [191, 306]</text></g>
+    <g data-on="2-4"><text x="170" y="96" font-size="8">color:red → [191, 306, 412]</text></g>
+    <g data-on="1"><text x="20" y="200" font-size="9" opacity=".8">document-partitioned = LOCAL index: each partition indexes only its own documents. Red cars appear in both indexes.</text></g>
+    <!-- step 2: local write -->
+    <g data-on="2" data-hot="2">
+      <text x="20" y="230" font-size="9" fill="var(--write)" font-weight="700">add car 412 · red · Ford</text>
+      <path d="M120 222 L 120 176" stroke="var(--write)" stroke-width="2" marker-end="url(#a6i-w)"/>
+      <rect x="166" y="86" width="146" height="14" rx="2" fill="none" stroke="var(--write)" stroke-width="1.5"/>
+      <text x="20" y="200" font-size="9" opacity=".8">write: 412 belongs to partition 0 by ID, so partition 0 stores it AND updates its own index. One partition touched.</text>
+    </g>
+    <!-- step 3: scatter/gather read -->
+    <g data-on="3" data-hot="3">
+      <text x="280" y="250" font-size="9" fill="var(--read)" font-weight="700">find color:red</text>
+      <path d="M300 240 L 220 176" stroke="var(--read)" stroke-width="2" marker-end="url(#a6i-r)"/>
+      <path d="M350 240 L 560 176" stroke="var(--read)" stroke-width="2" marker-end="url(#a6i-r)"/>
+      <path d="M230 176 C 250 210, 290 232, 318 244" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none" marker-end="url(#a6i-r)"/>
+      <path d="M560 176 C 500 210, 400 236, 370 246" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none" marker-end="url(#a6i-r)"/>
+      <text x="200" y="272" font-size="9" fill="var(--read)">[191, 306, 412] ∪ [768] — combined by the client or coordinator</text>
+      <text x="20" y="200" font-size="9" opacity=".8">read: nothing forced red cars onto one partition, so the query goes to EVERY partition and results are merged.</text>
+    </g>
+    <!-- step 4: tail latency -->
+    <g data-on="4" data-hot="4">
+      <rect x="20" y="186" width="640" height="20" rx="3" fill="var(--hot)"/>
+      <text x="26" y="200" font-size="9" font-weight="700">scatter/gather suffers tail latency amplification: as slow as the slowest partition, even in parallel</text>
+      <text x="20" y="232" font-size="9" opacity=".8">MongoDB, Riak, Cassandra, Elasticsearch, VoltDB use it. Vendors: design so index queries hit one partition —</text>
+      <text x="20" y="246" font-size="9" opacity=".8">not always possible, e.g. filtering by color AND make in the same query.</text>
+    </g>
+    <!-- GLOBAL INDEX (steps 5-7) -->
+    <g data-on="5-7">
+      <rect x="164" y="66" width="150" height="96" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="170" y="80" font-size="8" opacity=".7">global index · terms a–r</text>
+      <text x="170" y="96" font-size="8">color:black → [893]</text>
+      <text x="170" y="110" font-size="8">color:red → [191, 306, 768]</text>
+      <text x="170" y="124" font-size="8">make:Audi → [515]</text>
+      <text x="170" y="152" font-size="8">make:Honda → [191]</text>
+      <rect x="504" y="66" width="150" height="96" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="510" y="80" font-size="8" opacity=".7">global index · terms s–z</text>
+      <text x="510" y="110" font-size="8">make:Volvo → [768]</text>
+    </g>
+    <g data-on="5-6"><text x="170" y="138" font-size="8">make:Ford → [214, 306, 893]</text><text x="510" y="96" font-size="8">color:silver → [214, 515]</text></g>
+    <g data-on="7"><text x="170" y="138" font-size="8" fill="var(--write)">make:Ford → […, 306, 893, 950]</text><text x="510" y="96" font-size="8" fill="var(--write)">color:silver → [214, 515, 950]</text></g>
+    <g data-on="5"><text x="20" y="200" font-size="9" opacity=".8">term-partitioned = GLOBAL index over all documents, itself partitioned by TERM, not doc ID. All red cars under one entry.</text>
+      <text x="20" y="216" font-size="9" opacity=".7">partition by the term itself (range scans, e.g. price) or by its hash (even load). Boundary here: a–r | s–z.</text></g>
+    <!-- step 6: single-partition read -->
+    <g data-on="6" data-hot="6">
+      <text x="280" y="250" font-size="9" fill="var(--read)" font-weight="700">find color:red</text>
+      <path d="M300 240 L 240 176" stroke="var(--read)" stroke-width="2" marker-end="url(#a6i-r)"/>
+      <rect x="166" y="100" width="146" height="14" rx="2" fill="none" stroke="var(--read)" stroke-width="1.5"/>
+      <text x="20" y="200" font-size="9" opacity=".8">read: "red" is in a–r, so exactly one index partition answers with every red car in the whole database. No scatter, no gather.</text>
+    </g>
+    <!-- step 7: write to global index -->
+    <g data-on="7" data-hot="7">
+      <text x="380" y="250" font-size="9" fill="var(--write)" font-weight="700">add car 950 · silver · Ford</text>
+      <path d="M470 240 L 470 176" stroke="var(--write)" stroke-width="2" marker-end="url(#a6i-w)"/>
+      <path d="M440 236 C 400 220, 340 190, 300 166" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="4 3" fill="none" marker-end="url(#a6i-w)"/>
+      <path d="M520 236 C 560 210, 580 190, 590 166" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="4 3" fill="none" marker-end="url(#a6i-w)"/>
+      <rect x="166" y="128" width="146" height="14" rx="2" fill="none" stroke="var(--write)" stroke-width="1.5"/>
+      <rect x="506" y="86" width="146" height="14" rx="2" fill="none" stroke="var(--write)" stroke-width="1.5"/>
+      <text x="20" y="200" font-size="9" opacity=".8">write: 950 lands on partition 1, but its terms live in a–r (make:Ford) AND s–z (color:silver) — other nodes.</text>
+      <text x="20" y="216" font-size="9" opacity=".8">updating them synchronously = a distributed transaction per write. In practice the index is updated ASYNCHRONOUSLY.</text>
+      <text x="20" y="290" font-size="9" opacity=".7">DynamoDB: global secondary indexes usually catch up "within a fraction of a second" — longer under infrastructure faults</text>
+    </g>
+    <defs>
+      <marker id="a6i-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a6i-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>LOCAL INDEXES</strong> Cars are partitioned by document ID. In the document-partitioned scheme each partition maintains secondary indexes over <em>its own</em> documents only. Red cars exist in both partitions, so <code>color:red</code> appears in both local indexes with different ID lists.</li>
+  <li><strong>LOCAL WRITE</strong> Adding car 412 (red Ford): its ID says partition 0, so partition 0 stores the document and updates its own <code>color:red</code> and <code>make:Ford</code> entries. One partition, one node, no coordination — writes are cheap.</li>
+  <li><strong>SCATTER/GATHER READ</strong> "All red cars" can't be answered by one partition, because nothing forced red cars together. The query is sent to every partition and the partial results are merged. This is scatter/gather.</li>
+  <li><strong>THE TAIL-LATENCY TAX</strong> Even in parallel, the answer waits for the slowest partition — the tail latency amplification from Chapter 1. Still, MongoDB, Riak, Cassandra, Elasticsearch, SolrCloud, and VoltDB all use local indexes; vendors advise designing so index queries hit one partition, which multi-field filters make impossible.</li>
+  <li><strong>GLOBAL INDEX</strong> Alternative: one index covering all partitions — but it can't sit on one node (bottleneck), so it is itself partitioned, <em>by term</em>: colors and makes a–r on one index partition, s–z on another. "Term" is borrowed from full-text search, where terms are the words in a document. Partition by the term itself for range scans (e.g. price) or by its hash for even load.</li>
+  <li><strong>ONE-PARTITION READ</strong> "Red" falls in a–r, so a single index partition returns every red car in the database. Reads are as cheap as a primary-key lookup.</li>
+  <li><strong>THE WRITE PAYS</strong> Adding car 950 (silver Ford) stores the document on partition 1 but must update <code>make:Ford</code> on the a–r index partition and <code>color:silver</code> on s–z — different nodes. Doing that atomically needs a distributed transaction, which most databases lack, so global indexes are updated <em>asynchronously</em>: read the index right after a write and your change may not be there yet.</li>
+</ol>
+</figure>
+
+<p>Because a document-partitioned index lives with its documents, it's also called a <strong>local index</strong>; the term-partitioned one is a <strong>global index</strong>. The local approach makes writes trivially single-partition and reads expensive: <em>scatter/gather</em>, with the tail latency amplification of <a class="xref back" href="ch01-reliable-scalable-maintainable.html#describing-performance" data-tip="Ch 1 · Describing Performance — response time as a distribution; percentiles; a request fanned out to many backends is as slow as the slowest">Chapter&nbsp;1<sup>←1</sup></a>. Widely used regardless: MongoDB, Riak, Cassandra, Elasticsearch, SolrCloud, VoltDB.</p>
+
+<h3 id="partitioning-secondary-indexes-by-term"><a class="self" href="#partitioning-secondary-indexes-by-term">Partitioning Secondary Indexes by Term</a></h3>
+<span class="key-chip">partitioning-secondary-indexes-by-term</span>
+
+<p>The <strong>global index</strong> flips the trade. It covers data in all partitions but is partitioned <em>differently from the primary key</em> — by the term being looked up (<code>color:red</code>), either by the term's own value (enables range scans, e.g. asking price) or by its hash (even load). Reads become efficient: the client asks only the index partition that owns the term. Writes become slower and more complicated: a single document's terms may scatter across several index partitions on several nodes, and an always-up-to-date global index would need a distributed transaction across all affected partitions — <a class="xref fwd" href="ch09-consistency-and-consensus.html#distributed-transactions-and-consensus" data-tip="Ch 9 · Distributed Transactions and Consensus — atomic commit across nodes (2PC) and why it's hard · not yet written">Chapter&nbsp;9<sup>→9</sup></a> territory, and not supported everywhere. So in practice global secondary indexes are <strong>asynchronous</strong>: Amazon DynamoDB documents that its global secondary indexes usually update within a fraction of a second but can lag under infrastructure faults. Riak's search feature and Oracle's data warehouse (which lets you choose local or global indexing) are other users; the book returns to building term-partitioned indexes as derived data in <a class="xref fwd" href="ch12-future-of-data-systems.html#composing-data-storage-technologies" data-tip="Ch 12 · Composing Data Storage Technologies — indexes, caches, and search as derived views maintained from a log · not yet written">Chapter&nbsp;12<sup>→12</sup></a>.</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th></th><th>Document-partitioned (local)</th><th>Term-partitioned (global)</th></tr></thead>
+<tbody>
+<tr><td>Index lives</td><td>with the documents it covers, in the same partition</td><td>in its own partitions, split by term (value or hash of value)</td></tr>
+<tr><td>Write to one document</td><td><span style="color:var(--write);font-weight:600">one partition</span> — data and index together</td><td><span style="color:var(--write);font-weight:600">several partitions</span> — one per distinct term, on other nodes; usually async</td></tr>
+<tr><td>Read by indexed value</td><td><span style="color:var(--read);font-weight:600">scatter/gather</span> to all partitions; tail-latency amplified</td><td><span style="color:var(--read);font-weight:600">one index partition</span></td></tr>
+<tr><td>Freshness</td><td>immediate (same partition)</td><td>eventually consistent unless a distributed transaction is used</td></tr>
+<tr><td>Range scans on the indexed value</td><td>possible per partition, still scatter/gather</td><td>possible if partitioned by term value (not by hash)</td></tr>
+<tr><td>Systems</td><td>MongoDB, Riak 2i, Cassandra, Elasticsearch, SolrCloud, VoltDB</td><td>DynamoDB GSIs, Riak search, Oracle global indexes</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="rebalancing-partitions">
+<span class="key-chip">rebalancing-partitions</span>
+<h2><a class="self" href="#rebalancing-partitions">Rebalancing Partitions</a></h2>
+
+<p>Databases change: query throughput grows (more CPUs), the dataset grows (more disks and RAM), a machine dies (others must take over). All three mean moving data and requests between nodes — <strong>rebalancing</strong>. Whatever the partitioning scheme, rebalancing has minimum requirements: afterwards, load (storage, reads, writes) should be shared fairly; <em>during</em> it, the database must keep accepting reads and writes; and <strong>no more data than necessary should move</strong>, because rebalancing is expensive network and disk I/O.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · move shelves, don't renumber books</span>
+Opening a new room in the library, the worst thing you can do is re-derive every book's room from scratch — that's "hash mod N", and it reshuffles almost the entire collection. The good strategies all share one trick: <strong>the unit that moves is a whole shelf (a partition), never an individual book, and a book's shelf never changes</strong>. Only the shelf's room changes. Whether you start with far more shelves than rooms (fixed number of partitions), saw a shelf in half when it gets too full (dynamic partitioning), or give each room a fixed number of shelves (proportional to nodes) is the rest of this section.</div>
+
+<h3 id="strategies-for-rebalancing"><a class="self" href="#strategies-for-rebalancing">Strategies for Rebalancing</a></h3>
+<span class="key-chip">strategies-for-rebalancing</span>
+
+<h4>How not to do it: hash mod N</h4>
+<p>We said hash partitioning assigns each partition a <em>range</em> of hashes. Why not just <code>hash(key) mod N</code> with N nodes — it returns 0…N−1, a node number, done? Because when N changes, almost every key changes node:</p>
+
+<figure class="anim" id="anim-modn">
+<svg viewBox="0 0 680 250" role="img" aria-label="Hash mod N rebalancing: the key with hash 123456 lives on node 6 of 10; adding an eleventh node moves it to node 3; a twelfth moves it to node 0 — and the same happens to most keys, so nearly the whole dataset moves on every cluster size change.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="30" font-weight="700">hash(key) = 123456</text>
+    <!-- row N=10 -->
+    <g>
+      <text x="20" y="72" font-size="9">N = 10</text>
+      <g font-size="8">
+        <rect x="80" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="90" y="72">0</text>
+        <rect x="114" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="124" y="72">1</text>
+        <rect x="148" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="158" y="72">2</text>
+        <rect x="182" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="192" y="72">3</text>
+        <rect x="216" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="226" y="72">4</text>
+        <rect x="250" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="260" y="72">5</text>
+        <rect x="284" y="58" width="30" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="294" y="72" fill="var(--write)" font-weight="700">6</text>
+        <rect x="318" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="328" y="72">7</text>
+        <rect x="352" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="362" y="72">8</text>
+        <rect x="386" y="58" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="396" y="72">9</text>
+      </g>
+      <text x="440" y="72" font-size="9">123456 mod 10 = <tspan fill="var(--write)" font-weight="700">6</tspan></text>
+    </g>
+    <!-- row N=11 -->
+    <g data-on="2-4" data-hot="2">
+      <text x="20" y="122" font-size="9">N = 11</text>
+      <g font-size="8">
+        <rect x="80" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="90" y="122">0</text>
+        <rect x="114" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="124" y="122">1</text>
+        <rect x="148" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="158" y="122">2</text>
+        <rect x="182" y="108" width="30" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="192" y="122" fill="var(--write)" font-weight="700">3</text>
+        <rect x="216" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="226" y="122">4</text>
+        <rect x="250" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="260" y="122">5</text>
+        <rect x="284" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="294" y="122">6</text>
+        <rect x="318" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="328" y="122">7</text>
+        <rect x="352" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="362" y="122">8</text>
+        <rect x="386" y="108" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="396" y="122">9</text>
+        <rect x="420" y="108" width="30" height="20" rx="3" fill="none" stroke="var(--ok)" stroke-width="1.5"/><text x="428" y="122" fill="var(--ok)">10</text>
+      </g>
+      <path d="M299 80 L 199 106" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a6m-w)"/>
+      <text x="460" y="122" font-size="9">123456 mod 11 = <tspan fill="var(--write)" font-weight="700">3</tspan> — moved</text>
+    </g>
+    <!-- row N=12 -->
+    <g data-on="3-4" data-hot="3">
+      <text x="20" y="172" font-size="9">N = 12</text>
+      <g font-size="8">
+        <rect x="80" y="158" width="30" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="90" y="172" fill="var(--write)" font-weight="700">0</text>
+        <rect x="114" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="124" y="172">1</text>
+        <rect x="148" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="158" y="172">2</text>
+        <rect x="182" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="192" y="172">3</text>
+        <rect x="216" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="226" y="172">4</text>
+        <rect x="250" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="260" y="172">5</text>
+        <rect x="284" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="294" y="172">6</text>
+        <rect x="318" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="328" y="172">7</text>
+        <rect x="352" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="362" y="172">8</text>
+        <rect x="386" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="396" y="172">9</text>
+        <rect x="420" y="158" width="30" height="20" rx="3" fill="none" stroke="currentColor" stroke-opacity=".5"/><text x="428" y="172">10</text>
+        <rect x="454" y="158" width="30" height="20" rx="3" fill="none" stroke="var(--ok)" stroke-width="1.5"/><text x="462" y="172" fill="var(--ok)">11</text>
+      </g>
+      <path d="M197 130 L 97 156" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a6m-w)"/>
+      <text x="494" y="172" font-size="9">mod 12 = <tspan fill="var(--write)" font-weight="700">0</tspan> — moved again</text>
+    </g>
+    <!-- step 4: everyone moves -->
+    <g data-on="4" data-hot="4">
+      <rect x="20" y="196" width="640" height="44" rx="5" fill="var(--hot)"/>
+      <text x="28" y="214" font-size="9" font-weight="700">this key is typical: P(mod N ≠ mod N+1) ≈ N/(N+1) for a random key — adding ONE node moves ~91% of the data</text>
+      <text x="28" y="230" font-size="9" opacity=".85">rebalancing that moves nearly everything is unaffordable. We need a scheme that moves only what must move.</text>
+    </g>
+    <defs><marker id="a6m-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>TEN NODES</strong> A key hashes to 123456. With 10 nodes numbered 0–9, <code>123456 mod 10 = 6</code> — the last decimal digit — so the key lives on node 6. Simple, and it does spread keys evenly.</li>
+  <li><strong>ADD ONE NODE</strong> Grow to 11 nodes and <code>123456 mod 11 = 3</code>. The key must physically move from node 6 to node 3, even though node 6 is perfectly healthy and nothing about the key changed.</li>
+  <li><strong>ADD ANOTHER</strong> Grow to 12 and <code>123456 mod 12 = 0</code>. It moves again. Every change of N reshuffles the same key to an unrelated node.</li>
+  <li><strong>IT'S EVERY KEY</strong> Nothing is special about 123456: for almost every key, the remainder changes when the divisor does, so adding a single node moves the vast majority of the data. That violates the "move no more than necessary" requirement so badly that the approach is a non-starter. The fix is to break the link between <em>number of nodes</em> and <em>which partition a key belongs to</em>.</li>
+</ol>
+</figure>
+
+<h4>Fixed number of partitions</h4>
+<p>The simple, common answer: create <strong>many more partitions than nodes</strong> from the start and give each node several. A 10-node cluster might be split into 1,000 partitions, ~100 per node. When a node joins, it <em>steals a few partitions from every existing node</em> until things are fair again; when a node leaves, the reverse. Only <strong>entire partitions</strong> move. The number of partitions never changes and neither does the assignment of keys to partitions — the only thing that changes is the assignment of partitions to nodes. That reassignment takes time (bulk network transfer), so the old assignment keeps serving reads and writes while the transfer is in flight.</p>
+
+<figure class="anim" id="anim-fixed">
+<svg viewBox="0 0 680 300" role="img" aria-label="Fixed number of partitions: four nodes each hold five of twenty partitions; a fifth node joins empty and takes one partition from each existing node; during transfer the old owner keeps serving; afterwards every node holds four partitions, only four of twenty moved, and key-to-partition assignment never changed.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- nodes -->
+    <g>
+      <rect x="20" y="40" width="110" height="180" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="30" y="58" font-weight="700">node 0</text>
+      <rect x="150" y="40" width="110" height="180" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="160" y="58" font-weight="700">node 1</text>
+      <rect x="280" y="40" width="110" height="180" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="290" y="58" font-weight="700">node 2</text>
+      <rect x="410" y="40" width="110" height="180" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="420" y="58" font-weight="700">node 3</text>
+    </g>
+    <!-- stable partitions on each node (4 that never move) -->
+    <g font-size="9">
+      <rect x="30" y="66" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="36" y="80">p0</text>
+      <rect x="30" y="92" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="36" y="106">p1</text>
+      <rect x="30" y="118" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="36" y="132">p2</text>
+      <rect x="30" y="144" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="36" y="158">p3</text>
+      <rect x="160" y="66" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="166" y="80">p5</text>
+      <rect x="160" y="92" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="166" y="106">p6</text>
+      <rect x="160" y="118" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="166" y="132">p7</text>
+      <rect x="160" y="144" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="166" y="158">p8</text>
+      <rect x="290" y="66" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="296" y="80">p10</text>
+      <rect x="290" y="92" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="296" y="106">p11</text>
+      <rect x="290" y="118" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="296" y="132">p12</text>
+      <rect x="290" y="144" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="296" y="158">p13</text>
+      <rect x="420" y="66" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="426" y="80">p15</text>
+      <rect x="420" y="92" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="426" y="106">p16</text>
+      <rect x="420" y="118" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="426" y="132">p17</text>
+      <rect x="420" y="144" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="426" y="158">p18</text>
+    </g>
+    <!-- the 5th partition on each node: present steps 1-4 (moving in 3-4), gone in 5-6 -->
+    <g data-on="1-4" font-size="9">
+      <rect x="30" y="170" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="36" y="184">p4</text>
+      <rect x="160" y="170" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="166" y="184">p9</text>
+      <rect x="290" y="170" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="296" y="184">p14</text>
+      <rect x="420" y="170" width="90" height="20" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="426" y="184">p19</text>
+    </g>
+    <g data-on="1"><text x="20" y="250" font-size="9" opacity=".8">20 partitions on 4 nodes, 5 each. Keys were assigned to partitions once (by hash range) and that mapping is permanent.</text></g>
+    <!-- step 2: new node arrives -->
+    <g data-on="2-6" data-hot="2">
+      <rect x="550" y="40" width="110" height="180" rx="8" fill="none" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 3"/><text x="560" y="58" font-weight="700" fill="var(--ok)">node 4 (new)</text>
+    </g>
+    <g data-on="2"><text x="560" y="130" font-size="9" fill="var(--ok)">empty</text><text x="20" y="250" font-size="9" opacity=".8">a fifth node joins with nothing on it. Fair share is now 20 / 5 = 4 partitions each.</text></g>
+    <!-- step 3: steal one from each -->
+    <g data-on="3-4" data-hot="3">
+      <path d="M120 180 C 300 236, 480 236, 556 76" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a6f-w)"/>
+      <path d="M250 180 C 380 226, 500 226, 556 102" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a6f-w)"/>
+      <path d="M380 180 C 460 216, 520 216, 556 128" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a6f-w)"/>
+      <path d="M510 180 C 530 190, 540 190, 556 154" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a6f-w)"/>
+    </g>
+    <g data-on="3"><text x="20" y="250" font-size="9" opacity=".8">node 4 steals ONE whole partition from EACH existing node: p4, p9, p14, p19. Four of twenty partitions move — 20%, not 91%.</text></g>
+    <!-- step 4: in flight -->
+    <g data-on="4" data-hot="4">
+      <rect x="30" y="170" width="90" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="36" y="184" font-size="9" fill="var(--write)">p4 · copying…</text>
+      <rect x="160" y="170" width="90" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="166" y="184" font-size="9" fill="var(--write)">p9 · copying…</text>
+      <rect x="290" y="170" width="90" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="296" y="184" font-size="9" fill="var(--write)">p14 · copying…</text>
+      <rect x="420" y="170" width="90" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="426" y="184" font-size="9" fill="var(--write)">p19 · copying…</text>
+      <path d="M75 236 L 75 194" stroke="var(--read)" stroke-width="1.6" marker-end="url(#a6f-r)"/><text x="40" y="250" font-size="9" fill="var(--read)">get(k∈p4)</text>
+      <text x="140" y="250" font-size="9" opacity=".8">the transfer takes a while (bulk data over the network). Until it completes,</text>
+      <text x="140" y="264" font-size="9" opacity=".8">reads and writes for p4 still go to node 0 — the OLD assignment stays in force.</text>
+    </g>
+    <!-- step 5: done -->
+    <g data-on="5-6" font-size="9">
+      <rect x="560" y="66" width="90" height="20" rx="3" fill="var(--panel2)" stroke="var(--ok)"/><text x="566" y="80">p4</text>
+      <rect x="560" y="92" width="90" height="20" rx="3" fill="var(--panel2)" stroke="var(--ok)"/><text x="566" y="106">p9</text>
+      <rect x="560" y="118" width="90" height="20" rx="3" fill="var(--panel2)" stroke="var(--ok)"/><text x="566" y="132">p14</text>
+      <rect x="560" y="144" width="90" height="20" rx="3" fill="var(--panel2)" stroke="var(--ok)"/><text x="566" y="158">p19</text>
+    </g>
+    <g data-on="5" data-hot="5"><text x="20" y="250" font-size="9" opacity=".8">done: 4 per node. Partition count unchanged (20), key→partition unchanged; only partition→node changed. Removal = film backwards.</text>
+      <text x="20" y="266" font-size="9" opacity=".7">Riak, Elasticsearch, Couchbase, Voldemort work this way. Uneven hardware? Give beefy nodes more partitions.</text></g>
+    <!-- step 6: the sizing dilemma -->
+    <g data-on="6" data-hot="6">
+      <rect x="20" y="232" width="640" height="56" rx="5" fill="var(--hot)"/>
+      <text x="28" y="250" font-size="9" font-weight="700">the catch: partition count is fixed at setup = the MAXIMUM node count — too few caps growth, too many cost overhead</text>
+      <text x="28" y="266" font-size="9" opacity=".9">each partition is a fixed FRACTION of the data, so partitions grow with the dataset — huge ones make rebalancing</text>
+      <text x="28" y="282" font-size="9" opacity=".9">and recovery slow; tiny ones waste overhead. "Just right" is hard when the dataset size is unpredictable.</text>
+    </g>
+    <defs>
+      <marker id="a6f-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a6f-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>MANY PARTITIONS, FEW NODES</strong> Twenty partitions on four nodes, five apiece (the book's example is 1,000 on 10). Each key was assigned to a partition once by hash range, and that assignment is permanent.</li>
+  <li><strong>A NODE JOINS</strong> Node 4 arrives empty. The fair share is now 20 ÷ 5 = 4 partitions per node.</li>
+  <li><strong>STEAL WHOLE PARTITIONS</strong> The newcomer takes one entire partition from each existing node. Four of twenty partitions — 20% of the data — move, versus the ~91% that hash mod N would have reshuffled. Nothing moves that didn't have to.</li>
+  <li><strong>SERVE FROM THE OLD OWNER MEANWHILE</strong> Copying a partition is a bulk network transfer and takes time. Until it completes, the old assignment is used: a read for a key in p4 still goes to node 0. The cluster keeps accepting reads and writes throughout.</li>
+  <li><strong>STEADY STATE</strong> Every node holds four partitions. The partition count is still 20 and key→partition never changed; only partition→node did. Removing a node is the same film in reverse. Riak, Elasticsearch, Couchbase, and Voldemort do this — and you can hand more partitions to more powerful nodes.</li>
+  <li><strong>THE SIZING DILEMMA</strong> The partition count is set once and is effectively the maximum node count, so it must be high enough for future growth — but every partition has overhead. And because each partition is a fixed fraction of the data, partitions balloon as the dataset grows, making rebalancing and failure recovery slow. When dataset size is highly variable, no fixed number is "just right." That motivates dynamic partitioning.</li>
+</ol>
+</figure>
+
+<h4>Dynamic partitioning</h4>
+<p>For key-range partitioning, a fixed set of partitions with fixed boundaries would be a disaster: guess the boundaries wrong and all the data lands in one partition while the others sit empty, and fixing boundaries by hand is tedious. So key-range stores like HBase and RethinkDB <strong>create partitions dynamically</strong>: when a partition exceeds a configured size (HBase default: 10 GB), it is <em>split</em> into two halves; when deletes shrink one below a threshold, it is <em>merged</em> with a neighbor — exactly what happens at the top level of a <a class="xref back" href="ch03-storage-and-retrieval.html#b-trees" data-tip="Ch 3 · B-Trees — balanced pages that split on overflow and keep the tree balanced">B-tree<sup>←3</sup></a>. Each partition lives on one node, a node holds many partitions, and after a split one half can be shipped to another node to balance load (HBase moves the files via HDFS).</p>
+
+<figure>
+<svg viewBox="0 0 680 230" role="img" aria-label="Dynamic partitioning: a key-range partition grows past its size threshold and is split into two halves at the median key; one half is moved to another node; conversely an empty database starts as a single partition on one node until the first split, which pre-splitting avoids.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="22" font-weight="700">split when too big</text>
+    <rect x="20" y="40" width="200" height="34" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="30" y="61">[A, M) · 10.4 GB</text>
+    <text x="150" y="61" font-size="9" fill="var(--bad)">&gt; 10 GB</text>
+    <path d="M120 78 L 120 98" stroke="currentColor" stroke-opacity=".7" marker-end="url(#a6d-i)"/>
+    <text x="130" y="92" font-size="9" opacity=".8">split at the median key</text>
+    <rect x="20" y="104" width="96" height="34" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="28" y="125" font-size="9">[A, F) · 5.2 GB</text>
+    <rect x="124" y="104" width="96" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)"/><text x="132" y="125" font-size="9" fill="var(--write)">[F, M) · 5.2 GB</text>
+    <path d="M220 121 L 270 121" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a6d-w)"/>
+    <rect x="276" y="98" width="110" height="46" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="286" y="116" font-size="9" font-weight="700">another node</text><text x="286" y="132" font-size="9" opacity=".8">takes one half</text>
+    <text x="20" y="166" font-size="9" opacity=".8">merge is the mirror image: shrink below a threshold → join with an adjacent range</text>
+    <text x="20" y="182" font-size="9" opacity=".8">partition count tracks data volume: small data, few partitions; big data, many — each capped at the max size</text>
+
+    <text x="420" y="22" font-weight="700">the cold-start caveat</text>
+    <rect x="420" y="40" width="240" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="430" y="61" fill="var(--write)">[−∞, +∞) · the whole database</text>
+    <text x="420" y="94" font-size="9" opacity=".8">an empty database has no information about</text>
+    <text x="420" y="108" font-size="9" opacity=".8">where boundaries should go, so it starts as ONE</text>
+    <text x="420" y="122" font-size="9" opacity=".8">partition on ONE node — every write hits that node</text>
+    <text x="420" y="136" font-size="9" opacity=".8">until the first split, other nodes idle.</text>
+    <rect x="420" y="150" width="56" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="428" y="167" font-size="8">[A, F)</text>
+    <rect x="482" y="150" width="56" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="490" y="167" font-size="8">[F, M)</text>
+    <rect x="544" y="150" width="56" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="552" y="167" font-size="8">[M, S)</text>
+    <rect x="606" y="150" width="54" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="614" y="167" font-size="8">[S, ∞)</text>
+    <text x="420" y="196" font-size="9" fill="var(--ok)" font-weight="700">pre-splitting:</text><text x="500" y="196" font-size="9" opacity=".8">configure an initial set of partitions on the empty</text>
+    <text x="420" y="210" font-size="9" opacity=".8">database (HBase, MongoDB) — requires knowing the key distribution in advance</text>
+    <defs>
+      <marker id="a6d-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+      <marker id="a6d-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption>Dynamic partitioning adapts the partition count to data volume: little data, few partitions and little overhead; lots of data, many partitions each bounded by a configurable maximum. The cost is the cold start — a single initial partition means a single busy node until the first split — which <em>pre-splitting</em> avoids if you already know roughly how keys will be distributed. Dynamic splitting isn't tied to key ranges: MongoDB ≥ 2.4 supports both key-range and hash partitioning and splits dynamically in either case.</figcaption>
+</figure>
+
+<h4>Partitioning proportionally to nodes</h4>
+<p>Fixed-count partitions grow with the dataset; dynamic partitions keep a bounded size and their <em>count</em> grows with the dataset. In both, the partition count is independent of the node count. Cassandra and Ketama take a third route: a <strong>fixed number of partitions per node</strong> (Cassandra: 256 by default). Partition size grows with the dataset while nodes stay fixed, but adding nodes makes partitions smaller again — and since more data usually means more nodes anyway, partition size stays roughly stable. When a node joins it <em>randomly picks</em> a fixed number of existing partitions to split and takes one half of each. Randomization can produce unfair splits, but averaged over 256 partitions the newcomer ends up with a fair share; Cassandra 3.0 added a token-allocation algorithm that avoids unfair splits. Picking boundaries randomly requires hash partitioning — which makes this the scheme that <em>most closely matches the original definition of consistent hashing</em>, and newer hash functions (jump hash) get a similar effect with less metadata.</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Strategy</th><th># partitions</th><th>Partition size</th><th>Unit that moves</th><th>Systems</th><th>Weak spot</th></tr></thead>
+<tbody>
+<tr><td><strong>hash mod N</strong></td><td>= N nodes</td><td>∝ data / N</td><td>almost every key, every time N changes</td><td>— (how not to do it)</td><td>catastrophic data movement</td></tr>
+<tr><td><strong>Fixed number of partitions</strong></td><td>fixed at setup (≫ nodes); ≈ max node count</td><td>∝ dataset size</td><td>whole partitions, a few per node join</td><td>Riak, Elasticsearch, Couchbase, Voldemort</td><td>choosing the count when data volume is unpredictable</td></tr>
+<tr><td><strong>Dynamic partitioning</strong></td><td>∝ dataset size</td><td>bounded (e.g. HBase 10 GB)</td><td>halves after a split</td><td>HBase, RethinkDB, MongoDB ≥ 2.4</td><td>single-partition cold start (mitigate: pre-split)</td></tr>
+<tr><td><strong>Proportional to nodes</strong></td><td>fixed per node (Cassandra 256)</td><td>≈ stable (grows with data, shrinks with nodes)</td><td>random halves of existing partitions</td><td>Cassandra, Ketama</td><td>random splits can be unfair (fixed in Cassandra 3.0)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="operations-automatic-or-manual-rebalancing"><a class="self" href="#operations-automatic-or-manual-rebalancing">Operations: Automatic or Manual Rebalancing</a></h3>
+<span class="key-chip">operations-automatic-or-manual-rebalancing</span>
+
+<p>One question the strategies gloss over: <em>who decides</em> to rebalance? There's a gradient from fully automatic (the system moves partitions on its own, no administrator involved) to fully manual (an administrator sets the partition→node assignment and it changes only when they say so). Couchbase, Riak, and Voldemort sit in between: they <em>generate</em> a suggested assignment automatically but require an administrator to <em>commit</em> it. Automation is convenient — less routine work — but unpredictable. Rebalancing reroutes requests and moves large amounts of data, and done carelessly it saturates the network or the nodes and degrades everything else while it runs.</p>
+
+<figure>
+<svg viewBox="0 0 680 190" role="img" aria-label="Cascading failure from automatic rebalancing plus automatic failure detection: an overloaded node responds slowly, peers time out and declare it dead, the cluster automatically rebalances away from it, the extra transfer load makes the node and network slower still, more timeouts follow.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="40" width="140" height="50" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="30" y="60" font-weight="700" fill="var(--write)">node overloaded</text><text x="30" y="76" font-size="9" fill="var(--write)">slow to respond, not dead</text>
+    <path d="M160 65 H 190" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5" marker-end="url(#a6c-i)"/>
+    <rect x="196" y="40" width="140" height="50" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="206" y="60" font-weight="700">peers time out</text><text x="206" y="76" font-size="9" opacity=".8">"it's dead" — auto-detect</text>
+    <path d="M336 65 H 366" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5" marker-end="url(#a6c-i)"/>
+    <rect x="372" y="40" width="140" height="50" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="382" y="60" font-weight="700">auto-rebalance</text><text x="382" y="76" font-size="9" opacity=".8">move its partitions away</text>
+    <path d="M512 65 H 542" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5" marker-end="url(#a6c-i)"/>
+    <rect x="548" y="40" width="112" height="50" rx="6" fill="var(--panel2)" stroke="var(--bad)" stroke-width="1.5"/>
+    <text x="558" y="60" font-weight="700" fill="var(--bad)">more load</text><text x="558" y="76" font-size="9" fill="var(--bad)">on it, peers, network</text>
+    <path d="M604 90 C 604 150, 90 150, 90 94" stroke="var(--bad)" stroke-width="1.8" fill="none" stroke-dasharray="5 3" marker-end="url(#a6c-b)"/>
+    <text x="250" y="140" font-size="9" fill="var(--bad)" font-weight="700">the "dead" node gets slower, more nodes look dead → cascading failure</text>
+    <text x="20" y="176" font-size="9" opacity=".8">a human in the loop is slower than automation, but a human can tell "overloaded" from "dead" and decline to pour fuel on the fire</text>
+    <defs>
+      <marker id="a6c-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+      <marker id="a6c-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption>Automatic rebalancing is dangerous in combination with automatic failure detection. A node that is merely overloaded answers slowly; its peers time out and conclude it is dead; the cluster rebalances load away from it — which means <em>copying that node's data</em>, adding load to the very node, the other nodes, and the network, making things worse and potentially cascading. The same timeout dilemma appeared in Chapter 5's failover; the book's advice is the same: a human in the loop is slower but prevents operational surprises.</figcaption>
+</figure>
+
+<p>This is the failure-detection problem from <a class="xref back" href="ch05-replication.html#handling-node-outages" data-tip="Ch 5 · Handling Node Outages — leader failure needs failover: detect via timeout, elect, reconfigure — and timeouts can't distinguish slow from dead">Chapter&nbsp;5's failover<sup>←5</sup></a>, generalized: a timeout cannot distinguish a dead node from a slow one, and <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#detecting-faults" data-tip="Ch 8 · Detecting Faults — timeouts are the only fault detector available, and they can't tell slow from dead · not yet written">Chapter&nbsp;8<sup>→8</sup></a> shows there is no better detector available. Hence the book's preference for a human in the rebalancing loop.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · shard management services</span>
+The 2nd edition adds the machinery big operators built to make automatic rebalancing safe: <strong>Facebook's Shard Manager</strong> (a general shard-placement service with load-aware, rate-limited migrations), <strong>ScyllaDB's Raft-based topology changes</strong> (cluster membership and token ownership go through consensus instead of gossip, making concurrent node joins safe), and <strong>DynamoDB's adaptive capacity</strong> for hot partitions. The 1st edition's gradient from manual to automatic still frames the discussion, but the modern default in managed services has shifted toward automation with strong guardrails. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="request-routing">
+<span class="key-chip">request-routing</span>
+<h2><a class="self" href="#request-routing">Request Routing</a></h2>
+
+<p>The data is partitioned across nodes on many machines. When a client wants to read or write the key <code>"foo"</code>, <strong>which IP address and port does it connect to?</strong> Rebalancing keeps changing partition→node assignments, so somebody has to stay on top of the changes. This is an instance of <strong>service discovery</strong>, a problem for anything highly available over a network, and many companies have built and open-sourced their own tools for it. There are three broad shapes, and one shared hard problem:</p>
+
+<figure class="anim" id="anim-routing">
+<svg viewBox="0 0 680 320" role="img" aria-label="Three ways to route a request to the right partition: send to any node and let it forward; send to a partition-aware routing tier; or make the client partition-aware. In all three, the routing decision needs the current partition-to-node mapping, which a coordination service like ZooKeeper holds: nodes register, routers subscribe, and ownership changes trigger notifications. Cassandra and Riak use gossip instead.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- client -->
+    <rect x="20" y="130" width="90" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/>
+    <text x="34" y="154" font-weight="700">client</text>
+    <text x="20" y="188" font-size="9" fill="var(--read)">get("foo")</text>
+    <!-- nodes column -->
+    <g>
+      <rect x="480" y="40" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="490" y="58" font-weight="700">node 0</text><text x="490" y="72" font-size="8" opacity=".7">p0 p3 p6</text>
+      <rect x="480" y="130" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="490" y="148" font-weight="700">node 1</text>
+      <rect x="480" y="220" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="490" y="238" font-weight="700">node 2</text>
+    </g>
+    <g data-on="1-5"><text x="490" y="162" font-size="8" opacity=".7">p1 p4 p7</text><text x="490" y="252" font-size="8" opacity=".7">p2 p5 p8</text><text x="610" y="152" font-size="8" fill="var(--read)">"foo" ∈ p4</text></g>
+    <!-- step 1: the question -->
+    <g data-on="1"><text x="130" y="100" font-size="9" opacity=".8">"foo" hashes into partition 4. Partition 4 is on node 1 — today.</text>
+      <text x="130" y="116" font-size="9" opacity=".8">After the next rebalance it may not be. Who knows where p4 lives right now?</text></g>
+    <!-- step 2: approach 1 any node -->
+    <g data-on="2" data-hot="2">
+      <text x="130" y="30" font-size="9" font-weight="700">approach 1 · ask any node</text>
+      <path d="M110 140 C 250 120, 400 70, 476 60" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a6r-r)"/>
+      <text x="200" y="88" font-size="9" fill="var(--read)">round-robin load balancer → node 0</text>
+      <path d="M540 84 L 540 126" stroke="var(--read)" stroke-width="2" marker-end="url(#a6r-r)"/>
+      <text x="548" y="108" font-size="8" fill="var(--read)">forward</text>
+      <path d="M476 138 C 400 150, 250 170, 114 160" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none" marker-end="url(#a6r-r)"/>
+      <text x="230" y="178" font-size="8" fill="var(--read)">reply relayed back through node 0</text>
+      <text x="20" y="290" font-size="9" opacity=".8">every node knows the map; a node that doesn't own the partition forwards, then relays the reply. Cassandra, Riak (gossip).</text>
+    </g>
+    <!-- step 3: approach 2 routing tier -->
+    <g data-on="3" data-hot="3">
+      <text x="130" y="30" font-size="9" font-weight="700">approach 2 · routing tier</text>
+      <rect x="250" y="130" width="130" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="260" y="148" font-weight="700">routing tier</text><text x="260" y="162" font-size="8" opacity=".7">partition-aware LB</text>
+      <path d="M110 150 H 246" stroke="var(--read)" stroke-width="2" marker-end="url(#a6r-r)"/>
+      <path d="M380 150 H 476" stroke="var(--read)" stroke-width="2" marker-end="url(#a6r-r)"/>
+      <text x="390" y="142" font-size="8" fill="var(--read)">→ node 1</text>
+      <text x="20" y="290" font-size="9" opacity=".8">a dedicated tier holds the map and forwards; it stores no data. LinkedIn Espresso (Helix), MongoDB mongos, Couchbase moxi.</text>
+    </g>
+    <!-- step 4: approach 3 smart client -->
+    <g data-on="4" data-hot="4">
+      <text x="130" y="30" font-size="9" font-weight="700">approach 3 · partition-aware client</text>
+      <rect x="20" y="170" width="90" height="14" rx="2" fill="var(--read-soft)"/><text x="26" y="181" font-size="8" fill="var(--read)">has the map</text>
+      <path d="M110 150 C 250 150, 400 150, 476 150" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a6r-r)"/>
+      <text x="230" y="142" font-size="8" fill="var(--read)">direct to node 1, no intermediary</text>
+      <text x="20" y="290" font-size="9" opacity=".8">the client library knows the partitioning and the assignment; one hop, but every client must be kept up to date.</text>
+    </g>
+    <!-- step 5: ZooKeeper -->
+    <g data-on="5-6" data-hot="5">
+      <rect x="250" y="220" width="150" height="60" rx="6" fill="var(--panel)" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="260" y="240" font-weight="700">ZooKeeper</text><text x="260" y="254" font-size="8" opacity=".8">authoritative map:</text><text x="260" y="266" font-size="8" opacity=".8">p4 → node 1 · p5 → node 2 …</text>
+      <path d="M480 62 C 440 62, 420 200, 400 232" stroke="var(--write)" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#a6r-w)"/>
+      <path d="M480 152 C 450 152, 430 220, 402 240" stroke="var(--write)" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#a6r-w)"/>
+      <path d="M480 246 H 404" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#a6r-w)"/>
+      <text x="410" y="200" font-size="8" fill="var(--write)">nodes register</text>
+    </g>
+    <g data-on="5"><text x="130" y="30" font-size="9" font-weight="700">the shared problem · who holds the map?</text>
+      <path d="M300 220 C 300 190, 300 180, 315 174" stroke="var(--read)" stroke-width="1.4" fill="none" marker-end="url(#a6r-r)"/>
+      <rect x="250" y="130" width="130" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="260" y="148" font-weight="700">routing tier</text><text x="260" y="162" font-size="8" opacity=".7">subscribes to the map</text>
+      <text x="20" y="290" font-size="9" opacity=".8">all participants must AGREE on the map or requests go astray — that is consensus (Chapter 9), so most systems</text>
+      <text x="20" y="304" font-size="9" opacity=".8">delegate to a coordination service: nodes register, routers subscribe. HBase, SolrCloud, Kafka; Espresso via Helix.</text></g>
+    <!-- step 6: change notification -->
+    <g data-on="6" data-hot="6">
+      <text x="130" y="30" font-size="9" font-weight="700">a partition moves</text>
+      <rect x="250" y="130" width="130" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="260" y="148" font-weight="700">routing tier</text><text x="260" y="162" font-size="8" fill="var(--write)">p4 → node 2 (updated)</text>
+      <text x="490" y="162" font-size="8" fill="var(--write)">p1 p7</text>
+      <text x="490" y="252" font-size="8" fill="var(--write)">p2 p5 p8 +p4</text>
+      <text x="610" y="242" font-size="8" fill="var(--read)">"foo" ∈ p4</text>
+      <path d="M300 220 C 300 190, 300 180, 315 174" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a6r-w)"/>
+      <text x="150" y="210" font-size="9" fill="var(--write)" font-weight="700">ZooKeeper notifies subscribers</text>
+      <path d="M110 150 H 246" stroke="var(--read)" stroke-width="2" marker-end="url(#a6r-r)"/>
+      <path d="M380 160 C 420 180, 450 220, 476 236" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a6r-r)"/>
+      <text x="20" y="290" font-size="9" opacity=".8">rebalancing moved p4 to node 2; ZooKeeper pushes the new map to subscribers; the next get("foo") goes to node 2.</text>
+      <text x="20" y="304" font-size="9" opacity=".8">node/router IPs change slowly — DNS is fine for those. Cassandra and Riak instead GOSSIP changes and use approach 1.</text>
+    </g>
+    <defs>
+      <marker id="a6r-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+      <marker id="a6r-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE QUESTION</strong> <code>"foo"</code> hashes into partition 4, which happens to be on node 1 right now. Rebalancing can move it at any time. Whoever makes the routing decision needs the current partition→node map.</li>
+  <li><strong>APPROACH 1 · ANY NODE</strong> Clients contact any node (e.g. through a round-robin load balancer). If that node owns the partition it answers; otherwise it forwards the request to the right node, receives the reply, and relays it. Every node must know the map. Cassandra and Riak work this way.</li>
+  <li><strong>APPROACH 2 · ROUTING TIER</strong> All requests go first to a partition-aware load balancer that holds the map and forwards each request to the right node. The tier handles no data itself. LinkedIn's Espresso (via Helix), MongoDB's <code>mongos</code>, and Couchbase's <code>moxi</code> are routing tiers.</li>
+  <li><strong>APPROACH 3 · SMART CLIENT</strong> The client library itself knows the partitioning scheme and the assignment, and connects directly to the right node with no intermediary. Fewest hops, but now every client is a subscriber that must be kept current.</li>
+  <li><strong>THE SHARED PROBLEM</strong> In all three, the component deciding the route must learn about assignment changes — and all participants must <em>agree</em>, or requests go astray. Agreement is consensus, which is hard to implement correctly (Chapter 9), so many systems delegate to a coordination service such as ZooKeeper: nodes register themselves; ZooKeeper holds the authoritative map; routers or smart clients subscribe. HBase, SolrCloud, and Kafka do this (MongoDB uses its own config servers).</li>
+  <li><strong>A PARTITION MOVES</strong> Rebalancing shifts p4 to node 2. ZooKeeper notifies subscribers, the routing tier updates its map, and the next request for <code>"foo"</code> lands on node 2. Cassandra and Riak skip ZooKeeper and instead <em>gossip</em> cluster-state changes among nodes (more complexity in the database, no external dependency); Couchbase doesn't auto-rebalance, so <code>moxi</code> learns changes from the nodes. Finding the nodes' or routers' IPs at all changes slowly enough that plain DNS suffices.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · the map and the mapmaker</span>
+Three ways to find a room in the library: ask any librarian (they all carry the map and will walk your request over), ask the front desk (a dedicated desk that only gives directions), or carry your own map. The design question isn't which of those you pick — it's <em>who prints the map and how everyone gets the new edition</em> when a shelf moves. ZooKeeper is the print shop: every room reports what it holds, and every subscriber gets the update pushed. Cassandra and Riak instead have the librarians whisper changes to each other until everyone has heard (gossip). Either way, the routing layer is only as correct as its map is current — and agreeing on one current map is the consensus problem <a class="xref fwd" href="ch09-consistency-and-consensus.html#membership-and-coordination-services" data-tip="Ch 9 · Membership and Coordination Services — ZooKeeper/etcd: linearizable, totally ordered small state for locks, leader election, and service discovery · not yet written">Chapter&nbsp;9<sup>→9</sup></a> finally solves.</div>
+
+<h3 id="parallel-query-execution"><a class="self" href="#parallel-query-execution">Parallel Query Execution</a></h3>
+<span class="key-chip">parallel-query-execution</span>
+
+<p>Everything so far routes <em>simple</em> queries — read or write one key, plus scatter/gather for document-partitioned indexes — and that is about the level most NoSQL distributed stores support. <strong>Massively parallel processing (MPP)</strong> relational databases, used for analytics, are far more ambitious. A typical warehouse query has joins, filters, grouping, and aggregation; the MPP query optimizer breaks it into <em>execution stages</em> and <em>partitions</em>, many of which run in parallel on different nodes. Queries that scan large parts of the dataset benefit most. This is a specialized, commercially important topic; the book revisits parallel execution techniques in <a class="xref fwd" href="ch10-batch-processing.html#comparing-hadoop-to-distributed-databases" data-tip="Ch 10 · Comparing Hadoop to Distributed Databases — MPP databases vs MapReduce: query optimizers, storage formats, fault tolerance · not yet written">Chapter&nbsp;10<sup>→10</sup></a>.</p>
+
+<figure>
+<svg viewBox="0 0 680 210" role="img" aria-label="MPP parallel query execution: a warehouse query is broken by the optimizer into stages (scan and filter per partition, partial aggregate per partition, exchange/shuffle, final join and aggregate), each stage running in parallel across nodes.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="20" width="200" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="28" y="37" font-size="9" font-weight="700">SELECT region, SUM(amount)</text>
+    <text x="28" y="51" font-size="9">FROM sales JOIN stores … GROUP BY region</text>
+    <path d="M120 60 L 120 78" stroke="currentColor" stroke-opacity=".7" marker-end="url(#a6p-i)"/>
+    <text x="130" y="74" font-size="9" opacity=".8">MPP optimizer → stages</text>
+    <!-- stage 1: parallel scan/filter -->
+    <g>
+      <rect x="20" y="86" width="100" height="36" rx="5" fill="var(--read-soft)" stroke="var(--read)"/><text x="26" y="101" font-size="8" fill="var(--read)">node 0 · scan p0</text><text x="26" y="114" font-size="8" fill="var(--read)">filter · partial Σ</text>
+      <rect x="130" y="86" width="100" height="36" rx="5" fill="var(--read-soft)" stroke="var(--read)"/><text x="136" y="101" font-size="8" fill="var(--read)">node 1 · scan p1</text><text x="136" y="114" font-size="8" fill="var(--read)">filter · partial Σ</text>
+      <rect x="240" y="86" width="100" height="36" rx="5" fill="var(--read-soft)" stroke="var(--read)"/><text x="246" y="101" font-size="8" fill="var(--read)">node 2 · scan p2</text><text x="246" y="114" font-size="8" fill="var(--read)">filter · partial Σ</text>
+      <rect x="350" y="86" width="100" height="36" rx="5" fill="var(--read-soft)" stroke="var(--read)"/><text x="356" y="101" font-size="8" fill="var(--read)">node 3 · scan p3</text><text x="356" y="114" font-size="8" fill="var(--read)">filter · partial Σ</text>
+      <text x="460" y="108" font-size="9" opacity=".8">stage 1 · in parallel</text>
+    </g>
+    <!-- exchange -->
+    <path d="M70 122 L 200 150 M180 122 L 210 150 M290 122 L 220 150 M400 122 L 230 150" stroke="currentColor" stroke-opacity=".6" fill="none" marker-end="url(#a6p-i)"/>
+    <text x="460" y="150" font-size="9" opacity=".8">stage 2 · exchange / shuffle by region</text>
+    <!-- stage 3 -->
+    <rect x="120" y="156" width="180" height="36" rx="5" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="128" y="171" font-size="8" fill="var(--read)">join with stores · final Σ per region</text>
+    <text x="128" y="184" font-size="8" fill="var(--read)">(itself partitioned by region across nodes)</text>
+    <text x="460" y="178" font-size="9" opacity=".8">stage 3 · in parallel again</text>
+    <defs><marker id="a6p-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+  </g>
+</svg>
+<figcaption>What "parallel query execution" means in an MPP warehouse: the optimizer turns one SQL statement into a pipeline of stages, and each stage is itself partitioned so every node works on its slice at once — scan and pre-aggregate locally, shuffle rows so matching keys meet, join and finish. Contrast with the key-value routing above, where a query touches one partition (or scatter/gathers over all of them but does no cross-partition work). Teradata and Tandem NonStop SQL pioneered this in the 1980s; Chapter 10 compares it with MapReduce.</figcaption>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · the chapter's closing warning</span>
+By design every partition operates mostly independently — that independence <em>is</em> what lets a partitioned database scale across machines. The price shows up the moment an operation needs to write to several partitions: what if the write to one succeeds and the write to another fails? The chapter ends on that question and hands it to <a class="xref fwd" href="ch07-transactions.html#the-slippery-concept-of-a-transaction" data-tip="Ch 7 · The Slippery Concept of a Transaction — grouping reads and writes so the whole succeeds or fails · not yet written">Chapter&nbsp;7<sup>→7</sup></a> (transactions) and <a class="xref fwd" href="ch09-consistency-and-consensus.html#atomic-commit-and-two-phase-commit-2pc" data-tip="Ch 9 · Atomic Commit and Two-Phase Commit — making a write to several partitions all-or-nothing · not yet written">Chapter&nbsp;9<sup>→9</sup></a> (atomic commit across nodes).</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Why partition</strong>: when the dataset or query load exceeds one machine. Each record belongs to exactly one partition (shard / region / tablet / vnode / vBucket); partitions are spread over a shared-nothing cluster and usually each replicated, with every node leading some partitions and following others. Partitioning and replication are orthogonal choices.</li>
+<li><strong>Goal = even spread of data AND load</strong>; unevenness is <em>skew</em>, a disproportionately loaded partition a <em>hot spot</em>. Random placement spreads perfectly but makes reads ask every node.</li>
+<li><strong>Key-range partitioning</strong> (Bigtable, HBase, RethinkDB, early MongoDB): contiguous sorted ranges with data-adapted boundaries; cheap routing and efficient range scans (the key is a concatenated index), but sequential access patterns — timestamp keys — create hot spots; fix by putting a spreading component first in the key at the cost of one range query per prefix.</li>
+<li><strong>Hash partitioning</strong> (Cassandra, MongoDB hashed, Riak, Voldemort): a stable, process-independent hash maps skewed keys uniformly onto hash ranges; balances load but destroys key order, so range queries hit all partitions. Cassandra's compound key hashes the first column and sorts by the rest — one-to-many data (user, timestamp) on one partition. "Consistent hashing" is a rebalancing approach that works poorly for databases; say "hash partitioning."</li>
+<li><strong>Same-key hot spots</strong> (celebrities) defeat hashing; the application must salt the key (random 2-digit suffix → 100 keys), paying with 100-way reads and bookkeeping of which keys are split.</li>
+<li><strong>Secondary indexes</strong> don't map to partitions. <strong>Document-partitioned (local)</strong>: each partition indexes its own docs; writes touch one partition, reads scatter/gather with tail-latency amplification (MongoDB, Riak, Cassandra, Elasticsearch, SolrCloud, VoltDB). <strong>Term-partitioned (global)</strong>: one index split by term (value or hash); reads hit one index partition, writes fan out to several nodes and are therefore usually asynchronous (DynamoDB GSIs, Riak search, Oracle).</li>
+<li><strong>Rebalancing</strong> must leave load fair, keep serving reads and writes meanwhile, and move no more than necessary. <strong>hash mod N</strong> fails the last test catastrophically (nearly everything moves when N changes).</li>
+<li><strong>Strategies that work</strong>: fixed number of partitions ≫ nodes, move whole partitions on join/leave (Riak, Elasticsearch, Couchbase, Voldemort; the count caps node count and partitions grow with data); dynamic split/merge at a size threshold, B-tree style (HBase, RethinkDB, MongoDB ≥ 2.4; cold start on one partition unless pre-split); fixed partitions per node with random splits on join (Cassandra 256 vnodes, Ketama — the closest thing to real consistent hashing).</li>
+<li><strong>Automatic vs manual</strong>: automation is convenient but unpredictable and, combined with timeout-based failure detection, can cascade (slow node declared dead → rebalance adds load → slower). Couchbase/Riak/Voldemort propose, a human commits.</li>
+<li><strong>Request routing</strong> is service discovery: any node forwards (Cassandra, Riak via gossip), a routing tier (Espresso/Helix, mongos, moxi), or a partition-aware client. All need an agreed, current partition→node map — a consensus problem usually delegated to ZooKeeper (HBase, SolrCloud, Kafka); DNS suffices for the slowly changing node IPs.</li>
+<li><strong>Parallel query execution</strong>: NoSQL stores route single-key and scatter/gather queries; MPP warehouses break joins/aggregations into parallel stages across nodes (Chapter 10).</li>
+<li><strong>2nd-edition arc</strong>: chapter renamed <em>Sharding</em>; sharding for multitenancy added; the <em>need</em> to shard softened (bigger machines, managed services); shard management services (Facebook Shard Manager, ScyllaDB Raft topology, DynamoDB adaptive capacity, S3) join the Cassandra/Riak-era examples; jump hash and random slicing give consistent hashing a second look.</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Fourteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="c">
+<p>In the book's Figure 6-1 (partitioning combined with leader-based replication), what is true of each node?</p>
+<label><input type="radio" name="q1" value="a"> It is either a leader for all its partitions or a follower for all of them</label>
+<label><input type="radio" name="q1" value="b"> It holds exactly one partition</label>
+<label><input type="radio" name="q1" value="c"> It is the leader for some partitions and a follower for others, so each partition has one leader and its followers on different nodes</label>
+<label><input type="radio" name="q1" value="d"> It holds every partition, because replication requires full copies</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Why does the book reject assigning records to nodes randomly, even though it spreads data evenly?</p>
+<label><input type="radio" name="q2" value="a"> Random assignment creates hot spots</label>
+<label><input type="radio" name="q2" value="b"> Reading a particular item gives no clue which node holds it, so every read must query all nodes in parallel</label>
+<label><input type="radio" name="q2" value="c"> Random number generators aren't stable across processes</label>
+<label><input type="radio" name="q2" value="d"> It makes rebalancing impossible</label>
+</div>
+
+<div class="q" data-a="d">
+<p>A sensor database keys each reading by its timestamp and uses key-range partitioning. What goes wrong, and what's the fix?</p>
+<label><input type="radio" name="q3" value="a"> Range scans become impossible; fix by hashing the timestamp</label>
+<label><input type="radio" name="q3" value="b"> Partitions become uneven in size; fix by pre-splitting</label>
+<label><input type="radio" name="q3" value="c"> Reads scatter across all partitions; fix by adding a routing tier</label>
+<label><input type="radio" name="q3" value="d"> All writes go to the partition for the current time while others idle — a hot spot; fix by prefixing the key with e.g. the sensor name, at the cost of one range query per sensor</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Why are Java's <code>Object.hashCode()</code> and Ruby's <code>Object#hash</code> unsuitable for hash partitioning?</p>
+<label><input type="radio" name="q4" value="a"> The same key can produce a different hash in different processes, so nodes would disagree about which partition a key belongs to</label>
+<label><input type="radio" name="q4" value="b"> They are cryptographically weak</label>
+<label><input type="radio" name="q4" value="c"> They produce 32-bit outputs, which is too small</label>
+<label><input type="radio" name="q4" value="d"> They preserve key order, causing hot spots</label>
+</div>
+
+<div class="q" data-a="c">
+<p>How does Cassandra's compound primary key reconcile hash and key-range partitioning?</p>
+<label><input type="radio" name="q5" value="a"> It hashes all columns and stores a sorted copy on every node</label>
+<label><input type="radio" name="q5" value="b"> It range-partitions on the first column and hashes the rest</label>
+<label><input type="radio" name="q5" value="c"> Only the first column is hashed to choose the partition; the remaining columns form a concatenated index that sorts rows within that partition, enabling range scans over them (but not over the first column)</label>
+<label><input type="radio" name="q5" value="d"> It uses consistent hashing so ranges are preserved</label>
+</div>
+
+<div class="q" data-a="b">
+<p>What does the book advise about the term "consistent hashing"?</p>
+<label><input type="radio" name="q6" value="a"> Use it — it's the standard name for hash partitioning</label>
+<label><input type="radio" name="q6" value="b"> Avoid it: it names a specific rebalancing approach (random boundaries, from Karger et al.'s CDN work) that works poorly for databases, has nothing to do with replica or ACID consistency, and is often misapplied in database docs — say "hash partitioning"</label>
+<label><input type="radio" name="q6" value="c"> It guarantees that reads see consistent data across partitions</label>
+<label><input type="radio" name="q6" value="d"> It is what HBase uses for key-range partitioning</label>
+</div>
+
+<div class="q" data-a="d">
+<p>A celebrity's user ID receives millions of writes. Why doesn't hashing help, and what does the book suggest?</p>
+<label><input type="radio" name="q7" value="a"> Hashing helps; the database automatically splits the hot key</label>
+<label><input type="radio" name="q7" value="b"> Hashing fails because the hash function is too slow; use a faster one</label>
+<label><input type="radio" name="q7" value="c"> Hashing fails because celebrities' IDs are sequential; use random IDs</label>
+<label><input type="radio" name="q7" value="d"> The hash of one identical key is always the same, so all its writes hit one partition; the application can append a random two-digit number to spread writes over 100 keys, at the cost of reading and combining all 100 and tracking which keys are split</label>
+</div>
+
+<div class="q" data-a="a">
+<p>In a document-partitioned (local) secondary index, what are the write and read costs of "find all red cars"?</p>
+<label><input type="radio" name="q8" value="a"> Writes touch only the document's own partition; reads must scatter to every partition and gather results, with tail latency amplification</label>
+<label><input type="radio" name="q8" value="b"> Writes must update index partitions on several nodes; reads go to one partition</label>
+<label><input type="radio" name="q8" value="c"> Both writes and reads touch exactly one partition</label>
+<label><input type="radio" name="q8" value="d"> Both writes and reads touch every partition</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Why are term-partitioned (global) secondary indexes usually updated asynchronously?</p>
+<label><input type="radio" name="q9" value="a"> Because the index is stored on a single node that can't keep up</label>
+<label><input type="radio" name="q9" value="b"> Because reads of a global index are slow</label>
+<label><input type="radio" name="q9" value="c"> Because one document's terms can live on several index partitions on different nodes, and updating them all atomically would need a distributed transaction that most databases don't support — so DynamoDB, for instance, documents sub-second-but-not-guaranteed propagation</label>
+<label><input type="radio" name="q9" value="d"> Because terms are hashed and hashing is lossy</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Why is <code>hash(key) mod N</code> a bad rebalancing scheme?</p>
+<label><input type="radio" name="q10" value="a"> It distributes keys unevenly across nodes</label>
+<label><input type="radio" name="q10" value="b"> When N changes, most keys change remainder and must move to a different node — e.g. hash 123456 goes to node 6 of 10, node 3 of 11, node 0 of 12 — violating "move no more data than necessary"</label>
+<label><input type="radio" name="q10" value="c"> The mod operation is too slow for high throughput</label>
+<label><input type="radio" name="q10" value="d"> It only works with cryptographic hash functions</label>
+</div>
+
+<div class="q" data-a="d">
+<p>With a fixed number of partitions (e.g. 1,000 partitions on 10 nodes), what changes when a node is added?</p>
+<label><input type="radio" name="q11" value="a"> The number of partitions increases so each node keeps 100</label>
+<label><input type="radio" name="q11" value="b"> Keys are reassigned to partitions by re-hashing</label>
+<label><input type="radio" name="q11" value="c"> Every partition is split in half</label>
+<label><input type="radio" name="q11" value="d"> Only the assignment of partitions to nodes changes: the new node steals a few whole partitions from each existing node; the partition count and key→partition mapping stay fixed, and the old assignment serves requests until the transfer completes</label>
+</div>
+
+<div class="q" data-a="a">
+<p>What is the cold-start caveat of dynamic partitioning, and its mitigation?</p>
+<label><input type="radio" name="q12" value="a"> An empty database starts as one partition on one node, so all writes hit that node until the first split; HBase and MongoDB allow pre-splitting into an initial set of partitions if you know the key distribution</label>
+<label><input type="radio" name="q12" value="b"> Partitions never merge, so deletes leave empty partitions; mitigate with compaction</label>
+<label><input type="radio" name="q12" value="c"> It only works with hash partitioning; mitigate by using key ranges</label>
+<label><input type="radio" name="q12" value="d"> Splits require downtime; mitigate by splitting at night</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Why can fully automatic rebalancing be dangerous together with automatic failure detection?</p>
+<label><input type="radio" name="q13" value="a"> Because the two features use incompatible hash functions</label>
+<label><input type="radio" name="q13" value="b"> Because rebalancing deletes data from the failed node before it is copied</label>
+<label><input type="radio" name="q13" value="c"> An overloaded but alive node responds slowly, peers declare it dead by timeout, and the automatic rebalance moves data — adding load to that node, the others, and the network, making things worse and potentially cascading; a human in the loop prevents such surprises</label>
+<label><input type="radio" name="q13" value="d"> Because ZooKeeper cannot track more than one change at a time</label>
+</div>
+
+<div class="q" data-a="b">
+<p>In all three request-routing approaches (any node forwards, routing tier, partition-aware client), what is the shared hard problem and the common solution?</p>
+<label><input type="radio" name="q14" value="a"> Encrypting requests; solved by TLS</label>
+<label><input type="radio" name="q14" value="b"> Learning about changes to the partition→node assignment so that all participants agree; commonly solved by a coordination service such as ZooKeeper where nodes register and routers subscribe (HBase, SolrCloud, Kafka), or by gossip among nodes (Cassandra, Riak)</label>
+<label><input type="radio" name="q14" value="c"> Finding node IP addresses; solved by hardcoding them in clients</label>
+<label><input type="radio" name="q14" value="d"> Load balancing; solved by round-robin DNS</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — c.</span> Each partition's leader is on one node and its followers on others; a node leads some partitions and follows others. (a) and (b) would waste nodes; (d) describes unpartitioned replication (Chapter 5), which is exactly what partitioning removes.</div>
+<div class="ak"><span class="which">Q2 — b.</span> Random placement is perfectly even (so not (a)) but destroys locatability. (c) is the objection to Java/Ruby hash functions, not to randomness; (d) isn't the argument made.</div>
+<div class="ak"><span class="which">Q3 — d.</span> Timestamp keys make partitions = time ranges, so "now" is always one partition (the App Engine "monotonically increasing values are bad" reference). Prefixing with sensor name spreads writes but fragments time-range reads into one query per sensor. (a) would also kill the range scans you wanted; (b) is the dynamic-partitioning cold start; (c) is routing, unrelated.</div>
+<div class="ak"><span class="which">Q4 — a.</span> Partitioning needs the same key → the same hash everywhere; process-dependent hashing scatters one key across partitions (Kleppmann's "Java's hashCode is not safe for distributed systems"). Cryptographic strength (b) isn't required — MD5 and FNV are fine; (c) and (d) are false.</div>
+<div class="ak"><span class="which">Q5 — c.</span> Hash the first column for placement, sort by the rest inside the partition: (user_id, update_timestamp) puts one user's timeline on one partition in time order. You can't range-scan the hashed column. (b) inverts it; (d) misuses "consistent hashing."</div>
+<div class="ak"><span class="which">Q6 — b.</span> Karger et al.'s scheme uses random boundaries to avoid central coordination for CDN caches; the book says it "doesn't work very well for databases" and that the term confuses people because "consistent" means something else in Chapters 5 and 7. (c) is that confusion; (d) is wrong — HBase uses key ranges.</div>
+<div class="ak"><span class="which">Q7 — d.</span> Hashing spreads <em>different</em> keys, not one key. The two-digit salt is the book's technique, with its read-side cost and bookkeeping burden. (a) was the "perhaps in the future" — partly realized by DynamoDB adaptive capacity in the 2nd edition's examples, but not in 2017 systems generally.</div>
+<div class="ak"><span class="which">Q8 — a.</span> Local index = each partition indexes its own documents: single-partition writes, scatter/gather reads. (b) describes the term-partitioned (global) index. Used by MongoDB, Riak, Cassandra, Elasticsearch, SolrCloud, VoltDB.</div>
+<div class="ak"><span class="which">Q9 — c.</span> A write to one document fans out to every index partition owning one of its terms; synchronous = distributed transaction (Chapters 7 and 9). The index isn't on one node (a) — that would defeat partitioning; reads are the <em>fast</em> path (b).</div>
+<div class="ak"><span class="which">Q10 — b.</span> The book's worked example. Distribution is actually even (a); speed (c) and cryptographic strength (d) are irrelevant. The lesson: decouple which-partition from how-many-nodes.</div>
+<div class="ak"><span class="which">Q11 — d.</span> Only entire partitions move, only partition→node changes, the old assignment serves during transfer. (a)/(c) describe dynamic partitioning; (b) is hash mod N's failure. Riak, Elasticsearch, Couchbase, Voldemort.</div>
+<div class="ak"><span class="which">Q12 — a.</span> No a priori boundaries ⇒ one partition ⇒ one busy node until the first split; pre-splitting needs foreknowledge of key distribution. Dynamic partitioning does merge (b), works with hash partitioning too (c — MongoDB ≥ 2.4), and doesn't need downtime (d).</div>
+<div class="ak"><span class="which">Q13 — c.</span> The cascading-failure scenario: timeouts can't tell slow from dead (Chapters 5 and 8), and the "cure" adds load. Couchbase/Riak/Voldemort propose an assignment and let an operator commit it. (b) and (d) aren't in the text.</div>
+<div class="ak"><span class="which">Q14 — b.</span> The routing decision-maker must learn of assignment changes and everyone must agree — consensus (Chapter 9), usually delegated to ZooKeeper or done by gossip. Node IPs (c) change slowly and DNS handles them; it's not a load-balancing or encryption problem.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch05-replication.html">← ch 5 · Replication</a>
+  <a href="index.html">index</a>
+  <a href="ch07-transactions.html">ch 7 · Transactions →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>

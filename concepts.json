@@ -570,86 +570,86 @@
   "partitioning-and-replication": {
    "chapter": 6,
    "title": "Partitioning and Replication",
-   "definition": "",
+   "definition": "Each record belongs to exactly one partition (shard/region/tablet/vnode), but partitions are usually replicated too; under leader-based replication every node leads some partitions and follows others — the two schemes are chosen independently.",
    "pdf_page": 221
   },
   "partitioning-of-key-value-data": {
    "chapter": 6,
    "title": "Partitioning of Key-Value Data",
-   "definition": "",
+   "definition": "Deciding which records live on which nodes so data and query load spread evenly; unevenness is skew and an overloaded partition is a hot spot — random placement spreads data but makes every read ask every node.",
    "pdf_page": 222
   },
   "partitioning-by-key-range": {
    "chapter": 6,
    "title": "Partitioning by Key Range",
-   "definition": "",
+   "definition": "Each partition owns a contiguous sorted range of keys with data-adapted boundaries (Bigtable, HBase, RethinkDB); cheap routing and efficient range scans, but sequential access patterns like timestamp keys create write hot spots.",
    "pdf_page": 223,
    "parent": "partitioning-of-key-value-data"
   },
   "partitioning-by-hash-of-key": {
    "chapter": 6,
    "title": "Partitioning by Hash of Key",
-   "definition": "",
+   "definition": "A stable hash (MD5, FNV) maps skewed keys uniformly onto hash ranges owned by partitions; balances load but destroys key order so range queries hit all partitions — Cassandra's compound key hashes the first column and sorts by the rest.",
    "pdf_page": 224,
    "parent": "partitioning-of-key-value-data"
   },
   "skewed-workloads-and-relieving-hot-spots": {
    "chapter": 6,
    "title": "Skewed Workloads and Relieving Hot Spots",
-   "definition": "",
+   "definition": "Hashing can't spread traffic to one identical key (a celebrity's ID); the application salts the key with a small random suffix across ~100 sub-keys, paying with fan-out reads and bookkeeping of which keys are split.",
    "pdf_page": 226,
    "parent": "partitioning-of-key-value-data"
   },
   "partitioning-and-secondary-indexes": {
    "chapter": 6,
    "title": "Partitioning and Secondary Indexes",
-   "definition": "",
+   "definition": "Secondary indexes search by value, not primary key, so they don't map onto partitions; two approaches — document-partitioned (local) and term-partitioned (global) — trade write cost against read cost.",
    "pdf_page": 227
   },
   "partitioning-secondary-indexes-by-document": {
    "chapter": 6,
    "title": "Partitioning Secondary Indexes by Document",
-   "definition": "",
+   "definition": "Local index: each partition indexes only its own documents, so a write touches one partition but a read by indexed value must scatter/gather across all partitions with tail-latency amplification (MongoDB, Riak, Cassandra, Elasticsearch, SolrCloud).",
    "pdf_page": 227,
    "parent": "partitioning-and-secondary-indexes"
   },
   "partitioning-secondary-indexes-by-term": {
    "chapter": 6,
    "title": "Partitioning Secondary Indexes by Term",
-   "definition": "",
+   "definition": "Global index partitioned by the indexed term (or its hash), so a read hits one index partition while a write fans out to several nodes — hence usually updated asynchronously (DynamoDB GSIs, Riak search, Oracle global indexes).",
    "pdf_page": 229,
    "parent": "partitioning-and-secondary-indexes"
   },
   "rebalancing-partitions": {
    "chapter": 6,
    "title": "Rebalancing Partitions",
-   "definition": "",
+   "definition": "Moving load between nodes as data, throughput, or membership changes; must leave load fair, keep serving reads and writes meanwhile, and move no more data than necessary.",
    "pdf_page": 230
   },
   "strategies-for-rebalancing": {
    "chapter": 6,
    "title": "Strategies for Rebalancing",
-   "definition": "",
+   "definition": "hash mod N moves nearly everything (never do it); fixed number of partitions ≫ nodes and move whole partitions (Riak, Elasticsearch); dynamic split/merge at a size threshold (HBase, MongoDB); fixed partitions per node with random splits (Cassandra vnodes).",
    "pdf_page": 231,
    "parent": "rebalancing-partitions"
   },
   "operations-automatic-or-manual-rebalancing": {
    "chapter": 6,
    "title": "Operations: Automatic or Manual Rebalancing",
-   "definition": "",
+   "definition": "A gradient from fully automatic to fully manual; automation is convenient but, combined with timeout-based failure detection, can cascade (slow node declared dead → rebalance adds load) — many systems propose an assignment and let an operator commit it.",
    "pdf_page": 234,
    "parent": "rebalancing-partitions"
   },
   "request-routing": {
    "chapter": 6,
    "title": "Request Routing",
-   "definition": "",
+   "definition": "Service discovery for partitions: clients contact any node which forwards (Cassandra, Riak via gossip), a partition-aware routing tier (mongos, Helix, moxi), or a partition-aware client; all need an agreed current partition→node map, usually kept in ZooKeeper.",
    "pdf_page": 235
   },
   "parallel-query-execution": {
    "chapter": 6,
    "title": "Parallel Query Execution",
-   "definition": "",
+   "definition": "MPP analytic databases break a join/filter/aggregate query into stages and partitions executed in parallel across nodes, far beyond the single-key and scatter/gather queries most NoSQL stores route.",
    "pdf_page": 237,
    "parent": "request-routing"
   },
