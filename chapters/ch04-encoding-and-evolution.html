@@ -1,16 +1,1211 @@
-<title>DDIA Ch 4: Encoding and Evolution</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 4 — Encoding and Evolution</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#compatibility">compatibility</a>
+  <a class="l1" href="#formats-for-encoding-data">encoding-formats</a>
+  <a href="#language-specific-formats">language-specific</a>
+  <a href="#json-xml-and-binary-variants">json-xml-binary</a>
+  <a href="#thrift-and-protocol-buffers">thrift-protobuf</a>
+  <a href="#avro">avro</a>
+  <a href="#the-merits-of-schemas">merits-of-schemas</a>
+  <a class="l1" href="#modes-of-dataflow">modes-of-dataflow</a>
+  <a href="#dataflow-through-databases">via-databases</a>
+  <a href="#dataflow-through-services-rest-and-rpc">via-services-rest-rpc</a>
+  <a href="#message-passing-dataflow">via-messages</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 4: Encoding and Evolution</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;04</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;05</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Encoding and Evolution</h1>
+  <p class="epigraph">Everything changes and nothing stands still.
+  <span class="attr">— Heraclitus of Ephesus, as quoted by Plato in Cratylus (360 BCE)</span></p>
+</header>
+
+<p>Applications change: features are added, requirements are understood better, business circumstances shift. <a class="xref back" href="ch01-reliable-scalable-maintainable.html#evolvability-making-change-easy" data-tip="Ch 1 · Evolvability: Making Change Easy — agility at the data-system level; follows from simplicity and good abstractions">Chapter&nbsp;1<sup>←1</sup></a> named the goal — <em>evolvability</em> — and this chapter is where it gets concrete, because a change to features almost always means a change to the <strong>data</strong>: a new field, a new record type, an old field presented differently. The data models of <a class="xref back" href="ch02-data-models-query-languages.html#relational-versus-document-databases-today" data-tip="Ch 2 · Relational Versus Document Databases Today — schema-on-write (one schema at a time) vs schema-on-read (a mixture of old and new formats)">Chapter&nbsp;2<sup>←2</sup></a> cope differently: relational databases enforce exactly one schema at a time (changed by migrations); schema-on-read databases can hold a mixture of old and new formats written at different times.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Two processes that don't share memory can only exchange <strong>bytes</strong>, so every piece of data that crosses a process boundary — to disk, over the network, into a queue — has to be turned into bytes (<em>encoded</em>) and turned back (<em>decoded</em>). The catch: the encoder and the decoder are rarely the same version of your code. Deployments roll out gradually, users don't update their apps, and data written five years ago is still on disk. So the real question of this chapter is: <strong>how do you choose a byte format such that old code and new code can keep talking to each other while everything is mid-change?</strong> Colors as always: <span style="color:var(--write);font-weight:600">ember = writing/encoding</span>, <span style="color:var(--read);font-weight:600">cyan = reading/decoding</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="compatibility">
+<span class="key-chip">compatibility (framing)</span>
+<h2><a class="self" href="#compatibility">Why old and new must coexist</a></h2>
+
+<p>When a data format changes, application code has to change too — but in a large system code changes cannot happen all at once. Server-side, you want a <strong>rolling upgrade</strong> (staged rollout): deploy the new version to a few nodes, watch it, work through the rest — zero downtime, which encourages frequent small releases. Client-side you're at the mercy of the user, who may not install the update for months. So old and new code, and old and new data formats, coexist — and the system has to stay compatible <em>in both directions</em>:</p>
+
+<figure class="anim" id="anim-rolling">
+<svg viewBox="0 0 680 320" role="img" aria-label="A rolling upgrade: nodes move from version 1 to version 2 a few at a time; while mixed, new code must read old data (backward compatibility) and old code must read new data (forward compatibility); client apps may stay old for months.">
+  <text x="20" y="22" font-size="11" font-family="ui-monospace,Menlo,monospace" opacity=".65">server nodes</text>
+  <!-- nodes -->
+  <g data-on="1">
+    <rect x="20" y="34" width="130" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="52" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace">code v1</text>
+    <rect x="170" y="34" width="130" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="202" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace">code v1</text>
+    <rect x="320" y="34" width="130" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="352" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace">code v1</text>
+  </g>
+  <g data-on="2-4">
+    <rect x="20" y="34" width="130" height="50" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="52" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">code v2</text>
+    <rect x="170" y="34" width="130" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="202" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace">code v1</text>
+    <rect x="320" y="34" width="130" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="352" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace">code v1</text>
+  </g>
+  <g data-on="5">
+    <rect x="20" y="34" width="130" height="50" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="52" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">code v2</text>
+    <rect x="170" y="34" width="130" height="50" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="202" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">code v2</text>
+    <rect x="320" y="34" width="130" height="50" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="352" y="64" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">code v2</text>
+  </g>
+  <!-- database -->
+  <rect x="120" y="170" width="250" height="60" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="140" y="196" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700">database / messages / files</text>
+  <g data-on="1"><text x="140" y="216" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">all records in format v1</text></g>
+  <g data-on="2-5"><text x="140" y="216" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">records in format v1 <tspan fill="var(--write)" font-weight="700">and v2</tspan>, mixed</text></g>
+  <!-- backward -->
+  <g data-on="3" data-hot="3">
+    <path d="M 235 88 C 235 120, 200 140, 190 166" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW13)"/>
+    <text x="244" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">v1 writes old format</text>
+    <path d="M 160 166 C 130 130, 100 110, 85 88" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR13)"/>
+    <text x="20" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">v2 reads it</text>
+    <rect x="470" y="34" width="190" height="70" rx="6" fill="var(--read-soft)" stroke="var(--read)"/>
+    <text x="482" y="56" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">BACKWARD compat</text>
+    <text x="482" y="74" font-size="9" font-family="ui-monospace,Menlo,monospace">newer code can read data</text>
+    <text x="482" y="88" font-size="9" font-family="ui-monospace,Menlo,monospace">written by older code</text>
+  </g>
+  <!-- forward -->
+  <g data-on="4" data-hot="4">
+    <path d="M 85 88 C 100 120, 140 140, 170 166" fill="none" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW13)"/>
+    <text x="20" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">v2 writes NEW format</text>
+    <path d="M 300 166 C 330 140, 360 120, 385 88" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR13)"/>
+    <text x="330" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">v1 must read it</text>
+    <rect x="470" y="34" width="190" height="70" rx="6" fill="var(--write-soft)" stroke="var(--write)"/>
+    <text x="482" y="56" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">FORWARD compat</text>
+    <text x="482" y="74" font-size="9" font-family="ui-monospace,Menlo,monospace">older code can read data</text>
+    <text x="482" y="88" font-size="9" font-family="ui-monospace,Menlo,monospace">written by newer code</text>
+  </g>
+  <!-- clients -->
+  <g data-on="5" data-hot="5">
+    <rect x="20" y="260" width="140" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="5 3"/>
+    <text x="32" y="280" font-size="10" font-family="ui-monospace,Menlo,monospace">mobile app v1</text>
+    <text x="32" y="296" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">user never updated</text>
+    <rect x="180" y="260" width="140" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="5 3"/>
+    <text x="192" y="280" font-size="10" font-family="ui-monospace,Menlo,monospace">mobile app v0.9</text>
+    <text x="192" y="296" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">…for two years</text>
+    <path d="M 90 256 C 100 240, 180 236, 200 232" fill="none" stroke="var(--read)" stroke-width="1.4" marker-end="url(#arrR13)"/>
+    <text x="360" y="284" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">servers finish upgrading in minutes;</text>
+    <text x="360" y="300" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">clients — and stored data — stay old for years</text>
+  </g>
+  <defs>
+    <marker id="arrW13" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR13" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>BEFORE</strong> Every node runs v1 and every stored record is in format v1. Nothing to worry about.</li>
+  <li><strong>ROLLING UPGRADE BEGINS</strong> v2 is deployed to one node first. If it misbehaves, roll back — only a fraction of traffic was exposed. Meanwhile the shared data store starts accumulating records in <em>both</em> formats.</li>
+  <li><strong>BACKWARD COMPATIBILITY</strong> A v1 node writes a record in the old format; the v2 node reads it. Newer code reading older data — usually not hard: as the author of v2 you know exactly what v1 wrote and can handle it explicitly (or just keep the old reading code around).</li>
+  <li><strong>FORWARD COMPATIBILITY</strong> The v2 node writes a record in the <em>new</em> format; a v1 node reads it. Older code reading newer data — trickier, because v1 has to gracefully <em>ignore additions it has never heard of</em>. This is the property most formats get wrong.</li>
+  <li><strong>THE LONG TAIL</strong> Servers converge on v2 within minutes. Client apps don't: users skip updates for years. And data written long ago is still on disk in its original encoding. Both directions of compatibility must hold not for a deployment window but for a very long time.</li>
+</ol>
+</figure>
+
+<p>This chapter examines encoding formats — JSON, XML, Protocol Buffers, Thrift, Avro — through exactly this lens: how do they handle schema change, and how do they let old and new data and code coexist? Then it follows the data as it flows: through databases, through services (REST and RPC), and through message-passing systems.</p>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="formats-for-encoding-data">
+<span class="key-chip">formats-for-encoding-data</span>
+<h2><a class="self" href="#formats-for-encoding-data">Formats for Encoding Data</a></h2>
+
+<p>Programs hold data in (at least) two representations. <strong>In memory</strong>: objects, structs, lists, hash tables, trees — optimized for CPU access, full of pointers. <strong>On the wire or on disk</strong>: a self-contained sequence of bytes, since a pointer means nothing to another process. Translating memory → bytes is <strong>encoding</strong> (also serialization, marshalling); bytes → memory is <strong>decoding</strong> (parsing, deserialization, unmarshalling). The book says <em>encoding</em> throughout, because "serialization" also means something entirely different in <a class="xref fwd" href="ch07-transactions.html#serializability" data-tip="Ch 7 · Serializability — the transaction isolation level, an unrelated meaning of the word · not yet written">transactions<sup>→7</sup></a>. (And encoding has nothing to do with encryption.)</p>
+
+<h3 id="language-specific-formats"><a class="self" href="#language-specific-formats">Language-Specific Formats</a></h3>
+<span class="key-chip">language-specific-formats</span>
+
+<p>Every language ships one: Java's <code>java.io.Serializable</code>, Ruby's <code>Marshal</code>, Python's <code>pickle</code>, plus libraries like Kryo. Convenient — objects saved and restored with almost no code — and deeply problematic:</p>
+<ul>
+<li><strong>Language lock-in.</strong> Reading the data from another language is very hard; you've committed your data to your current language for potentially decades and precluded integration with other organizations.</li>
+<li><strong>Security.</strong> Decoding must instantiate arbitrary classes. If an attacker can feed your application a byte sequence to decode, they can instantiate arbitrary classes — which routinely leads to remote code execution.</li>
+<li><strong>Versioning is an afterthought</strong> — forward and backward compatibility are neglected.</li>
+<li><strong>Efficiency is an afterthought</strong> — Java's built-in serialization is notorious for poor performance and bloated output.</li>
+</ul>
+<p>Verdict: use them for very transient purposes only.</p>
+
+<h3 id="json-xml-and-binary-variants"><a class="self" href="#json-xml-and-binary-variants">JSON, XML, and Binary Variants</a></h3>
+<span class="key-chip">json-xml-and-binary-variants</span>
+
+<p>The standardized, cross-language options: JSON, XML (widely known, widely supported, almost as widely disliked — XML for verbosity and complexity; JSON popular for browser support and relative simplicity), and CSV (popular, less powerful). All three are textual and roughly human-readable. Beyond syntax debates, the subtle problems:</p>
+<ul>
+<li><strong>Numbers are ambiguous.</strong> XML and CSV can't tell a number from a digit string without an external schema. JSON distinguishes strings from numbers but not integers from floats, and specifies no precision. Integers above 2<sup>53</sup> can't be represented exactly in an IEEE 754 double, so JavaScript mangles them — which is why Twitter's API returns each 64-bit tweet ID <em>twice</em>, as a number and as a decimal string.</li>
+<li><strong>No binary strings.</strong> Unicode text is fine; raw bytes aren't supported, so people Base64-encode them and use the schema to say so. Hacky, and 33% bigger.</li>
+<li><strong>Schemas are optional and complicated.</strong> XML Schema is widely used; many JSON tools skip JSON Schema entirely — so the interpretation of numbers and binary has to be hardcoded in application logic instead.</li>
+<li><strong>CSV has no schema at all</strong> — meaning of rows and columns is up to the application; a new column is a manual change; and it's vague (commas and newlines in values), with escaping rules that not every parser honors.</li>
+</ul>
+<p>Still: good enough for many purposes, and likely to stay popular as <em>interchange</em> formats between organizations — where getting people to agree on anything outweighs prettiness or efficiency.</p>
+
+<h4 id="binary-encoding">Binary encoding</h4>
+<p>For data used only within your organization there's less pressure toward a lowest-common-denominator format; at terabyte scale, compactness and parse speed matter. Hence a profusion of binary encodings for JSON (MessagePack, BSON, BJSON, UBJSON, BISON, Smile…) and XML (WBXML, Fast Infoset). Some extend the datatypes (integers vs floats, binary strings) but keep the data model — and crucially, <strong>without a schema they must still embed every field name</strong>. The book encodes one record in every format that follows:</p>
+
+<pre><code>{
+    "userName": "Martin",
+    "favoriteNumber": 1337,
+    "interests": ["daydreaming", "hacking"]
+}</code></pre>
+
+<figure class="anim" id="anim-bytes">
+<svg viewBox="0 0 680 330" role="img" aria-label="The same record encoded six ways, from 81 bytes of JSON to 66 bytes of MessagePack with inline field names, 59 bytes of Thrift BinaryProtocol with field tags, 34 and 33 bytes for Thrift CompactProtocol and Protocol Buffers with packed tags and variable-length integers, and 32 bytes of Avro with no tags or types at all.">
+  <!-- legend -->
+  <rect x="20" y="300" width="12" height="12" fill="var(--write-soft)" stroke="var(--write)"/><text x="38" y="310" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".8">structure: type / tag / field name / length</text>
+  <rect x="300" y="300" width="12" height="12" fill="var(--read-soft)" stroke="var(--read)"/><text x="318" y="310" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".8">payload: the actual values</text>
+
+  <!-- JSON -->
+  <g data-on="1">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">textual JSON (whitespace removed) — 81 bytes</text>
+    <rect x="20" y="40" width="640" height="30" rx="4" fill="var(--code-bg)"/>
+    <text x="28" y="60" font-size="8.6" font-family="ui-monospace,Menlo,monospace">{"userName":"Martin","favoriteNumber":1337,"interests":["daydreaming","hacking"]}</text>
+    <text x="20" y="110" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">every field name spelled out · quotes, colons, commas, brackets · numbers as digit characters</text>
+    <text x="20" y="130" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".75">the baseline everything below is measured against</text>
+  </g>
+
+  <!-- MessagePack -->
+  <g data-on="2">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">MessagePack (binary JSON) — 66 bytes</text>
+    <g font-size="8.5" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="40" width="40" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="57">83</text>
+      <rect x="60" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="66" y="57">a8</text>
+      <rect x="94" y="40" width="96" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="100" y="57">userName</text>
+      <rect x="190" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="196" y="57">a6</text>
+      <rect x="224" y="40" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="230" y="57">Martin</text>
+      <rect x="294" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="300" y="57">ae</text>
+      <rect x="328" y="40" width="130" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="334" y="57">favoriteNumber</text>
+      <rect x="458" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="464" y="57">cd</text>
+      <rect x="492" y="40" width="60" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="498" y="57">05 39</text>
+      <rect x="552" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="558" y="57">a9</text>
+      <rect x="586" y="40" width="74" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="592" y="57">interests</text>
+      <rect x="20" y="70" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="87">92</text>
+      <rect x="54" y="70" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="60" y="87">ab</text>
+      <rect x="88" y="70" width="110" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="94" y="87">daydreaming</text>
+      <rect x="198" y="70" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="204" y="87">a7</text>
+      <rect x="232" y="70" width="80" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="238" y="87">hacking</text>
+    </g>
+    <text x="20" y="126" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">83 = object (0x80) with 3 fields (0x03) · a8 = string (0xa0) of length 8 · then "userName" raw — no quotes, no escaping</text>
+    <text x="20" y="142" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">cd 05 39 = 16-bit int 1337 · 92 = array of 2</text>
+    <text x="20" y="170" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">still carries every field name: 81 → 66 bytes is a small win for losing human-readability</text>
+  </g>
+
+  <!-- Thrift Binary -->
+  <g data-on="3">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">Thrift BinaryProtocol — 59 bytes</text>
+    <g font-size="8.5" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="40" width="48" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="57">0b</text>
+      <rect x="68" y="40" width="56" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="74" y="57">00 01</text>
+      <rect x="124" y="40" width="96" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="130" y="57">00 00 00 06</text>
+      <rect x="220" y="40" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="226" y="57">Martin</text>
+      <rect x="290" y="40" width="48" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="296" y="57">0a</text>
+      <rect x="338" y="40" width="56" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="344" y="57">00 02</text>
+      <rect x="394" y="40" width="190" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="400" y="57">00 00 00 00 00 00 05 39</text>
+      <rect x="20" y="70" width="48" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="87">0f</text>
+      <rect x="68" y="70" width="56" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="74" y="87">00 03</text>
+      <rect x="124" y="70" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="130" y="87">0b</text>
+      <rect x="158" y="70" width="96" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="164" y="87">00 00 00 02</text>
+      <rect x="254" y="70" width="96" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="260" y="87">00 00 00 0b</text>
+      <rect x="350" y="70" width="110" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="356" y="87">daydreaming</text>
+      <rect x="460" y="70" width="96" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="466" y="87">00 00 00 07</text>
+      <rect x="556" y="70" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="562" y="87">hacking</text>
+      <rect x="626" y="70" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="632" y="87">00</text>
+    </g>
+    <text x="20" y="126" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">0b = type string · 00 01 = FIELD TAG 1 · 00 00 00 06 = length 6 · "Martin"</text>
+    <text x="20" y="142" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">0a = type i64 · tag 2 · eight bytes for 1337 · 0f = list, tag 3, item type 0b, 2 items · 00 = end of struct</text>
+    <text x="20" y="170" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">the field NAMES are gone — replaced by tag numbers from the schema. Field tags are aliases for fields.</text>
+  </g>
+
+  <!-- Thrift Compact + Protobuf -->
+  <g data-on="4">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">Thrift CompactProtocol — 34 bytes</text>
+    <g font-size="8.5" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="57">18</text>
+      <rect x="54" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="60" y="57">06</text>
+      <rect x="88" y="40" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="94" y="57">Martin</text>
+      <rect x="158" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="164" y="57">16</text>
+      <rect x="192" y="40" width="60" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="198" y="57">f2 14</text>
+      <rect x="252" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="258" y="57">19</text>
+      <rect x="286" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="292" y="57">28</text>
+      <rect x="320" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="326" y="57">0b</text>
+      <rect x="354" y="40" width="110" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="360" y="57">daydreaming</text>
+      <rect x="464" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="470" y="57">07</text>
+      <rect x="498" y="40" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="504" y="57">hacking</text>
+      <rect x="568" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="574" y="57">00</text>
+    </g>
+    <text x="20" y="90" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">18 = one byte packing (tag delta 1, type 8 = string) · 06 = length · 16 = (tag +1, type 6 = i64) · f2 14 = 1337 as a VARINT</text>
+    <text x="20" y="128" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">Protocol Buffers — 33 bytes</text>
+    <g font-size="8.5" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="161">0a</text>
+      <rect x="54" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="60" y="161">06</text>
+      <rect x="88" y="144" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="94" y="161">Martin</text>
+      <rect x="158" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="164" y="161">10</text>
+      <rect x="192" y="144" width="60" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="198" y="161">b9 0a</text>
+      <rect x="252" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="258" y="161">1a</text>
+      <rect x="286" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="292" y="161">0b</text>
+      <rect x="320" y="144" width="110" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="326" y="161">daydreaming</text>
+      <rect x="430" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="436" y="161">1a</text>
+      <rect x="464" y="144" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="470" y="161">07</text>
+      <rect x="498" y="144" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="504" y="161">hacking</text>
+    </g>
+    <text x="20" y="194" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">0a = (field 1, wire type 2 = length-delimited) · 10 = (field 2, varint) · 1a repeated twice: a "repeated" field is just the same tag appearing again</text>
+    <text x="20" y="224" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">varints: top bit of each byte says "more bytes follow" → −64..63 in 1 byte, −8192..8191 in 2, … 1337 takes 2 bytes, not 8</text>
+  </g>
+
+  <!-- Avro -->
+  <g data-on="5-6">
+    <text x="20" y="24" font-size="12" font-family="ui-monospace,Menlo,monospace" font-weight="700">Apache Avro — 32 bytes</text>
+    <g font-size="8.5" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="26" y="57">0c</text>
+      <rect x="54" y="40" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="60" y="57">Martin</text>
+      <rect x="124" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="130" y="57">02</text>
+      <rect x="158" y="40" width="60" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="164" y="57">f2 14</text>
+      <rect x="218" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="224" y="57">04</text>
+      <rect x="252" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="258" y="57">16</text>
+      <rect x="286" y="40" width="110" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="292" y="57">daydreaming</text>
+      <rect x="396" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="402" y="57">0e</text>
+      <rect x="430" y="40" width="70" height="26" fill="var(--read-soft)" stroke="var(--read)"/><text x="436" y="57">hacking</text>
+      <rect x="500" y="40" width="34" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="506" y="57">00</text>
+    </g>
+    <text x="20" y="90" font-size="9.5" font-family="ui-monospace,Menlo,monospace" opacity=".8">0c = length 6 (zigzag varint) · "Martin" · 02 = union branch 1 (long) · f2 14 = 1337 · 04 = array block of 2 · 16 = length 11 · … · 00 = end of array</text>
+  </g>
+  <g data-on="5">
+    <text x="20" y="130" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">NOTHING says what type anything is, and there are no tags. "0c Martin" could be a string, an int, anything.</text>
+    <text x="20" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".8">the bytes are just values concatenated; the READER walks the schema field by field to know how to interpret them</text>
+    <text x="20" y="170" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".8">⇒ decodes correctly only if the reader knows the schema the writer used. How Avro squares that circle: next section.</text>
+  </g>
+  <g data-on="6">
+    <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+      <text x="20" y="130" opacity=".8">JSON              81 bytes</text>
+      <rect x="240" y="121" width="405" height="12" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".4"/>
+      <text x="20" y="150" opacity=".8">MessagePack       66</text>
+      <rect x="240" y="141" width="330" height="12" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".4"/>
+      <text x="20" y="170" opacity=".8">Thrift Binary     59</text>
+      <rect x="240" y="161" width="295" height="12" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".4"/>
+      <text x="20" y="190" opacity=".8">Thrift Compact    34</text>
+      <rect x="240" y="181" width="170" height="12" fill="var(--write-soft)" stroke="var(--write)"/>
+      <text x="20" y="210" opacity=".8">Protocol Buffers  33</text>
+      <rect x="240" y="201" width="165" height="12" fill="var(--write-soft)" stroke="var(--write)"/>
+      <text x="20" y="230" opacity=".8">Avro              32</text>
+      <rect x="240" y="221" width="160" height="12" fill="var(--read-soft)" stroke="var(--read)"/>
+    </g>
+    <text x="20" y="262" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">the big saving comes from the SCHEMA: drop field names (tags), then drop tags and types too (Avro)</text>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>JSON — 81 bytes</strong> The baseline. Every field name spelled out, structural punctuation everywhere, the number as digit characters. Human-readable, self-describing, and fat.</li>
+  <li><strong>MESSAGEPACK — 66 bytes</strong> A binary JSON. Type and length are packed into a leading byte (<code>0x83</code>: object, 3 fields; <code>0xa8</code>: string, 8 bytes), so strings need no quotes or escaping. But with no schema, <strong>every field name must still be embedded</strong>. 81 → 66 is a modest win for giving up readability — all binary-JSON variants land about here.</li>
+  <li><strong>THRIFT BINARYPROTOCOL — 59 bytes</strong> Now there's a schema, and it changes everything: field <em>names</em> vanish, replaced by <strong>field tags</strong> — the numbers 1, 2, 3 from the schema. Each field still carries a type byte and, where needed, a length; the i64 costs a full 8 bytes.</li>
+  <li><strong>THRIFT COMPACT — 34 · PROTOBUF — 33</strong> Same information, packed: field type and tag squeezed into one byte, and integers as <strong>varints</strong> (the top bit of each byte says "more follows"), so 1337 takes 2 bytes instead of 8. Protobuf does the bit-packing slightly differently but ends up one byte smaller. Note the two <code>1a</code> bytes: Protobuf has no list type — a <code>repeated</code> field is literally the same tag appearing multiple times.</li>
+  <li><strong>AVRO — 32 bytes</strong> The most compact — and the strangest: <strong>no tags, no type bytes at all</strong>. Just values concatenated: a length prefix, then UTF-8; a union branch index; a varint. Nothing in the bytes identifies a field or its type. To decode, the reader walks the schema in field order and lets it dictate how to interpret each run of bytes — so the bytes can only be read correctly with the exact schema the writer used. Or so it seems.</li>
+  <li><strong>SCOREBOARD</strong> The jump isn't binary-vs-text; it's <em>schema-vs-no-schema</em>. The schema lets you drop field names (Thrift/Protobuf) and then even tags and types (Avro), because the schema itself carries that information once, out of band.</li>
+</ol>
+</figure>
+
+<h3 id="thrift-and-protocol-buffers"><a class="self" href="#thrift-and-protocol-buffers">Thrift and Protocol Buffers</a></h3>
+<span class="key-chip">thrift-and-protocol-buffers</span>
+
+<p><strong>Apache Thrift</strong> (Facebook) and <strong>Protocol Buffers</strong> (Google), both open-sourced 2007–08, share a principle: a <strong>schema is required</strong> for anything encoded, written in an interface definition language —</p>
+<div class="tablewrap"><table>
+<tr><th>Thrift IDL</th><th>Protocol Buffers</th></tr>
+<tr><td><pre style="margin:0"><code>struct Person {
+  1: required string       userName,
+  2: optional i64          favoriteNumber,
+  3: optional list&lt;string&gt; interests
+}</code></pre></td><td><pre style="margin:0"><code>message Person {
+    required string user_name       = 1;
+    optional int64  favorite_number = 2;
+    repeated string interests       = 3;
+}</code></pre></td></tr>
+</table></div>
+<p>— and a <strong>code generator</strong> that turns the schema into classes in many languages; application code calls the generated code to encode and decode. (Thrift, confusingly, has two binary encodings — BinaryProtocol and CompactProtocol — plus a C++-only DenseProtocol and two JSON variants. "What fun!") One detail: <code>required</code> vs <code>optional</code> makes <em>no difference to the bytes</em>. <code>required</code> just enables a runtime check that fails if the field isn't set — useful for catching bugs.</p>
+
+<h4 id="field-tags-and-schema-evolution">Field tags and schema evolution</h4>
+<p>An encoded record is the concatenation of its fields; each field is identified by <strong>tag number</strong> and annotated with a datatype; unset fields are simply omitted. So tags carry the meaning: you can rename a field freely (names are never encoded), but you can <em>never</em> change a tag. Schema evolution follows from there:</p>
+
+<figure class="anim" id="anim-tags">
+<svg viewBox="0 0 680 320" role="img" aria-label="Schema evolution with field tags: a new field gets a new tag; old code skips unknown tags using the type annotation (forward compatibility); new code reading old data finds the field absent, so new fields must be optional or have defaults (backward compatibility); removed tags are never reused; widening an integer truncates on old readers.">
+  <!-- schema v1 -->
+  <rect x="20" y="20" width="230" height="90" rx="6" fill="var(--code-bg)"/>
+  <text x="30" y="38" font-size="9" font-family="ui-monospace,Menlo,monospace" font-weight="700">schema v1</text>
+  <text x="30" y="56" font-size="9" font-family="ui-monospace,Menlo,monospace">1: required string userName</text>
+  <text x="30" y="72" font-size="9" font-family="ui-monospace,Menlo,monospace">2: optional i64    favoriteNumber</text>
+  <text x="30" y="88" font-size="9" font-family="ui-monospace,Menlo,monospace">3: optional list   interests</text>
+  <!-- schema v2 -->
+  <g data-on="1-5">
+    <rect x="290" y="20" width="370" height="90" rx="6" fill="var(--code-bg)"/>
+    <text x="300" y="38" font-size="9" font-family="ui-monospace,Menlo,monospace" font-weight="700">schema v2</text>
+    <text x="300" y="56" font-size="9" font-family="ui-monospace,Menlo,monospace">1: required string userName    <tspan opacity=".55">(renamed? fine — names aren't encoded)</tspan></text>
+    <text x="300" y="72" font-size="9" font-family="ui-monospace,Menlo,monospace">2: optional i64    favoriteNumber</text>
+    <text x="300" y="88" font-size="9" font-family="ui-monospace,Menlo,monospace">3: optional list   interests</text>
+    <text x="300" y="104" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">4: optional string photoUrl      ← NEW TAG</text>
+  </g>
+  <!-- record row -->
+  <g data-on="1-2">
+    <text x="20" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">record written by v2 code:</text>
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="160" width="90" height="26" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="26" y="177">tag1 Martin</text>
+      <rect x="110" y="160" width="80" height="26" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="116" y="177">tag2 1337</text>
+      <rect x="190" y="160" width="130" height="26" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="196" y="177">tag3 [daydr…,hack…]</text>
+      <rect x="320" y="160" width="170" height="26" fill="var(--write-soft)" stroke="var(--write)"/><text x="326" y="177">tag4 str len=21 https://…</text>
+    </g>
+  </g>
+  <g data-on="2" data-hot="2">
+    <path d="M 405 200 L 405 190" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR14)"/>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">v1 code reads: "tag 4? never heard of it. Type byte says string, length says 21 → skip 21 bytes." → FORWARD compatible ✓</text>
+  </g>
+  <g data-on="3" data-hot="3">
+    <text x="20" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">record written by v1 code:</text>
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="160" width="90" height="26" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="26" y="177">tag1 Martin</text>
+      <rect x="110" y="160" width="80" height="26" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="116" y="177">tag2 1337</text>
+      <rect x="190" y="160" width="130" height="26" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="196" y="177">tag3 [daydr…,hack…]</text>
+      <rect x="320" y="160" width="170" height="26" fill="none" stroke="var(--bad)" stroke-dasharray="4 3"/><text x="326" y="177" fill="var(--bad)">(no tag 4 — v1 didn't know it)</text>
+    </g>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">v2 code reads: tag 4 absent → it's optional → photoUrl = null/default. BACKWARD compatible ✓</text>
+    <text x="20" y="240" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">had tag 4 been declared REQUIRED, this read would fail its check ✗ — every field added later must be optional or have a default</text>
+  </g>
+  <g data-on="4" data-hot="4">
+    <rect x="290" y="130" width="370" height="60" rx="6" fill="var(--code-bg)"/>
+    <text x="300" y="148" font-size="9" font-family="ui-monospace,Menlo,monospace" font-weight="700">schema v3 — remove favoriteNumber</text>
+    <text x="300" y="164" font-size="9" font-family="ui-monospace,Menlo,monospace">1: required string userName</text>
+    <text x="300" y="180" font-size="9" font-family="ui-monospace,Menlo,monospace"><tspan fill="var(--bad)">2: ✕ retired forever</tspan>   3: optional list interests   4: optional string photoUrl</text>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">removing = adding with the concerns reversed: only OPTIONAL fields may be removed (a required one never can),</text>
+    <text x="20" y="238" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">and tag 2 may NEVER be reused — data with an old tag 2 is still out there, and new code must keep ignoring it</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <text x="20" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".7">datatype change: favoriteNumber i32 → i64</text>
+    <rect x="20" y="160" width="300" height="26" rx="3" fill="var(--read-soft)" stroke="var(--read)"/><text x="26" y="177" font-size="9" font-family="ui-monospace,Menlo,monospace">new code reads old i32: pad missing bits with zeros ✓</text>
+    <rect x="340" y="160" width="320" height="26" rx="3" fill="none" stroke="var(--bad)"/><text x="346" y="177" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">old code reads new i64 into a 32-bit variable: TRUNCATED ✗</text>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">Protobuf bonus: optional (single) → repeated (multi) is safe — new code reading old data sees a 0- or 1-element list;</text>
+    <text x="20" y="238" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">old code reading new data sees only the LAST element. Thrift's dedicated list type can't do this, but supports nested lists.</text>
+  </g>
+  <defs><marker id="arrR14" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>ADD A FIELD</strong> Schema v2 adds <code>photoUrl</code> with a <em>new</em> tag number, 4. Renaming fields is free (names never hit the wire); changing a tag would invalidate every existing record.</li>
+  <li><strong>FORWARD COMPATIBILITY</strong> v2 writes a record including tag 4. Old v1 code hits an unknown tag — but the datatype annotation tells it how many bytes to skip. Unknown fields are ignored; old code reads new data.</li>
+  <li><strong>BACKWARD COMPATIBILITY</strong> v1 writes a record without tag 4. New v2 code reads it: tag numbers still mean the same thing, and tag 4 is simply absent. Fine — <em>as long as the new field is optional or has a default</em>. A <code>required</code> field added after initial deployment would fail its check on every old record.</li>
+  <li><strong>REMOVE A FIELD</strong> Removing is adding with the compatibility concerns reversed: only optional fields can go, and the tag number is retired forever — some stored data still carries it, and new code must keep skipping it.</li>
+  <li><strong>CHANGE A TYPE</strong> Possible, with precision risk: widening i32 → i64 is safe for new readers (zero-pad) but old readers truncate. Protobuf's <code>repeated</code> marker (no list type — the tag just repeats) allows optional → repeated evolution; Thrift's real list type doesn't, but supports nesting.</li>
+</ol>
+</figure>
+
+<h3 id="avro"><a class="self" href="#avro">Avro</a></h3>
+<span class="key-chip">avro</span>
+
+<p><strong>Apache Avro</strong> (2009, a Hadoop subproject born because Thrift didn't fit Hadoop's needs) also requires a schema, in two syntaxes — Avro IDL for humans, a JSON form for machines:</p>
+<div class="tablewrap"><table>
+<tr><th>Avro IDL</th><th>JSON schema</th></tr>
+<tr><td><pre style="margin:0"><code>record Person {
+    string               userName;
+    union { null, long } favoriteNumber = null;
+    array&lt;string&gt;        interests;
+}</code></pre></td><td><pre style="margin:0"><code>{"type": "record", "name": "Person", "fields": [
+  {"name": "userName",       "type": "string"},
+  {"name": "favoriteNumber", "type": ["null","long"],
+                             "default": null},
+  {"name": "interests",      "type": {"type":"array",
+                             "items":"string"}}
+]}</code></pre></td></tr>
+</table></div>
+<p><strong>No tag numbers.</strong> The encoding (32 bytes, above) is pure values; the reader must walk a schema to interpret them. So how can Avro possibly evolve? With the idea that makes it interesting:</p>
+
+<figure class="anim" id="anim-avro">
+<svg viewBox="0 0 680 340" role="img" aria-label="Avro schema resolution: the writer's schema and the reader's schema differ; the library matches fields by name, tolerates reordering, ignores fields unknown to the reader, and fills fields missing from the writer with the reader's defaults; the writer's schema is obtained from a file header, a version number in each record, or connection negotiation.">
+  <!-- writer schema -->
+  <rect x="20" y="20" width="200" height="120" rx="6" fill="var(--write-soft)" stroke="var(--write)"/>
+  <text x="30" y="40" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">WRITER's schema (v-old)</text>
+  <text x="30" y="62" font-size="9" font-family="ui-monospace,Menlo,monospace">userName        string</text>
+  <text x="30" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">favoriteNumber  long|null</text>
+  <text x="30" y="98" font-size="9" font-family="ui-monospace,Menlo,monospace">interests       array</text>
+  <text x="30" y="116" font-size="9" font-family="ui-monospace,Menlo,monospace">photoUrl        string</text>
+  <!-- reader schema -->
+  <rect x="460" y="20" width="200" height="120" rx="6" fill="var(--read-soft)" stroke="var(--read)"/>
+  <text x="470" y="40" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)" font-weight="700">READER's schema (v-new)</text>
+  <text x="470" y="62" font-size="9" font-family="ui-monospace,Menlo,monospace">favoriteNumber  long|null</text>
+  <text x="470" y="80" font-size="9" font-family="ui-monospace,Menlo,monospace">userName        string</text>
+  <text x="470" y="98" font-size="9" font-family="ui-monospace,Menlo,monospace">interests       array</text>
+  <text x="470" y="116" font-size="9" font-family="ui-monospace,Menlo,monospace">region  string = "unknown"</text>
+  <!-- bytes -->
+  <g data-on="1-5">
+    <rect x="250" y="60" width="180" height="40" rx="4" fill="var(--code-bg)"/>
+    <text x="258" y="78" font-size="8.5" font-family="ui-monospace,Menlo,monospace">0c Martin 02 f2 14 04 16 …</text>
+    <text x="258" y="92" font-size="8.5" font-family="ui-monospace,Menlo,monospace">… 0e hacking 00 1a https://…</text>
+    <path d="M 224 80 L 246 80" stroke="var(--write)" stroke-width="1.4" marker-end="url(#arrW15)"/>
+    <path d="M 434 80 L 456 80" stroke="var(--read)" stroke-width="1.4" marker-end="url(#arrR15)"/>
+  </g>
+  <g data-on="1">
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">the writer encoded with the schema it knew (compiled in). The reader expects the schema ITS code was built from.</text>
+    <text x="20" y="200" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">key idea: they don't have to be the same — only COMPATIBLE. The library resolves the two side by side.</text>
+  </g>
+  <g data-on="2" data-hot="2">
+    <path d="M 220 62 C 340 62, 340 80, 460 80" fill="none" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <path d="M 220 80 C 340 80, 340 62, 460 62" fill="none" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">fields are matched BY NAME, so a different order is no problem: userName ↔ userName, favoriteNumber ↔ favoriteNumber</text>
+  </g>
+  <g data-on="3" data-hot="3">
+    <rect x="26" y="106" width="150" height="14" fill="none" stroke="var(--bad)" stroke-dasharray="3 2"/>
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">photoUrl is in the writer's schema but not the reader's → IGNORED (the writer's schema says how many bytes to skip)</text>
+  </g>
+  <g data-on="4" data-hot="4">
+    <rect x="466" y="106" width="188" height="14" fill="none" stroke="var(--write)" stroke-dasharray="3 2"/>
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">region is in the reader's schema but the writer never wrote it → filled with the reader's DEFAULT, "unknown"</text>
+    <text x="20" y="204" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">⇒ the rule: you may add or remove a field ONLY if it has a default value. No default ⇒ adding breaks backward compat,</text>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">removing breaks forward compat. null is not a free default: to allow null, use a union {null, long} and put null first.</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">but how does the reader GET the writer's schema? (shipping it with every record would dwarf the data)</text>
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="20" y="196" width="200" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="30" y="214" font-weight="700">big file, millions of records</text>
+      <text x="30" y="230">writer's schema ONCE in the</text><text x="30" y="244">header (object container file)</text>
+      <rect x="240" y="196" width="200" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="250" y="214" font-weight="700">database, records over years</text>
+      <text x="250" y="230">version number per record +</text><text x="250" y="244">a table of schema versions</text>
+      <rect x="460" y="196" width="200" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="470" y="214" font-weight="700">network connection</text>
+      <text x="470" y="230">negotiate the schema version</text><text x="470" y="244">at connection setup (Avro RPC)</text>
+    </g>
+    <text x="20" y="284" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">a registry of schema versions is worth having anyway: it's documentation, and lets you check compatibility BEFORE deploying</text>
+  </g>
+  <g data-on="6">
+    <text x="20" y="180" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">why "no tag numbers" matters: dynamically generated schemas</text>
+    <text x="20" y="204" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">dump a relational database to a binary file: generate an Avro record schema per table, a field per column, name = column name.</text>
+    <text x="20" y="222" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">a column is added and another dropped? just regenerate the schema and export — readers match old fields by NAME as before.</text>
+    <text x="20" y="246" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">with Thrift/Protobuf someone would have to hand-assign tag numbers on every change, never reusing an old one.</text>
+    <text x="20" y="270" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">also: code generation is optional. An object container file is self-describing — open it and browse it like JSON (Pig loves this).</text>
+  </g>
+  <defs>
+    <marker id="arrW15" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR15" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>TWO SCHEMAS</strong> The <em>writer's schema</em> is whatever the encoding application knew (compiled in). The <em>reader's schema</em> is what the decoding application's code was built against. Avro's key idea: <strong>they don't have to be identical, only compatible</strong> — the library looks at both side by side and translates.</li>
+  <li><strong>REORDERING</strong> Fields are matched <em>by name</em>, so a different field order between writer and reader is harmless.</li>
+  <li><strong>UNKNOWN FIELDS</strong> A field in the writer's schema that the reader doesn't know (<code>photoUrl</code>) is skipped — the writer's schema tells the library its type and size.</li>
+  <li><strong>MISSING FIELDS AND THE RULE</strong> A field the reader expects but the writer never wrote (<code>region</code>) takes the <em>default value</em> from the reader's schema. Hence the evolution rule: only add or remove fields <strong>with defaults</strong>. Adding a default-less field breaks backward compatibility (new readers can't read old data); removing one breaks forward compatibility. Avro has no <code>optional</code>/<code>required</code> — unions and defaults instead, and <code>null</code> is only allowed via <code>union {null, …}</code> with null as the first branch. Renaming and adding union branches are backward- but not forward-compatible (via reader-side aliases).</li>
+  <li><strong>WHERE THE WRITER'S SCHEMA COMES FROM</strong> Depends on context: a big file embeds the schema once in its header (object container files, the Hadoop pattern); a database stores a version number with each record and keeps a table of schema versions (LinkedIn's Espresso); a network connection negotiates the version once at setup (Avro RPC). A schema-version registry is valuable regardless — documentation, plus pre-deployment compatibility checks.</li>
+  <li><strong>WHY IT MATTERS</strong> No tags ⇒ Avro is friendly to <em>dynamically generated</em> schemas: dump a relational database by generating a record type per table with a field per column; when columns change, regenerate and re-export, and readers keep matching by name. With Thrift or Protobuf, tag assignment would need a careful human on every change. Avro also makes code generation optional — a container file is self-describing; open it like JSON.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · tags vs names</span>
+Thrift and Protobuf label every box in the shipment with a <strong>number</strong> — compact, but somebody has to keep the master list of numbers forever and never hand out a used one twice. Avro labels nothing in the shipment; instead, sender and receiver each hold a <strong>packing list</strong>, and the receiver reconciles the two lists by item <em>name</em>: reorder freely, ignore items you didn't order, and for items you expected but didn't get, use your listed default. The cost is that the receiver must somehow obtain the sender's packing list — once per file, once per connection, or via a version stamp and a registry.</div>
+
+<h3 id="the-merits-of-schemas"><a class="self" href="#the-merits-of-schemas">The Merits of Schemas</a></h3>
+<span class="key-chip">the-merits-of-schemas</span>
+
+<p>Protobuf, Thrift, and Avro schemas are far simpler than XML Schema or JSON Schema (no regex validation, no numeric ranges) — which is why they're simple to implement and support so many languages. The idea is old: <strong>ASN.1</strong> (1984) defined network protocols, its DER encoding still encodes X.509 SSL certificates, and it evolves schemas with tag numbers like Protobuf/Thrift — but it's complex and badly documented, so not a choice for new applications. Databases have proprietary binary protocols too, decoded by vendor drivers behind ODBC/JDBC. The case for schema-driven binary encodings:</p>
+<ul>
+<li><strong>Compactness</strong> — far smaller than binary-JSON variants, because field names are omitted.</li>
+<li><strong>Documentation that can't go stale</strong> — the schema is required for decoding, so it's guaranteed up to date, unlike hand-maintained docs.</li>
+<li><strong>Compatibility checks before deployment</strong> — a database of schemas lets you verify forward and backward compatibility ahead of time.</li>
+<li><strong>Code generation</strong> for statically typed languages — compile-time type checking.</li>
+</ul>
+<p>Net: schema evolution gives you the flexibility of schema-on-read JSON databases <em>plus</em> better guarantees and tooling.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · schema registries become infrastructure</span>
+The 1st edition's "a database of schema versions is a useful thing to have" became a product category: the 2nd edition (Chapter&nbsp;5 there) covers <strong>schema registries</strong> (Confluent-style) as standard infrastructure for evolving schemas in event streams — the registry assigns version IDs, stores every schema, and rejects incompatible changes at publish time. The refs suggest Avro and Protobuf dominate the discussion, with Thrift a smaller presence than in 2017 (low-confidence inference).</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="modes-of-dataflow">
+<span class="key-chip">modes-of-dataflow</span>
+<h2><a class="self" href="#modes-of-dataflow">Modes of Dataflow</a></h2>
+
+<p>Compatibility is a relationship between the process that <em>encodes</em> and the process that <em>decodes</em> — but who is who? Data flows between processes in three common ways, each with its own compatibility shape:</p>
+
+<figure>
+<svg viewBox="0 0 680 200" role="img" aria-label="Three modes of dataflow: through a database where the writer encodes and a later reader decodes; through a service where the client encodes a request and decodes a response while the server does the reverse; and through a message broker where a producer encodes and one or more consumers decode asynchronously.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="22" font-weight="700">via databases</text>
+    <rect x="20" y="40" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="30" y="60">writer</text>
+    <rect x="130" y="40" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/><text x="150" y="60">DB</text>
+    <rect x="20" y="120" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="30" y="140">reader</text>
+    <path d="M 92 55 L 126 55" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW16)"/>
+    <path d="M 160 74 C 160 110, 120 135, 94 135" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR16)"/>
+    <text x="100" y="172" font-size="9" opacity=".7">later — maybe years</text>
+    <text x="250" y="22" font-weight="700">via services (REST/RPC)</text>
+    <rect x="250" y="40" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="260" y="60">client</text>
+    <rect x="370" y="40" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="380" y="60">server</text>
+    <path d="M 322 50 L 366 50" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW16)"/>
+    <path d="M 366 62 L 322 62" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR16)"/>
+    <text x="326" y="44" font-size="8" fill="var(--write)">request</text>
+    <text x="322" y="76" font-size="8" fill="var(--read)">response</text>
+    <text x="250" y="110" font-size="9" opacity=".7">synchronous: expects a</text>
+    <text x="250" y="124" font-size="9" opacity=".7">reply as fast as possible</text>
+    <text x="490" y="22" font-weight="700">via message passing</text>
+    <rect x="490" y="40" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="497" y="60">producer</text>
+    <rect x="600" y="40" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/><text x="610" y="60">broker</text>
+    <rect x="490" y="120" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="493" y="140">consumer</text>
+    <rect x="600" y="120" width="70" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="603" y="140">consumer</text>
+    <path d="M 562 55 L 596 55" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW16)"/>
+    <path d="M 625 74 C 625 100, 560 110, 540 116" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR16)"/>
+    <path d="M 640 74 L 638 116" fill="none" stroke="var(--read)" stroke-width="1.6" marker-end="url(#arrR16)"/>
+    <text x="490" y="172" font-size="9" opacity=".7">asynchronous, one-way, via a store</text>
+  </g>
+  <defs>
+    <marker id="arrW16" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR16" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<figcaption>Three ways encoded bytes travel between processes. Message passing sits between the other two: low-latency like RPC, but via an intermediary store like a database.</figcaption>
+</figure>
+
+<h3 id="dataflow-through-databases"><a class="self" href="#dataflow-through-databases">Dataflow Through Databases</a></h3>
+<span class="key-chip">dataflow-through-databases</span>
+
+<p>The writer encodes, the reader decodes. With a single process, the reader is a later version of the same process — storing data is <strong>sending a message to your future self</strong>, so backward compatibility is obviously required. But usually many processes hit the database concurrently, some on newer code and some on older (mid rolling-upgrade), so a value written by new code may be read by old code: <strong>forward compatibility is required too</strong>. And there's a snag beyond what the encoding format handles:</p>
+
+<figure class="anim" id="anim-lostfield">
+<svg viewBox="0 0 680 280" role="img" aria-label="An older application version reads a record written by a newer version, decodes it into a model object that has no slot for the new field, updates another field, and writes the object back — silently deleting the new field unless unknown fields are preserved.">
+  <rect x="250" y="20" width="180" height="70" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text x="262" y="40" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">database record</text>
+  <g data-on="1"><text x="262" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace">{name, email}</text></g>
+  <g data-on="2-3"><text x="262" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace">{name, email, <tspan fill="var(--write)" font-weight="700">photo</tspan>}</text></g>
+  <g data-on="4"><text x="262" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace">{name, email'}  <tspan fill="var(--bad)" font-weight="700">photo GONE</tspan></text></g>
+  <g data-on="5"><text x="262" y="60" font-size="10" font-family="ui-monospace,Menlo,monospace">{name, email', <tspan fill="var(--write)" font-weight="700">photo</tspan>} ✓</text></g>
+  <!-- new code -->
+  <rect x="20" y="130" width="160" height="60" rx="6" fill="var(--write-soft)" stroke="var(--write)"/>
+  <text x="32" y="152" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--write)" font-weight="700">new code (v2)</text>
+  <text x="32" y="170" font-size="9" font-family="ui-monospace,Menlo,monospace">knows: name, email, photo</text>
+  <!-- old code -->
+  <rect x="500" y="130" width="160" height="60" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+  <text x="512" y="152" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">old code (v1)</text>
+  <text x="512" y="170" font-size="9" font-family="ui-monospace,Menlo,monospace">knows: name, email</text>
+  <g data-on="2" data-hot="2">
+    <path d="M 120 126 C 140 100, 200 60, 246 56" fill="none" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW17)"/>
+    <text x="110" y="100" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">writes photo</text>
+  </g>
+  <g data-on="3" data-hot="3">
+    <path d="M 434 56 C 480 60, 540 100, 560 126" fill="none" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR17)"/>
+    <text x="470" y="100" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">reads record</text>
+    <rect x="500" y="210" width="160" height="50" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="512" y="230" font-size="9" font-family="ui-monospace,Menlo,monospace">model object: {name, email}</text>
+    <text x="512" y="246" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">no slot for photo → dropped</text>
+    <text x="330" y="236" font-size="9" font-family="ui-monospace,Menlo,monospace" opacity=".8">user edits email</text>
+  </g>
+  <g data-on="4" data-hot="4">
+    <path d="M 560 126 C 540 100, 480 60, 434 66" fill="none" stroke="var(--bad)" stroke-width="1.8" marker-end="url(#arrB17)"/>
+    <text x="440" y="104" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">writes back {name, email'}</text>
+    <text x="20" y="236" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">re-encoding the model object lost the field the old code couldn't interpret. Data written by new code silently destroyed.</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <rect x="500" y="210" width="160" height="50" rx="6" fill="var(--read-soft)" stroke="var(--read)"/>
+    <text x="512" y="230" font-size="9" font-family="ui-monospace,Menlo,monospace">{name, email} + <tspan fill="var(--write)">unknown bytes</tspan></text>
+    <text x="512" y="246" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">carried through untouched</text>
+    <path d="M 560 126 C 540 100, 480 60, 434 66" fill="none" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW17)"/>
+    <text x="20" y="236" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">the encodings above all support preserving unknown fields; the application layer must not throw them away in translation.</text>
+  </g>
+  <defs>
+    <marker id="arrW17" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR17" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    <marker id="arrB17" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> A user record with <code>name</code> and <code>email</code>. A rolling upgrade is in progress: v2 (which adds a <code>photo</code> field) and v1 both run.</li>
+  <li><strong>NEW CODE WRITES</strong> v2 stores a photo. The record now has a field v1 has never heard of.</li>
+  <li><strong>OLD CODE READS AND EDITS</strong> v1 reads the record and decodes it into its model object — which has no slot for <code>photo</code>. The user edits their email address.</li>
+  <li><strong>THE HAZARD</strong> v1 re-encodes its model object and writes it back. The photo is gone — not because the encoding couldn't carry it, but because the application's decode → object → encode round trip dropped it. The book's Figure 4-7.</li>
+  <li><strong>THE FIX</strong> Preserve unknown fields through the round trip. Thrift, Protobuf, and Avro can all carry unknown fields; you just have to make sure your application layer doesn't discard them. Not hard — you just need to know it's there.</li>
+</ol>
+</figure>
+
+<h4 id="different-values-written-at-different-times">Different values written at different times — <em>data outlives code</em></h4>
+<p>A database lets any value be updated any time, so it holds values written five milliseconds ago beside values written five years ago. Deploying a new version replaces all the <em>code</em> in minutes; the five-year-old <em>data</em> stays in its original encoding unless you explicitly rewrite it. Rewriting (migrating) a large dataset is expensive, so databases avoid it: most relational systems add a column with a <code>NULL</code> default without touching existing rows (MySQL being the exception that often rewrites the table), filling nulls in at read time. LinkedIn's Espresso stores Avro and leans on its schema-evolution rules. Either way, <strong>schema evolution lets the whole database look as if it had one schema</strong> even though storage holds records from many eras.</p>
+
+<h4 id="archival-storage">Archival storage</h4>
+<p>Snapshots for backup or for loading into a <a class="xref back" href="ch03-storage-and-retrieval.html#data-warehousing" data-tip="Ch 3 · Data Warehousing — a separate read-only analytics database fed from OLTP systems by ETL">data warehouse<sup>←3</sup></a> are the exception: you're copying anyway, so encode the copy consistently in the latest schema. Written once and immutable, dumps suit Avro object container files — or, for analytics, a column-oriented format like <a class="xref back" href="ch03-storage-and-retrieval.html#column-compression" data-tip="Ch 3 · Column Compression — why columnar formats like Parquet compress and scan so well">Parquet<sup>←3</sup></a>. More on archived data in <a class="xref fwd" href="ch10-batch-processing.html" data-tip="Ch 10 · Batch Processing — bulk processing of immutable input data · not yet written">Chapter&nbsp;10<sup>→10</sup></a>.</p>
+
+<h3 id="dataflow-through-services-rest-and-rpc"><a class="self" href="#dataflow-through-services-rest-and-rpc">Dataflow Through Services: REST and RPC</a></h3>
+<span class="key-chip">dataflow-through-services-rest-and-rpc</span>
+
+<p>Over a network the usual arrangement is <strong>clients and servers</strong>: the server exposes an API — a <em>service</em> — and clients call it. The web is the canonical case (browsers making GET/POST requests; standardized HTTP, URLs, TLS, HTML). Clients can also be native apps or in-browser JavaScript (Ajax), receiving data like JSON rather than HTML. And a server is often a client of other services — the pattern of decomposing an application into services by function, called <strong>service-oriented architecture</strong> and lately rebranded <strong>microservices</strong>. Services resemble databases (submit and query data) but expose an application-specific API rather than arbitrary queries — an encapsulation that lets them restrict what clients can do. The design goal is independent deployability and evolvability — each service owned by one team releasing on its own schedule — which means old and new servers and clients coexist, and API encodings must be compatible across versions. Exactly this chapter's subject.</p>
+
+<h4 id="web-services">Web services: REST vs SOAP</h4>
+<p>HTTP-based services are called web services (a misnomer — they're used everywhere: user devices calling over the internet; service-to-service within a datacenter, a.k.a. middleware; and cross-organization data exchange like payment processing or OAuth). Two opposed philosophies:</p>
+<div class="tablewrap"><table>
+<tr><th></th><th>REST</th><th>SOAP</th></tr>
+<tr><td>What it is</td><td>Not a protocol — a design philosophy built on HTTP's principles: simple formats, URLs identify resources, HTTP features for caching, auth, content negotiation. "RESTful" APIs.</td><td>An XML-based protocol for network API requests; usually over HTTP but aims to be independent of it and avoids most HTTP features.</td></tr>
+<tr><td>Ecosystem</td><td>Less code generation and tooling; OpenAPI (Swagger) describes APIs and generates docs.</td><td>A sprawling family of standards (WS-*); APIs described in WSDL, enabling code generation into local classes and method calls. Not human-readable; heavy reliance on tools and IDEs.</td></tr>
+<tr><td>Status</td><td>Gaining, especially for cross-organizational integration; associated with microservices; predominant for public APIs.</td><td>Interoperability between vendors is often a problem; still used in large enterprises, out of favor elsewhere. (SOAP is not a requirement for SOA — the acronyms just rhyme.)</td></tr>
+</table></div>
+
+<h4 id="the-problems-with-rpcs">The problems with remote procedure calls</h4>
+<p>Web services are the latest in a long line of network-API technologies with serious problems: EJB and Java RMI (Java only), DCOM (Microsoft only), CORBA (excessively complex, no compatibility story). All rest on the <strong>remote procedure call</strong> idea (1970s): make a network request look like a local function call — <em>location transparency</em>. Convenient-seeming and fundamentally flawed, because a network request is a different animal:</p>
+
+<figure class="anim" id="anim-rpc">
+<svg viewBox="0 0 680 300" role="img" aria-label="Why a remote call is not a local call: the request can be lost, the response can be lost so that a retry duplicates the action, a timeout leaves the outcome unknown, latency varies wildly, and parameters must be encoded across languages.">
+  <rect x="20" y="40" width="120" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="48" y="70" font-size="11" font-family="ui-monospace,Menlo,monospace">client</text>
+  <rect x="540" y="40" width="120" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="568" y="70" font-size="11" font-family="ui-monospace,Menlo,monospace">service</text>
+  <text x="300" y="30" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".55">~ the network ~</text>
+  <g data-on="1" data-hot="1">
+    <path d="M 142 58 L 330 58" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW18)"/>
+    <text x="336" y="62" font-size="14" fill="var(--bad)">✕</text>
+    <text x="150" y="50" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">request</text>
+    <text x="20" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">a local call is predictable: succeeds or fails on parameters YOU control. A network request can vanish, or hit</text>
+    <text x="20" y="156" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">a slow or dead machine — causes entirely outside your control, and common. You must anticipate them: retry.</text>
+  </g>
+  <g data-on="2" data-hot="2">
+    <path d="M 142 58 L 536 58" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW18)"/>
+    <text x="150" y="50" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">request #1: charge $50 ✓ performed</text>
+    <path d="M 536 76 L 380 76" stroke="var(--read)" stroke-width="1.8" marker-end="url(#arrR18)"/>
+    <text x="360" y="80" font-size="14" fill="var(--bad)">✕</text>
+    <text x="400" y="94" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--read)">response lost</text>
+    <path d="M 142 110 L 536 110" stroke="var(--write)" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arrW18)"/>
+    <text x="150" y="104" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">request #2 (retry): charge $50 AGAIN ✗</text>
+    <text x="20" y="150" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">if requests get through but responses don't, retrying performs the action twice — unless the protocol has</text>
+    <text x="20" y="166" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">deduplication built in: IDEMPOTENCE. Local calls never have this problem.</text>
+  </g>
+  <g data-on="3" data-hot="3">
+    <path d="M 142 58 L 536 58" stroke="var(--write)" stroke-width="1.8" marker-end="url(#arrW18)"/>
+    <text x="150" y="50" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">request</text>
+    <text x="230" y="90" font-size="11" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">…waiting… ⏱ timeout</text>
+    <text x="20" y="140" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">a local call returns a result, throws, or never returns. A network call has a FOURTH outcome: timeout with no result —</text>
+    <text x="20" y="156" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">and you simply don't know whether the request got through. (The deep dive is <tspan fill="var(--read)">Chapter 8</tspan>.)</text>
+  </g>
+  <g data-on="4" data-hot="4">
+    <g font-size="9" font-family="ui-monospace,Menlo,monospace">
+      <rect x="150" y="120" width="30" height="14" fill="var(--read-soft)" stroke="var(--read)"/><text x="186" y="131">0.8 ms</text>
+      <rect x="150" y="140" width="34" height="14" fill="var(--read-soft)" stroke="var(--read)"/><text x="190" y="151">1.1 ms</text>
+      <rect x="150" y="160" width="480" height="14" fill="none" stroke="var(--bad)"/><text x="400" y="171" fill="var(--bad)">9,400 ms — congested network / overloaded service</text>
+      <rect x="150" y="180" width="32" height="14" fill="var(--read-soft)" stroke="var(--read)"/><text x="188" y="191">0.9 ms</text>
+    </g>
+    <text x="20" y="220" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">a local function takes about the same time every call. A network request is far slower AND wildly variable —</text>
+    <text x="20" y="236" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">sub-millisecond at good times, many seconds for the identical work when things are congested.</text>
+  </g>
+  <g data-on="5" data-hot="5">
+    <rect x="150" y="110" width="160" height="60" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="160" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace">Java: long id = 2^60</text>
+    <text x="160" y="146" font-size="9" font-family="ui-monospace,Menlo,monospace">pointer → big object</text>
+    <path d="M 314 140 L 366 140" stroke="var(--write)" stroke-width="1.6" marker-end="url(#arrW18)"/>
+    <text x="318" y="132" font-size="8" font-family="ui-monospace,Menlo,monospace" fill="var(--write)">encode</text>
+    <rect x="370" y="110" width="180" height="60" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="380" y="130" font-size="9" font-family="ui-monospace,Menlo,monospace">JavaScript: Number(2^60)</text>
+    <text x="380" y="146" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">≠ 2^60 (> 2^53 lost)</text>
+    <text x="380" y="162" font-size="9" font-family="ui-monospace,Menlo,monospace" fill="var(--bad)">no pointers at all</text>
+    <text x="20" y="210" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">locally you pass pointers to objects for free; remotely every parameter must be encoded to bytes — fine for</text>
+    <text x="20" y="226" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">primitives, ugly for big objects. And with different languages on each side, the framework must translate types</text>
+    <text x="20" y="242" font-size="10" font-family="ui-monospace,Menlo,monospace" opacity=".85">that don't line up (JavaScript's numbers above 2⁵³ again). None of this exists inside one process in one language.</text>
+    <text x="20" y="278" font-size="10" font-family="ui-monospace,Menlo,monospace" font-weight="700">conclusion: don't pretend a remote service is a local object. It's a fundamentally different thing.</text>
+  </g>
+  <defs>
+    <marker id="arrW18" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    <marker id="arrR18" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+  </defs>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>UNPREDICTABLE</strong> A local call's outcome depends only on parameters you control. A network request or response can be lost, the remote machine can be slow or down — causes outside your control, and common enough that you must plan for them (retries).</li>
+  <li><strong>RETRIES DUPLICATE</strong> If the request got through but the response was lost, retrying performs the action a second time. You need <strong>idempotence</strong> — deduplication built into the protocol (more in <a class="xref fwd" href="ch11-stream-processing.html#messaging-systems" data-tip="Ch 11 · Messaging Systems — delivery semantics, idempotence, and exactly-once · not yet written">Chapter&nbsp;11<sup>→11</sup></a>). Local calls have no such issue.</li>
+  <li><strong>THE FOURTH OUTCOME</strong> Local: return, throw, or never return. Remote adds: <em>timeout</em> — no result, and no way to know whether the request was ever received. <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#timeouts-and-unbounded-delays" data-tip="Ch 8 · Timeouts and Unbounded Delays — why you can't tell a slow node from a dead one · not yet written">Chapter&nbsp;8<sup>→8</sup></a> lives in this uncertainty.</li>
+  <li><strong>LATENCY</strong> A local call costs about the same every time; a network call is orders of magnitude slower and wildly variable — sub-millisecond when healthy, seconds under congestion, for identical work.</li>
+  <li><strong>ENCODING AND LANGUAGES</strong> Pointers to local objects are free; over the network every parameter is encoded to bytes, painful for big objects. Different languages on each end mean type translation — JavaScript's 2<sup>53</sup> problem again. Conclusion: a remote service isn't a local object, so don't try too hard to make it look like one. Part of REST's appeal is that it doesn't hide being a network protocol (though people build RPC libraries on top of it anyway).</li>
+</ol>
+</figure>
+
+<h4 id="current-directions-for-rpc">Current directions for RPC</h4>
+<p>RPC isn't going away. Frameworks exist over every encoding here — Thrift and Avro ship RPC; <strong>gRPC</strong> uses Protocol Buffers; Finagle uses Thrift; Rest.li uses JSON over HTTP — and the new generation is <em>explicit</em> that remote ≠ local: Finagle and Rest.li use <strong>futures/promises</strong> for asynchronous, failable actions (and for fanning out to several services in parallel and combining results); gRPC supports <strong>streams</strong> — a series of requests and responses over one call. Some provide <strong>service discovery</strong> (finding a service's IP and port), revisited under <a class="xref fwd" href="ch06-partitioning.html#request-routing" data-tip="Ch 6 · Request Routing — how clients find the right node · not yet written">request routing<sup>→6</sup></a>. Binary custom RPC beats JSON-over-REST on performance, but REST wins on experimentation and debugging (curl, a browser), universal language support, and a vast tool ecosystem — so REST dominates public APIs, while RPC frameworks focus on service-to-service calls inside one organization's datacenter.</p>
+
+<h4 id="data-encoding-and-evolution-for-rpc">Data encoding and evolution for RPC</h4>
+<p>Clients and servers must be deployable independently. Versus databases there's a simplifying assumption: <strong>servers are updated first, then clients</strong> — so you need only <em>backward</em> compatibility on requests and <em>forward</em> compatibility on responses. Compatibility is inherited from the encoding: Thrift, gRPC, and Avro RPC follow their formats' rules; SOAP uses XML schemas (evolvable, with subtle pitfalls); RESTful APIs mostly use schema-less JSON, where adding optional request parameters and new response fields is conventionally compatible. The hard part: RPC often crosses organizational boundaries, so the provider can't force clients to upgrade — compatibility must hold for a very long time, and breaking changes mean maintaining <strong>multiple API versions side by side</strong>. Versioning has no consensus: a version in the URL or in the <code>Accept</code> header for REST; or, for API-key-identified clients, storing each client's requested version server-side and changing it through an admin interface (Stripe's approach).</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · API versioning, idempotency, and durable execution</span>
+The 2nd edition grounds this section in named practice: <strong>Stripe's API versioning</strong> as the worked example, and <strong>idempotency keys</strong> as the standard answer to the retry-duplication problem. And it adds a new mode of dataflow the 1st edition didn't have: <strong>durable execution / workflow engines</strong> (Temporal, Restate), which persist the state of a multi-step process so it survives crashes and resumes — encoding-and-evolution questions reappear there, since workflow state outlives the code that produced it. Message passing is reframed in <strong>event-driven architecture</strong> terms, and Orleans' <em>virtual actors</em> appear in the actor discussion.</div>
+
+<h3 id="message-passing-dataflow"><a class="self" href="#message-passing-dataflow">Message-Passing Dataflow</a></h3>
+<span class="key-chip">message-passing-dataflow</span>
+
+<p><strong>Asynchronous message passing</strong> sits between RPC and databases: like RPC, a message is delivered to another process with low latency; like a database, it isn't sent directly but via an intermediary — a <strong>message broker</strong> (message queue, message-oriented middleware) that stores it temporarily. Versus direct RPC, the broker:</p>
+<ul>
+<li>acts as a <strong>buffer</strong> when the recipient is unavailable or overloaded — improving reliability;</li>
+<li><strong>redelivers</strong> to a crashed process, preventing message loss;</li>
+<li>spares the sender from knowing the recipient's IP and port — valuable in clouds where VMs come and go;</li>
+<li>lets one message reach <strong>several recipients</strong>;</li>
+<li><strong>decouples</strong> sender from recipient: publish and forget who consumes.</li>
+</ul>
+<p>Unlike RPC, it's usually <strong>one-way</strong>: the sender doesn't expect a reply (a response, if any, goes over a separate channel), and doesn't wait — it sends and forgets. Asynchronous.</p>
+
+<h4 id="message-brokers">Message brokers</h4>
+<p>Once the domain of commercial enterprise software (TIBCO, IBM WebSphere, webMethods), now open source: RabbitMQ, ActiveMQ, HornetQ, NATS, Apache Kafka — compared in depth in <a class="xref fwd" href="ch11-stream-processing.html#messaging-systems" data-tip="Ch 11 · Messaging Systems — brokers, delivery semantics, partitioned logs · not yet written">Chapter&nbsp;11<sup>→11</sup></a>. Delivery semantics vary, but the shape is: a producer sends to a named <em>queue</em> or <em>topic</em>; the broker delivers to one or more <em>consumers</em>/<em>subscribers</em>; many producers and consumers may share a topic. A topic is one-way, but a consumer can publish onward to another topic (chaining, as <a class="xref fwd" href="ch11-stream-processing.html#transmitting-event-streams" data-tip="Ch 11 · Transmitting Event Streams — chaining topics into processing pipelines · not yet written">Chapter&nbsp;11<sup>→11</sup></a> shows) or to a reply queue the original sender consumes — RPC-like request/response. Brokers impose no data model — a message is bytes plus metadata — so any encoding works, and a backward- <em>and</em> forward-compatible one gives maximum freedom to change publishers and consumers independently and deploy in any order. And if a consumer republishes to another topic, preserve unknown fields — the database hazard from earlier, in a new costume.</p>
+
+<h4 id="distributed-actor-frameworks">Distributed actor frameworks</h4>
+<p>The <strong>actor model</strong> is a concurrency model for a single process: instead of threads (races, locks, deadlocks), logic lives in <em>actors</em> — each representing one client or entity, with private local state, communicating only by asynchronous messages that may be lost; each processes one message at a time, so no thread worries. <strong>Distributed actor frameworks</strong> scale this across nodes with the same message-passing mechanism regardless of whether sender and receiver share a node — messages are transparently encoded, sent, decoded. Location transparency works <em>better</em> here than in RPC, because the model already assumes messages can be lost even locally; the local/remote mismatch is smaller. Essentially a message broker fused with a programming model — and rolling upgrades still demand compatibility, since messages flow between old and new nodes. In practice: <strong>Akka</strong> defaults to Java serialization (no compatibility) but can swap in Protobuf to enable rolling upgrades; <strong>Orleans</strong> defaults to a custom encoding without rolling-upgrade support (deploy a new cluster, shift traffic, retire the old — or plug in custom serialization); <strong>Erlang OTP</strong>, despite its high-availability pedigree, makes record-schema changes surprisingly hard — rolling upgrades are possible but need careful planning, and the newer <code>maps</code> type may help.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · why the broker is the friendliest place to evolve</span>
+A database is a message to your future self; RPC is a phone call that demands an answer now; a message broker is a mailbox. Mailboxes tolerate everything this chapter worries about: the recipient can be asleep (buffering), can have moved (no IP needed), can be several people (fan-out), and can read tomorrow (asynchrony). The only thing a mailbox <em>can't</em> fix is the letter's language — which is why the encoding you drop in the mailbox must be compatible both ways, so any consumer of any version can read any producer of any version.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Rolling upgrades</strong> (a few nodes at a time, zero downtime, easy rollback) are what make frequent small releases safe — and they guarantee old and new code and data coexist. Client apps and stored data stay old far longer than servers.</li>
+<li><strong>Two directions of compatibility</strong>: backward (new code reads old data — easy, you know the past) and forward (old code reads new data — harder, it must ignore what it doesn't understand). Both are required, for a long time.</li>
+<li><strong>Encoding</strong> = memory → bytes; decoding = bytes → memory. Language-built-in serializers are transient-use only: lock-in, security holes (arbitrary class instantiation → RCE), no versioning, poor efficiency.</li>
+<li><strong>JSON/XML/CSV</strong>: fine for interchange between organizations, where agreement beats efficiency; but vague on numbers (JSON: ints vs floats, precision, the 2<sup>53</sup> problem), no binary strings (Base64, +33%), optional and heavyweight schemas. Binary-JSON variants save little because they still carry field names.</li>
+<li><strong>Thrift and Protocol Buffers</strong>: schema-required, code-generated; field <em>tags</em> replace names (59 → 33/34 bytes with packed tags and varints). Evolution rules: never change a tag; add fields only with new tags and only as optional/default; remove only optional fields and never reuse the tag; type changes risk truncation; Protobuf's <code>repeated</code> allows optional → list.</li>
+<li><strong>Avro</strong>: no tags, no types in the bytes (32 bytes); the reader reconciles the <em>writer's schema</em> with its own <em>reader's schema</em> by field name — reorder, ignore unknown, default missing. Rule: add/remove only fields with defaults; null only via unions. The writer's schema travels via file header, per-record version + registry, or connection negotiation. No tags ⇒ dynamically generated schemas; code generation optional; files self-describing.</li>
+<li><strong>Schemas earn their keep</strong>: compactness, documentation that can't drift, pre-deployment compatibility checks, code generation for static languages — schema-on-read flexibility <em>with</em> guarantees.</li>
+<li><strong>Dataflow through databases</strong>: a message to your future self; needs backward <em>and</em> forward compatibility; beware old code round-tripping records and dropping unknown fields; <em>data outlives code</em>, so schema evolution makes many eras look like one schema; archive dumps re-encode consistently (Avro container files, Parquet).</li>
+<li><strong>Dataflow through services</strong>: REST (HTTP philosophy, simple, curl-able, dominant for public APIs) vs SOAP (XML protocol, WS-*, WSDL, tooling-dependent). RPC's location transparency is a lie: requests and responses get lost (retries need idempotence), timeouts leave outcomes unknown, latency varies wildly, parameters must be encoded across languages. Modern RPC (gRPC, Finagle, Rest.li) is explicit about it: futures, streams, service discovery. Servers upgrade first ⇒ backward compat on requests, forward on responses; cross-org APIs need long-lived versioning.</li>
+<li><strong>Dataflow through messages</strong>: brokers buffer, redeliver, decouple, fan out, hide addresses — one-way and asynchronous; any encoding, but bidirectional compatibility gives deployment freedom. Actor frameworks fuse a broker with a concurrency model; their default encodings often block rolling upgrades.</li>
+<li><strong>2nd-edition arc</strong>: schema registries as infrastructure, Stripe-style API versioning and idempotency keys as named practice, event-driven framing, virtual actors, and a new dataflow mode — durable execution/workflow engines (Temporal, Restate).</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Fourteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="b">
+<p>Old code reading data written by new code is called:</p>
+<label><input type="radio" name="q1" value="a"> Backward compatibility — and it's the easy direction</label>
+<label><input type="radio" name="q1" value="b"> Forward compatibility — the trickier direction, because old code must ignore additions it has never seen</label>
+<label><input type="radio" name="q1" value="c"> Schema-on-read</label>
+<label><input type="radio" name="q1" value="d"> Location transparency</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why does the book advise using your language's built-in serialization (Java Serializable, pickle…) only for transient purposes?</p>
+<label><input type="radio" name="q2" value="a"> It's too compact to debug</label>
+<label><input type="radio" name="q2" value="b"> It requires a schema registry</label>
+<label><input type="radio" name="q2" value="c"> It only supports strings</label>
+<label><input type="radio" name="q2" value="d"> Language lock-in, security holes (decoding instantiates arbitrary classes → remote code execution), versioning as an afterthought, and poor efficiency</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Why does Twitter's API return each tweet ID both as a JSON number and as a decimal string?</p>
+<label><input type="radio" name="q3" value="a"> JSON doesn't distinguish integers from floats or specify precision; 64-bit IDs exceed 2<sup>53</sup> and get corrupted when JavaScript parses them as doubles</label>
+<label><input type="radio" name="q3" value="b"> Some clients only support strings</label>
+<label><input type="radio" name="q3" value="c"> For Base64 compatibility</label>
+<label><input type="radio" name="q3" value="d"> To make the API forward compatible</label>
+</div>
+
+<div class="q" data-a="c">
+<p>MessagePack cut the example record from 81 to only 66 bytes. What's the fundamental reason binary-JSON formats save so little?</p>
+<label><input type="radio" name="q4" value="a"> They use 32-bit lengths</label>
+<label><input type="radio" name="q4" value="b"> They Base64-encode strings</label>
+<label><input type="radio" name="q4" value="c"> Without a schema they must still embed every field name in the encoded data</label>
+<label><input type="radio" name="q4" value="d"> They pad every value to 8 bytes</label>
+</div>
+
+<div class="q" data-a="d">
+<p>In Thrift and Protocol Buffers, which change is safe, and which is fatal?</p>
+<label><input type="radio" name="q5" value="a"> Safe: change a field's tag number · Fatal: rename a field</label>
+<label><input type="radio" name="q5" value="b"> Safe: add a required field · Fatal: add an optional field</label>
+<label><input type="radio" name="q5" value="c"> Safe: reuse a removed field's tag · Fatal: remove an optional field</label>
+<label><input type="radio" name="q5" value="d"> Safe: rename a field (names aren't encoded) · Fatal: change a field's tag number (it invalidates all existing data)</label>
+</div>
+
+<div class="q" data-a="b">
+<p>How does old Thrift/Protobuf code achieve forward compatibility when it meets a field with an unknown tag?</p>
+<label><input type="radio" name="q6" value="a"> It rejects the record</label>
+<label><input type="radio" name="q6" value="b"> The datatype annotation tells the parser how many bytes to skip, so the unknown field is ignored</label>
+<label><input type="radio" name="q6" value="c"> It fetches the new schema from a registry</label>
+<label><input type="radio" name="q6" value="d"> It converts the field to a string</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Why must every field added to a Thrift/Protobuf schema after initial deployment be optional or have a default?</p>
+<label><input type="radio" name="q7" value="a"> Required fields are encoded differently and take more bytes</label>
+<label><input type="radio" name="q7" value="b"> Optional fields compress better</label>
+<label><input type="radio" name="q7" value="c"> New code reading records written by old code won't find the new field; a required-field check would fail — breaking backward compatibility</label>
+<label><input type="radio" name="q7" value="d"> The code generator refuses required fields</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Avro's encoded bytes contain neither field tags nor type markers. How can it possibly support schema evolution?</p>
+<label><input type="radio" name="q8" value="a"> The reader has both the writer's schema and its own reader's schema and resolves them by field name: reordering is fine, unknown fields are skipped, missing fields get the reader's defaults</label>
+<label><input type="radio" name="q8" value="b"> It can't — writer and reader must use identical schemas</label>
+<label><input type="radio" name="q8" value="c"> It embeds the full schema in every record</label>
+<label><input type="radio" name="q8" value="d"> It falls back to JSON when schemas differ</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Where does an Avro reader obtain the writer's schema?</p>
+<label><input type="radio" name="q9" value="a"> It's always embedded in each record</label>
+<label><input type="radio" name="q9" value="b"> It's inferred from the bytes</label>
+<label><input type="radio" name="q9" value="c"> It must be the same as the reader's, so there's nothing to obtain</label>
+<label><input type="radio" name="q9" value="d"> Depends on context: once in a large file's header (object container files), a version number per database record plus a table of schema versions, or negotiated at connection setup for RPC</label>
+</div>
+
+<div class="q" data-a="b">
+<p>What advantage does Avro's lack of tag numbers give over Thrift/Protobuf?</p>
+<label><input type="radio" name="q10" value="a"> Faster parsing on 64-bit CPUs</label>
+<label><input type="radio" name="q10" value="b"> Friendliness to dynamically generated schemas — e.g. dumping a relational database by generating a schema per table, regenerating whenever columns change, with readers still matching fields by name; with tags, a human would have to assign and never reuse numbers</label>
+<label><input type="radio" name="q10" value="c"> Support for nested lists</label>
+<label><input type="radio" name="q10" value="d"> Mandatory code generation</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Old code reads a record that new code wrote with an extra field, updates one value, and writes it back. What's the hazard and the fix?</p>
+<label><input type="radio" name="q11" value="a"> The write fails; fix: retry</label>
+<label><input type="radio" name="q11" value="b"> The record is duplicated; fix: idempotence</label>
+<label><input type="radio" name="q11" value="c"> The unknown field is silently dropped when the record round-trips through the old code's model objects; fix: preserve unknown fields through decode–modify–encode</label>
+<label><input type="radio" name="q11" value="d"> The database rejects the mixed schema; fix: migrate all data first</label>
+</div>
+
+<div class="q" data-a="a">
+<p>"Data outlives code" means:</p>
+<label><input type="radio" name="q12" value="a"> Deploying replaces all code within minutes, but five-year-old records remain in their original encoding unless explicitly rewritten — so schema evolution has to make many historical formats look like one schema</label>
+<label><input type="radio" name="q12" value="b"> Databases should never be upgraded</label>
+<label><input type="radio" name="q12" value="c"> Code should be stored in the database</label>
+<label><input type="radio" name="q12" value="d"> Backups must be taken before every deploy</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Which is NOT one of the book's reasons a network request differs fundamentally from a local function call?</p>
+<label><input type="radio" name="q13" value="a"> Requests or responses can be lost, and retrying can perform the action twice without idempotence</label>
+<label><input type="radio" name="q13" value="b"> A timeout is a fourth outcome in which you don't know whether the request got through</label>
+<label><input type="radio" name="q13" value="c"> Latency is much higher and wildly variable, and parameters must be encoded across possibly different languages</label>
+<label><input type="radio" name="q13" value="d"> Network requests cannot carry more than one parameter</label>
+</div>
+
+<div class="q" data-a="b">
+<p>For RPC, why is it enough to have backward compatibility on requests and forward compatibility on responses?</p>
+<label><input type="radio" name="q14" value="a"> Because REST requires it</label>
+<label><input type="radio" name="q14" value="b"> Because you can reasonably assume servers are updated before clients: new servers read old clients' requests (backward), and old clients read new servers' responses (forward)</label>
+<label><input type="radio" name="q14" value="c"> Because responses are never versioned</label>
+<label><input type="radio" name="q14" value="d"> Because clients are always updated first</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — b.</span> Backward = newer code reads older data (easy: you know the old format). Forward = older code reads newer data (harder: old code must gracefully ignore unknown additions). Rolling upgrades and slow client updates make both mandatory.</div>
+<div class="ak"><span class="which">Q2 — d.</span> Four problems from the text: tied to one language; deserialization instantiates arbitrary classes, a classic RCE vector (CWE-502); compatibility neglected; Java serialization notoriously slow and bloated.</div>
+<div class="ak"><span class="which">Q3 — a.</span> JSON numbers carry no int/float distinction or precision; IEEE 754 doubles represent integers exactly only up to 2<sup>53</sup>. Twitter's 64-bit IDs overflow that, so JavaScript clients need the string form.</div>
+<div class="ak"><span class="which">Q4 — c.</span> Binary-JSON variants keep the JSON data model — including embedding <code>userName</code>, <code>favoriteNumber</code>, <code>interests</code> as strings — because there's no schema to make the names implicit. That's why Thrift/Protobuf (tags) and Avro (nothing) win so decisively.</div>
+<div class="ak"><span class="which">Q5 — d.</span> Encoded data refers to fields only by tag, never by name — so renames are free and tag changes are catastrophic. (b) and (c) are the other fatal moves: adding required fields breaks backward compat; reusing tags corrupts the meaning of old data still on disk.</div>
+<div class="ak"><span class="which">Q6 — b.</span> Every field carries a type annotation; from it the parser knows the field's length (or how to find it) and skips. This is why "add fields with new tags" preserves forward compatibility.</div>
+<div class="ak"><span class="which">Q7 — c.</span> Old writers never wrote the new field; if new readers require it, every old record fails the check. So post-deployment additions must be optional or defaulted. (Note <code>required</code> changes nothing on the wire — it's purely a runtime check.)</div>
+<div class="ak"><span class="which">Q8 — a.</span> Avro's central idea: writer's and reader's schemas need only be compatible; the library resolves them side by side by field name. Evolution rule: add/remove only fields with defaults.</div>
+<div class="ak"><span class="which">Q9 — d.</span> Embedding the schema per record would dwarf the data. Context decides: file header (Hadoop-style container files), version stamp + schema table (Espresso), or connection negotiation (Avro RPC). A schema registry is useful in every case.</div>
+<div class="ak"><span class="which">Q10 — b.</span> This was an explicit Avro design goal and not one for Thrift/Protobuf. Name-based matching means regenerated schemas stay compatible with old readers; tag assignment would need careful manual bookkeeping.</div>
+<div class="ak"><span class="which">Q11 — c.</span> The encodings can carry unknown fields; the loss happens at the application layer when decode → model object → encode drops what the object has no slot for. Awareness is the whole fix.</div>
+<div class="ak"><span class="which">Q12 — a.</span> Rewriting large datasets is expensive, so databases avoid it (adding a NULL-default column touches no rows); the mixture of eras is hidden by schema evolution — or re-encoded consistently when you archive anyway.</div>
+<div class="ak"><span class="which">Q13 — d.</span> The book's list: unpredictability and loss, the timeout "fourth outcome," retry duplication needing idempotence, variable latency, encoding parameters instead of passing pointers, and cross-language type translation. Parameter count isn't an issue.</div>
+<div class="ak"><span class="which">Q14 — b.</span> The simplifying assumption for services (unlike databases, where any version may read any value): servers first, clients second. Cross-organization APIs weaken it — you can't force clients to upgrade, so compatibility must hold long-term and versions pile up.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch03-storage-and-retrieval.html">← ch 3 · Storage and Retrieval</a>
+  <a href="index.html">index</a>
+  <a href="ch05-replication.html">ch 5 · Replication →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>

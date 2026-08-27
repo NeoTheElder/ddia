@@ -373,68 +373,68 @@
   "formats-for-encoding-data": {
    "chapter": 4,
    "title": "Formats for Encoding Data",
-   "definition": "",
+   "definition": "Encoding (memory \u2192 bytes) and decoding (bytes \u2192 memory), and how each format handles schema change so old and new code can coexist through rolling upgrades.",
    "pdf_page": 133
   },
   "language-specific-formats": {
    "chapter": 4,
    "title": "Language-Specific Formats",
-   "definition": "",
+   "definition": "Built-in serializers (Java Serializable, pickle, Marshal): convenient but language-locked, insecure (arbitrary class instantiation \u2192 RCE), unversioned, inefficient \u2014 transient use only.",
    "pdf_page": 134,
    "parent": "formats-for-encoding-data"
   },
   "json-xml-and-binary-variants": {
    "chapter": 4,
    "title": "JSON, XML, and Binary Variants",
-   "definition": "",
+   "definition": "Textual interchange formats: vague numbers (JSON's 2^53 problem), no binary strings, optional heavyweight schemas; binary-JSON variants (MessagePack) save little because field names stay embedded.",
    "pdf_page": 135,
    "parent": "formats-for-encoding-data"
   },
   "thrift-and-protocol-buffers": {
    "chapter": 4,
    "title": "Thrift and Protocol Buffers",
-   "definition": "",
+   "definition": "Schema-required binary encodings with code generation; field tags replace names; varints pack integers; evolution: never change tags, add only optional/default fields, never reuse removed tags.",
    "pdf_page": 138,
    "parent": "formats-for-encoding-data"
   },
   "avro": {
    "chapter": 4,
    "title": "Avro",
-   "definition": "",
+   "definition": "No tags or types in the bytes; reader resolves the writer's schema against its own by field name (reorder, skip unknown, default missing); writer's schema via file header, version + registry, or connection negotiation; friendly to dynamically generated schemas.",
    "pdf_page": 143,
    "parent": "formats-for-encoding-data"
   },
   "the-merits-of-schemas": {
    "chapter": 4,
    "title": "The Merits of Schemas",
-   "definition": "",
+   "definition": "Schema-driven binary encodings are compact, self-documenting (the schema can't go stale), checkable for compatibility before deployment, and support code generation \u2014 schema-on-read flexibility with guarantees.",
    "pdf_page": 148,
    "parent": "formats-for-encoding-data"
   },
   "modes-of-dataflow": {
    "chapter": 4,
    "title": "Modes of Dataflow",
-   "definition": "",
+   "definition": "Who encodes and who decodes: through databases (writer \u2192 later reader), through services (client request / server response), through asynchronous message passing (producer \u2192 broker \u2192 consumers).",
    "pdf_page": 149
   },
   "dataflow-through-databases": {
    "chapter": 4,
    "title": "Dataflow Through Databases",
-   "definition": "",
+   "definition": "A message to your future self; needs backward and forward compatibility; beware old code round-tripping records and dropping unknown fields; data outlives code, so schema evolution unifies many eras; archive dumps re-encode consistently.",
    "pdf_page": 150,
    "parent": "modes-of-dataflow"
   },
   "dataflow-through-services-rest-and-rpc": {
    "chapter": 4,
    "title": "Dataflow Through Services: REST and RPC",
-   "definition": "",
+   "definition": "REST vs SOAP; why RPC's location transparency fails (lost messages, retry duplication needing idempotence, timeouts, variable latency, cross-language encoding); modern RPC (gRPC, futures, streams); servers-first \u21d2 backward compat on requests, forward on responses; long-lived API versioning.",
    "pdf_page": 152,
    "parent": "modes-of-dataflow"
   },
   "message-passing-dataflow": {
    "chapter": 4,
    "title": "Message-Passing Dataflow",
-   "definition": "",
+   "definition": "Message brokers buffer, redeliver, decouple, fan out, hide addresses \u2014 one-way and asynchronous; any encoding but bidirectional compatibility gives deployment freedom; distributed actor frameworks (Akka, Orleans, Erlang) and their rolling-upgrade caveats.",
    "pdf_page": 157,
    "parent": "modes-of-dataflow"
   },
