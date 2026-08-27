@@ -2,7 +2,7 @@
 
 - **Type**: wayfinder:task (AFK build, user review)
 - **Status**: open
-- **Assignee**:
+- **Assignee**: yagyesh (session, 2026-08-27)
 - **Blocked by**: [04-pilot-chapter-03-template-lock](04-pilot-chapter-03-template-lock.md)
 
 ## Question
