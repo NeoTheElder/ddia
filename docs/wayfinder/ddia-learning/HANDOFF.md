@@ -1,6 +1,6 @@
 # Handoff — DDIA interactive study notes (wayfinder map)
 
-_Written 2026-08-27, updated after the Chapter 5 session. Continue by opening a session in `~/ddia`
+_Written 2026-08-27, updated after the Chapter 6 session. Continue by opening a session in `~/ddia`
 (or anywhere) and saying `Use ~/ddia/docs/wayfinder/ddia-learning/HANDOFF.md`, then what to do
 (e.g. "close ch4 and ch5, do chapter 6"). If a `wayfinder` skill is available, `/wayfinder MAP.md`
 also works; otherwise read `MAP.md` + `tickets/` directly._
@@ -25,11 +25,11 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2** closed on the map. **4 and 5 built and pushed, awaiting user
-review** — tickets `07-chapter-04-encoding-and-evolution.md` and `08-chapter-05-replication.md`
-are claimed and open. User's pattern so far: "close it, do the next chapter."
+Built chapters: **3 (pilot), 1, 2, 4, 5** closed on the map. **6 built and pushed, awaiting user
+review** — ticket `09-chapter-06-partitioning.md` is claimed and open. User's pattern so far:
+"close it, do the next chapter."
 
-Remaining frontier after 4/5 close: chapters 6–12 (tickets 09–15, in book order; user may name
+Remaining frontier after 6 closes: chapters 7–12 (tickets 10–15, in book order; user may name
 a different one) and the **index page** (ticket 16 — `index.html` doesn't exist yet; stubs and
 chapter footers already link to it).
 
@@ -54,17 +54,25 @@ The assembly/validation Python is in the last few Bash calls of the previous ses
 transcript and is short; re-derive from the description above if needed. Chapter pages weigh
 100–135KB; the pilot and ch 2/ch 4 have 6 steppers, ch 1 has 2 — calibrate by mechanism density.
 
-## Notes for Chapter 6 (next in order)
+## Notes for Chapter 7 (next in order)
 
-- PDF pages 220–241 (0-based); sections in `reference/toc.md`. 2nd edition renames it *Sharding*
-  — see the research file's Chapter 6 section.
-- Ch 5 links forward to `ch06-partitioning.html#partitioning-and-replication`,
-  `#partitioning-of-key-value-data`, and Ch 5's failover step mentions request routing
-  (`#request-routing`) — those slugs already exist in the registry.
-- Ch 5 build notes for calibration: 170KB, 6 steppers + 7 static figures (heavier than earlier
-  chapters because the Part II intro was folded in). Headless Chrome works for visual checks:
-  inject a script that isolates the target element in `<body>` and click `.next` N times, then
-  `--headless=new --screenshot` (fragment URLs and scrolling do NOT work for screenshots).
+- PDF pages 242–263 (0-based); sections in `reference/toc.md`; 2nd ed = its Chapter 8.
+- Existing forward links into ch 7 that must resolve: `#the-slippery-concept-of-a-transaction`
+  (ch 5, ch 6), `#the-meaning-of-acid` (ch 6), `#single-object-and-multi-object-operations`
+  (ch 6), `#weak-isolation-levels` and `#write-skew-and-phantoms` (ch 5), `#serializability`
+  (ch 4). All slugs already exist in the registry.
+- Ch 6 build notes for calibration: 150KB, 6 steppers (key-range hot spot, hash + compound key,
+  local vs global secondary index, hash mod N, fixed-partition node join, request routing +
+  ZooKeeper) + 5 static figures, 14-question quiz.
+- **Visual QA is worth doing before the first push** — the ch 6 screenshots caught ~10 SVG
+  text overflows/overlaps (captions running past x=680, step-N text still visible under step-N+1
+  banners, filled highlight rects covering text). Rules of thumb: 9px mono ≈ 5.4px/char, so a
+  caption starting at x=20 must be ≤ ~115 chars; give every per-step caption its own
+  `data-on="N"` group rather than a range; use `fill="none"` + stroke for highlight boxes over
+  text; never put `<em>`/`<strong>` inside SVG `<text>` (use `<tspan>`).
+- Headless Chrome recipe: inject a script that isolates the target `.anim` in `<body>` and
+  clicks `.next` N times, then `--headless=new --window-size=760,600 --screenshot` (fragment
+  URLs and scrolling do NOT work for screenshots).
 - `concepts.json` is serialized with `indent=1` — dump it that way to keep diffs small.
 
 ## Standing user preferences (also in the map's Notes)
