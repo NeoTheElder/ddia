@@ -82,26 +82,26 @@
   "thinking-about-data-systems": {
    "chapter": 1,
    "title": "Thinking About Data Systems",
-   "definition": "Databases, caches, queues, and indexes blur together and get composed by application code \u2014 which then owns the guarantees; you become a data system designer.",
+   "definition": "Databases, caches, queues, and indexes blur together and get composed by application code — which then owns the guarantees; you become a data system designer.",
    "pdf_page": 25
   },
   "reliability": {
    "chapter": 1,
    "title": "Reliability",
-   "definition": "Continuing to work correctly even when things go wrong; fault (component deviates) \u2260 failure (system stops serving users) \u2014 design fault tolerance so faults don't become failures.",
+   "definition": "Continuing to work correctly even when things go wrong; fault (component deviates) ≠ failure (system stops serving users) — design fault tolerance so faults don't become failures.",
    "pdf_page": 27
   },
   "hardware-faults": {
    "chapter": 1,
    "title": "Hardware Faults",
-   "definition": "Random, uncorrelated faults (10k disks \u21d2 ~1 dead/day); answered first by hardware redundancy, increasingly by software fault tolerance that survives whole-machine loss (enabling rolling upgrades).",
+   "definition": "Random, uncorrelated faults (10k disks ⇒ ~1 dead/day); answered first by hardware redundancy, increasingly by software fault tolerance that survives whole-machine loss (enabling rolling upgrades).",
    "pdf_page": 28,
    "parent": "reliability"
   },
   "software-errors": {
    "chapter": 1,
    "title": "Software Errors",
-   "definition": "Systematic, correlated faults \u2014 a bug hits every node at once, runaway processes, cascading failures \u2014 dormant until an environmental assumption breaks; no quick fix, many small disciplines.",
+   "definition": "Systematic, correlated faults — a bug hits every node at once, runaway processes, cascading failures — dormant until an environmental assumption breaks; no quick fix, many small disciplines.",
    "pdf_page": 29,
    "parent": "reliability"
   },
@@ -122,20 +122,20 @@
   "scalability": {
    "chapter": 1,
    "title": "Scalability",
-   "definition": "A system's ability to cope with increased load \u2014 not a label but a set of options: 'if load grows this way, what can we do?'",
+   "definition": "A system's ability to cope with increased load — not a label but a set of options: 'if load grows this way, what can we do?'",
    "pdf_page": 31
   },
   "describing-load": {
    "chapter": 1,
    "title": "Describing Load",
-   "definition": "Load parameters chosen for your architecture (req/s, read/write ratio, fan-out\u2026); Twitter's timeline fan-out shows trading read-time work for write-time work and averages hiding long tails.",
+   "definition": "Load parameters chosen for your architecture (req/s, read/write ratio, fan-out…); Twitter's timeline fan-out shows trading read-time work for write-time work and averages hiding long tails.",
    "pdf_page": 32,
    "parent": "scalability"
   },
   "describing-performance": {
    "chapter": 1,
    "title": "Describing Performance",
-   "definition": "Throughput for batch, response time for online systems \u2014 as a distribution: use percentiles (p50, p95, p99, p999), not means; tail latency amplification; measure client-side; add histograms.",
+   "definition": "Throughput for batch, response time for online systems — as a distribution: use percentiles (p50, p95, p99, p999), not means; tail latency amplification; measure client-side; add histograms.",
    "pdf_page": 34,
    "parent": "scalability"
   },
@@ -162,7 +162,7 @@
   "simplicity-managing-complexity": {
    "chapter": 1,
    "title": "Simplicity: Managing Complexity",
-   "definition": "Remove accidental complexity (from the implementation, not the problem) via good abstractions \u2014 SQL and high-level languages as exemplars; avoid the big ball of mud.",
+   "definition": "Remove accidental complexity (from the implementation, not the problem) via good abstractions — SQL and high-level languages as exemplars; avoid the big ball of mud.",
    "pdf_page": 41,
    "parent": "maintainability"
   },
@@ -189,7 +189,7 @@
   "the-object-relational-mismatch": {
    "chapter": 2,
    "title": "The Object-Relational Mismatch",
-   "definition": "The impedance mismatch between application objects and tables/rows; ORMs reduce boilerplate, documents reduce the gap for tree-shaped data like a r\u00e9sum\u00e9.",
+   "definition": "The impedance mismatch between application objects and tables/rows; ORMs reduce boilerplate, documents reduce the gap for tree-shaped data like a résumé.",
    "pdf_page": 50,
    "parent": "relational-model-versus-document-model"
   },
@@ -203,7 +203,7 @@
   "are-document-databases-repeating-history": {
    "chapter": 2,
    "title": "Are Document Databases Repeating History?",
-   "definition": "IMS's hierarchical model \u2248 documents; CODASYL's network model used hand-navigated pointer access paths; the relational model won with the automatic query optimizer; documents nest like IMS but reference by ID like relational.",
+   "definition": "IMS's hierarchical model ≈ documents; CODASYL's network model used hand-navigated pointer access paths; the relational model won with the automatic query optimizer; documents nest like IMS but reference by ID like relational.",
    "pdf_page": 57,
    "parent": "relational-model-versus-document-model"
   },
@@ -217,7 +217,7 @@
   "query-languages-for-data": {
    "chapter": 2,
    "title": "Query Languages for Data",
-   "definition": "Declarative (SQL, relational algebra) states the result pattern and leaves the how to the optimizer \u2014 concise, implementation-hiding, parallelizable; imperative fixes order and steps.",
+   "definition": "Declarative (SQL, relational algebra) states the result pattern and leaves the how to the optimizer — concise, implementation-hiding, parallelizable; imperative fixes order and steps.",
    "pdf_page": 63
   },
   "declarative-queries-on-the-web": {
@@ -230,7 +230,7 @@
   "mapreduce-querying": {
    "chapter": 2,
    "title": "MapReduce Querying",
-   "definition": "Map emits key\u2013value pairs, the framework groups by key, reduce folds each group; functions must be pure. Two coordinated functions are harder than one query, so MongoDB added the declarative aggregation pipeline.",
+   "definition": "Map emits key–value pairs, the framework groups by key, reduce folds each group; functions must be pure. Two coordinated functions are harder than one query, so MongoDB added the declarative aggregation pipeline.",
    "pdf_page": 67,
    "parent": "query-languages-for-data"
   },
@@ -257,7 +257,7 @@
   "graph-queries-in-sql": {
    "chapter": 2,
    "title": "Graph Queries in SQL",
-   "definition": "Variable-length traversals need recursive common table expressions (WITH RECURSIVE) \u2014 ~29 lines to Cypher's 4; data models fit different uses.",
+   "definition": "Variable-length traversals need recursive common table expressions (WITH RECURSIVE) — ~29 lines to Cypher's 4; data models fit different uses.",
    "pdf_page": 74,
    "parent": "graph-like-data-models"
   },
@@ -291,7 +291,7 @@
   "sstables-and-lsm-trees": {
    "chapter": 3,
    "title": "SSTables and LSM-Trees",
-   "definition": "Sorted segment files (SSTables) fed by an in-memory memtable + WAL, merged by background compaction \u2014 the LSM-tree design behind LevelDB, RocksDB, Cassandra, HBase.",
+   "definition": "Sorted segment files (SSTables) fed by an in-memory memtable + WAL, merged by background compaction — the LSM-tree design behind LevelDB, RocksDB, Cassandra, HBase.",
    "pdf_page": 97,
    "parent": "data-structures-that-power-your-database"
   },
@@ -319,7 +319,7 @@
   "transaction-processing-or-analytics": {
    "chapter": 3,
    "title": "Transaction Processing or Analytics?",
-   "definition": "OLTP (few records by key, seek-bound, user-facing) vs OLAP (scan millions, bandwidth-bound, analyst-facing) \u2014 the fork that splits storage engine design.",
+   "definition": "OLTP (few records by key, seek-bound, user-facing) vs OLAP (scan millions, bandwidth-bound, analyst-facing) — the fork that splits storage engine design.",
    "pdf_page": 111
   },
   "data-warehousing": {
@@ -359,27 +359,27 @@
   "writing-to-column-oriented-storage": {
    "chapter": 3,
    "title": "Writing to Column-Oriented Storage",
-   "definition": "Update-in-place is impossible against compressed sorted columns \u2014 so writes go through an LSM-style in-memory buffer merged into new column files in bulk.",
+   "definition": "Update-in-place is impossible against compressed sorted columns — so writes go through an LSM-style in-memory buffer merged into new column files in bulk.",
    "pdf_page": 122,
    "parent": "column-oriented-storage"
   },
   "aggregation-data-cubes-and-materialized-views": {
    "chapter": 3,
    "title": "Aggregation: Data Cubes and Materialized Views",
-   "definition": "Materialized views physically cache query results; data cubes precompute aggregate grids by dimension \u2014 instant for anticipated queries, inflexible beyond them.",
+   "definition": "Materialized views physically cache query results; data cubes precompute aggregate grids by dimension — instant for anticipated queries, inflexible beyond them.",
    "pdf_page": 122,
    "parent": "column-oriented-storage"
   },
   "formats-for-encoding-data": {
    "chapter": 4,
    "title": "Formats for Encoding Data",
-   "definition": "Encoding (memory \u2192 bytes) and decoding (bytes \u2192 memory), and how each format handles schema change so old and new code can coexist through rolling upgrades.",
+   "definition": "Encoding (memory → bytes) and decoding (bytes → memory), and how each format handles schema change so old and new code can coexist through rolling upgrades.",
    "pdf_page": 133
   },
   "language-specific-formats": {
    "chapter": 4,
    "title": "Language-Specific Formats",
-   "definition": "Built-in serializers (Java Serializable, pickle, Marshal): convenient but language-locked, insecure (arbitrary class instantiation \u2192 RCE), unversioned, inefficient \u2014 transient use only.",
+   "definition": "Built-in serializers (Java Serializable, pickle, Marshal): convenient but language-locked, insecure (arbitrary class instantiation → RCE), unversioned, inefficient — transient use only.",
    "pdf_page": 134,
    "parent": "formats-for-encoding-data"
   },
@@ -407,14 +407,14 @@
   "the-merits-of-schemas": {
    "chapter": 4,
    "title": "The Merits of Schemas",
-   "definition": "Schema-driven binary encodings are compact, self-documenting (the schema can't go stale), checkable for compatibility before deployment, and support code generation \u2014 schema-on-read flexibility with guarantees.",
+   "definition": "Schema-driven binary encodings are compact, self-documenting (the schema can't go stale), checkable for compatibility before deployment, and support code generation — schema-on-read flexibility with guarantees.",
    "pdf_page": 148,
    "parent": "formats-for-encoding-data"
   },
   "modes-of-dataflow": {
    "chapter": 4,
    "title": "Modes of Dataflow",
-   "definition": "Who encodes and who decodes: through databases (writer \u2192 later reader), through services (client request / server response), through asynchronous message passing (producer \u2192 broker \u2192 consumers).",
+   "definition": "Who encodes and who decodes: through databases (writer → later reader), through services (client request / server response), through asynchronous message passing (producer → broker → consumers).",
    "pdf_page": 149
   },
   "dataflow-through-databases": {
@@ -427,143 +427,143 @@
   "dataflow-through-services-rest-and-rpc": {
    "chapter": 4,
    "title": "Dataflow Through Services: REST and RPC",
-   "definition": "REST vs SOAP; why RPC's location transparency fails (lost messages, retry duplication needing idempotence, timeouts, variable latency, cross-language encoding); modern RPC (gRPC, futures, streams); servers-first \u21d2 backward compat on requests, forward on responses; long-lived API versioning.",
+   "definition": "REST vs SOAP; why RPC's location transparency fails (lost messages, retry duplication needing idempotence, timeouts, variable latency, cross-language encoding); modern RPC (gRPC, futures, streams); servers-first ⇒ backward compat on requests, forward on responses; long-lived API versioning.",
    "pdf_page": 152,
    "parent": "modes-of-dataflow"
   },
   "message-passing-dataflow": {
    "chapter": 4,
    "title": "Message-Passing Dataflow",
-   "definition": "Message brokers buffer, redeliver, decouple, fan out, hide addresses \u2014 one-way and asynchronous; any encoding but bidirectional compatibility gives deployment freedom; distributed actor frameworks (Akka, Orleans, Erlang) and their rolling-upgrade caveats.",
+   "definition": "Message brokers buffer, redeliver, decouple, fan out, hide addresses — one-way and asynchronous; any encoding but bidirectional compatibility gives deployment freedom; distributed actor frameworks (Akka, Orleans, Erlang) and their rolling-upgrade caveats.",
    "pdf_page": 157,
    "parent": "modes-of-dataflow"
   },
   "leaders-and-followers": {
    "chapter": 5,
    "title": "Leaders and Followers",
-   "definition": "",
+   "definition": "One replica (the leader) accepts all writes and streams a replication log to followers, which apply writes in the same order; reads may go to any replica (active/passive, master–slave).",
    "pdf_page": 173
   },
   "synchronous-versus-asynchronous-replication": {
    "chapter": 5,
    "title": "Synchronous Versus Asynchronous Replication",
-   "definition": "",
+   "definition": "Whether the leader waits for a follower's acknowledgment before confirming a write; fully sync blocks on any follower outage, so practice is semi-synchronous (one sync follower) or fully async (risking loss of acknowledged writes).",
    "pdf_page": 174,
    "parent": "leaders-and-followers"
   },
   "setting-up-new-followers": {
    "chapter": 5,
    "title": "Setting Up New Followers",
-   "definition": "",
+   "definition": "Take a consistent snapshot of the leader pinned to a replication-log position, copy it to the new node, then replay all changes since that position until the follower has caught up — no downtime.",
    "pdf_page": 176,
    "parent": "leaders-and-followers"
   },
   "handling-node-outages": {
    "chapter": 5,
    "title": "Handling Node Outages",
-   "definition": "",
+   "definition": "Follower failure heals by catch-up from its local log; leader failure needs failover — detect via timeout, elect the most up-to-date follower, reconfigure clients — with hazards of discarded writes, split brain, and the timeout dilemma.",
    "pdf_page": 177,
    "parent": "leaders-and-followers"
   },
   "implementation-of-replication-logs": {
    "chapter": 5,
    "title": "Implementation of Replication Logs",
-   "definition": "",
+   "definition": "Statement-based (nondeterminism problems), WAL shipping (exact but coupled to engine/version), logical row-based (decoupled, cross-version, parseable ⇒ change data capture), and trigger-based (flexible, costly).",
    "pdf_page": 179,
    "parent": "leaders-and-followers"
   },
   "problems-with-replication-lag": {
    "chapter": 5,
    "title": "Problems with Replication Lag",
-   "definition": "",
+   "definition": "Reads from asynchronous followers can be stale — eventual consistency with no bound on 'eventually' — producing read-your-writes, monotonic-read, and consistent-prefix anomalies.",
    "pdf_page": 182
   },
   "reading-your-own-writes": {
    "chapter": 5,
    "title": "Reading Your Own Writes",
-   "definition": "",
+   "definition": "Read-after-write consistency: a user always sees their own submissions; via leader reads for self-modified data, time windows after updates, or last-write timestamps that replicas must have caught up to.",
    "pdf_page": 183,
    "parent": "problems-with-replication-lag"
   },
   "monotonic-reads": {
    "chapter": 5,
    "title": "Monotonic Reads",
-   "definition": "",
+   "definition": "A user never sees time go backward across successive reads (no older data after newer); achieved by pinning each user to one replica, e.g. by hash of user ID.",
    "pdf_page": 185,
    "parent": "problems-with-replication-lag"
   },
   "consistent-prefix-reads": {
    "chapter": 5,
    "title": "Consistent Prefix Reads",
-   "definition": "",
+   "definition": "Writes that happen in a certain order are seen in that order by all readers (causality); a problem in partitioned databases where partitions have no global write order.",
    "pdf_page": 186,
    "parent": "problems-with-replication-lag"
   },
   "solutions-for-replication-lag": {
    "chapter": 5,
    "title": "Solutions for Replication Lag",
-   "definition": "",
+   "definition": "Design for how the app behaves if lag reaches minutes or hours; application-level fixes are complex and error-prone, which is what transactions exist to spare you.",
    "pdf_page": 188,
    "parent": "problems-with-replication-lag"
   },
   "multi-leader-replication": {
    "chapter": 5,
    "title": "Multi-Leader Replication",
-   "definition": "",
+   "definition": "More than one node accepts writes and forwards them to the others (master–master, active/active); each leader is also a follower of the rest; introduces write conflicts.",
    "pdf_page": 189
   },
   "use-cases-for-multi-leader-replication": {
    "chapter": 5,
    "title": "Use Cases for Multi-Leader Replication",
-   "definition": "",
+   "definition": "A leader per datacenter (local writes, tolerance of datacenter and WAN failures), clients with offline operation (every device a leader, e.g. calendar sync), and real-time collaborative editing.",
    "pdf_page": 189,
    "parent": "multi-leader-replication"
   },
   "handling-write-conflicts": {
    "chapter": 5,
    "title": "Handling Write Conflicts",
-   "definition": "",
+   "definition": "Concurrent writes to the same record on different leaders are detected asynchronously and must be resolved convergently: avoid them, last-write-wins (lossy), merge, or preserve for application logic on write or on read; CRDTs/OT automate it.",
    "pdf_page": 192,
    "parent": "multi-leader-replication"
   },
   "multi-leader-replication-topologies": {
    "chapter": 5,
    "title": "Multi-Leader Replication Topologies",
-   "definition": "",
+   "definition": "Communication paths for propagating writes — circular, star, all-to-all; sparse topologies break on a node failure, dense ones let writes overtake each other, a causality problem needing version vectors.",
    "pdf_page": 196,
    "parent": "multi-leader-replication"
   },
   "leaderless-replication": {
    "chapter": 5,
    "title": "Leaderless Replication",
-   "definition": "",
+   "definition": "Any replica accepts writes directly, with no leader enforcing order (Dynamo-style: Riak, Cassandra, Voldemort); clients write to and read from several nodes in parallel and reconcile by version.",
    "pdf_page": 198
   },
   "writing-to-the-database-when-a-node-is-down": {
    "chapter": 5,
    "title": "Writing to the Database When a Node Is Down",
-   "definition": "",
+   "definition": "No failover: write to all n replicas and succeed on w acks; read from all and take the newest of r replies; stale replicas heal via read repair and anti-entropy; w + r > n guarantees overlap.",
    "pdf_page": 198,
    "parent": "leaderless-replication"
   },
   "limitations-of-quorum-consistency": {
    "chapter": 5,
    "title": "Limitations of Quorum Consistency",
-   "definition": "",
+   "definition": "Even with w + r > n, stale reads leak through sloppy quorums, concurrent writes, writes concurrent with reads, partial write failures, and restores from stale replicas — quorums tune probability, not guarantees; monitor staleness.",
    "pdf_page": 202,
    "parent": "leaderless-replication"
   },
   "sloppy-quorums-and-hinted-handoff": {
    "chapter": 5,
    "title": "Sloppy Quorums and Hinted Handoff",
-   "definition": "",
+   "definition": "Accept writes on reachable non-home nodes when a quorum of home nodes can't be reached (durability, not a true quorum); hinted handoff later forwards them home.",
    "pdf_page": 204,
    "parent": "leaderless-replication"
   },
   "detecting-concurrent-writes": {
    "chapter": 5,
    "title": "Detecting Concurrent Writes",
-   "definition": "",
+   "definition": "Concurrency is causal (neither operation knows of the other), not temporal; LWW forces an order and loses data; version numbers per key (and version vectors per replica) keep concurrent siblings for the application to merge, with tombstones for deletions.",
    "pdf_page": 205,
    "parent": "leaderless-replication"
   },

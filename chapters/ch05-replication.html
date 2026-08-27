@@ -1,16 +1,1503 @@
-<title>DDIA Ch 5: Replication</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 5 — Replication</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#distributed-data">part-ii-framing</a>
+  <a class="l1" href="#leaders-and-followers">leaders-followers</a>
+  <a href="#synchronous-versus-asynchronous-replication">sync-vs-async</a>
+  <a href="#setting-up-new-followers">new-followers</a>
+  <a href="#handling-node-outages">node-outages</a>
+  <a href="#implementation-of-replication-logs">replication-logs</a>
+  <a class="l1" href="#problems-with-replication-lag">replication-lag</a>
+  <a href="#reading-your-own-writes">read-your-writes</a>
+  <a href="#monotonic-reads">monotonic-reads</a>
+  <a href="#consistent-prefix-reads">consistent-prefix</a>
+  <a href="#solutions-for-replication-lag">solutions</a>
+  <a class="l1" href="#multi-leader-replication">multi-leader</a>
+  <a href="#use-cases-for-multi-leader-replication">use-cases</a>
+  <a href="#handling-write-conflicts">write-conflicts</a>
+  <a href="#multi-leader-replication-topologies">topologies</a>
+  <a class="l1" href="#leaderless-replication">leaderless</a>
+  <a href="#writing-to-the-database-when-a-node-is-down">node-down-writes</a>
+  <a href="#limitations-of-quorum-consistency">quorum-limits</a>
+  <a href="#sloppy-quorums-and-hinted-handoff">sloppy-quorums</a>
+  <a href="#detecting-concurrent-writes">concurrent-writes</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 5: Replication</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;05</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;06</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Replication</h1>
+  <p class="epigraph">The major difference between a thing that might go wrong and a thing that cannot possibly go wrong is that when a thing that cannot possibly go wrong goes wrong it usually turns out to be impossible to get at or repair.
+  <span class="attr">— Douglas Adams, Mostly Harmless (1992)</span></p>
+</header>
+
+<p>Part I of the book lived on a single machine. Part II asks what happens when several machines share the job of storing and serving data — and this chapter is the first and gentlest of those questions: <strong>keep a copy of the same data on several nodes</strong>. If the data never changed, replication would be a one-time file copy. Every difficulty in this chapter comes from the same source: <em>the data keeps changing while you copy it</em>, and the copies have to agree about what happened and in what order. The chapter assumes the whole dataset fits on every node; <a class="xref fwd" href="ch06-partitioning.html#partitioning-and-replication" data-tip="Ch 6 · Partitioning and Replication — splitting a dataset into partitions, each of which is itself replicated · not yet written">Chapter&nbsp;6<sup>→6</sup></a> drops that assumption and splits the data up.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Imagine three clerks, each keeping their own copy of the same ledger, in three different buildings, communicating by messenger. Every design in this chapter is an answer to one question: <strong>who is allowed to write in the ledger, and how do the other copies find out?</strong> One clerk writes and the others copy (single-leader). Several clerks write and reconcile later (multi-leader). Anyone writes anywhere and readers ask several clerks and compare (leaderless). Each answer trades away something different — write latency, durability, simplicity, or the very notion of "the latest value." And the messengers are slow and sometimes lost, so a reader who asks the wrong clerk gets yesterday's ledger: that is <em>replication lag</em>, and half the chapter is about what it does to users. Colors as always: <span style="color:var(--write);font-weight:600">ember = writes and the replication stream</span>, <span style="color:var(--read);font-weight:600">cyan = reads</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="distributed-data">
+<span class="key-chip">distributed-data (Part II framing)</span>
+<h2><a class="self" href="#distributed-data">Part II: why distribute at all?</a></h2>
+
+<p>Kleppmann opens Part II with a Feynman epigraph of his own — "reality must take precedence over public relations, for nature cannot be fooled" — and a plain list of reasons you'd spread a database across machines. <strong>Scalability</strong>: data volume, read load, or write load outgrows one box. <strong>Fault tolerance / high availability</strong>: the application must keep working when a machine, a network, or a whole datacenter dies. <strong>Latency</strong>: users around the world should be served from nearby, not from across an ocean.</p>
+
+<h4>Scaling to higher load: three architectures</h4>
+<p>The simplest path is a bigger machine — <em>vertical scaling</em> or <em>scaling up</em>. Many CPUs, RAM chips, and disks under one operating system with a fast interconnect form a <strong>shared-memory architecture</strong>: the components behave as one machine. The problem is that cost grows faster than linearly (twice the CPUs costs well over twice the money and, because of bottlenecks, gives less than twice the throughput), fault tolerance is limited (hot-swappable parts, but one building), and even inside a big machine, NUMA means memory near one CPU is far from another — so partitioning creeps back in anyway. The <strong>shared-disk architecture</strong> gives each machine its own CPUs and RAM but a shared disk array over a fast network (NAS/SAN); it survives in some data warehousing, but locking contention caps its scalability.</p>
+
+<figure>
+<svg viewBox="0 0 680 210" role="img" aria-label="Three architectures for scaling: shared-memory (one machine, many CPUs), shared-disk (independent machines sharing a disk array), and shared-nothing (independent nodes coordinating over a network).">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="20" font-weight="700">shared-memory</text>
+    <rect x="20" y="32" width="190" height="130" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <rect x="34" y="46" width="34" height="24" rx="3" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="42" y="63">cpu</text>
+    <rect x="76" y="46" width="34" height="24" rx="3" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="84" y="63">cpu</text>
+    <rect x="118" y="46" width="34" height="24" rx="3" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="126" y="63">cpu</text>
+    <rect x="160" y="46" width="34" height="24" rx="3" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="168" y="63">cpu</text>
+    <rect x="34" y="84" width="160" height="22" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="80" y="99">one RAM · one OS</text>
+    <rect x="34" y="118" width="160" height="22" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="86" y="133">many disks</text>
+    <text x="24" y="180" font-size="9" opacity=".7">cost superlinear · one building</text>
+    <text x="24" y="194" font-size="9" opacity=".7">NUMA ⇒ partitioning anyway</text>
+
+    <text x="245" y="20" font-weight="700">shared-disk</text>
+    <rect x="245" y="32" width="50" height="40" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="252" y="49">cpu</text><text x="252" y="63">ram</text>
+    <rect x="315" y="32" width="50" height="40" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="322" y="49">cpu</text><text x="322" y="63">ram</text>
+    <rect x="385" y="32" width="50" height="40" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="392" y="49">cpu</text><text x="392" y="63">ram</text>
+    <path d="M270 72 V 100 M340 72 V 100 M410 72 V 100" stroke="currentColor" stroke-opacity=".5" fill="none"/>
+    <path d="M270 100 H 410" stroke="currentColor" stroke-opacity=".5" fill="none"/>
+    <text x="300" y="94" font-size="8" opacity=".7">fast network</text>
+    <path d="M340 100 V 118" stroke="currentColor" stroke-opacity=".5"/>
+    <rect x="260" y="118" width="160" height="30" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="292" y="137">shared disk array</text>
+    <text x="249" y="180" font-size="9" opacity=".7">locking contention caps scale</text>
+    <text x="249" y="194" font-size="9" opacity=".7">some data warehouses</text>
+
+    <text x="470" y="20" font-weight="700">shared-nothing</text>
+    <g>
+      <rect x="470" y="32" width="56" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/><text x="479" y="49">cpu</text><text x="479" y="63">ram</text><text x="479" y="77">disk</text>
+      <rect x="546" y="32" width="56" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/><text x="555" y="49">cpu</text><text x="555" y="63">ram</text><text x="555" y="77">disk</text>
+      <rect x="622" y="32" width="48" height="60" rx="5" fill="none" stroke="currentColor" stroke-opacity=".8" stroke-width="1.5"/><text x="627" y="49">cpu</text><text x="627" y="63">ram</text><text x="627" y="77">disk</text>
+    </g>
+    <path d="M498 92 V 118 M574 92 V 118 M646 92 V 118 M498 118 H 646" stroke="currentColor" stroke-opacity=".5" fill="none" stroke-dasharray="4 3"/>
+    <text x="490" y="136" font-size="8" opacity=".7">plain network, coordination in software</text>
+    <text x="474" y="166" font-size="9" opacity=".7">each machine = a <tspan font-weight="700">node</tspan></text>
+    <text x="474" y="180" font-size="9" opacity=".7">commodity price/perf · multi-region</text>
+    <text x="474" y="194" font-size="9" opacity=".7">complexity lands on YOU</text>
+  </g>
+</svg>
+<figcaption>The Part II intro's three scaling architectures. Shared-memory and shared-disk keep the illusion of one machine and pay for it in cost or contention. Shared-nothing — plain machines, plain network — is what the rest of the book studies, not because it's always best but because it hides nothing: the application developer has to face every trade-off.</figcaption>
+</figure>
+
+<h4>Shared-nothing architectures</h4>
+<p>The alternative that took over is <strong>shared-nothing</strong> (<em>horizontal scaling</em>, <em>scaling out</em>): each machine or VM running the database is a <strong>node</strong> with its own CPUs, RAM, and disks, and all coordination happens in software over an ordinary network. No special hardware, so you buy whatever has the best price/performance; data can spread across geographic regions to cut latency and to survive losing a datacenter; and with cloud VMs, even a small company can afford a multi-region deployment. The book focuses on shared-nothing not because it's always the right choice but because it demands the most care: distributing data across nodes brings constraints and trade-offs that the database cannot magically hide, it adds application complexity, and it sometimes limits the data models you can use — the "COST" paper's single-threaded program beating a 100-core cluster is the cautionary tale. This is the same scale-up-vs-scale-out pragmatism that <a class="xref back" href="ch01-reliable-scalable-maintainable.html#approaches-for-coping-with-load" data-tip="Ch 1 · Approaches for Coping with Load — rethink architecture per order of magnitude; scale up vs scale out pragmatically">Chapter&nbsp;1<sup>←1</sup></a> introduced.</p>
+
+<h4>Replication versus partitioning</h4>
+<p>Two mechanisms distribute data across nodes, and they are separate ideas that usually travel together. <strong>Replication</strong>: keep a copy of the <em>same</em> data on several nodes, possibly in different places — redundancy when nodes fail, and often better performance (this chapter). <strong>Partitioning</strong> (also <em>sharding</em>): split one big database into subsets called partitions and put different partitions on different nodes (<a class="xref fwd" href="ch06-partitioning.html#partitioning-and-replication" data-tip="Ch 6 · Partitioning and Replication — partitions are usually each replicated; a node may lead some partitions and follow others · not yet written">Chapter&nbsp;6<sup>→6</sup></a>). Figure II-1 in the book shows the combination: two partitions, two replicas each. After these two chapters Part II moves to <a class="xref fwd" href="ch07-transactions.html#the-slippery-concept-of-a-transaction" data-tip="Ch 7 · The Slippery Concept of a Transaction — grouping reads and writes so the whole succeeds or fails · not yet written">transactions<sup>→7</sup></a>, then to the fundamental limits of distributed systems in <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#faults-and-partial-failures" data-tip="Ch 8 · Faults and Partial Failures — in a distributed system some parts are broken in unknowable ways while others work · not yet written">Chapter&nbsp;8<sup>→8</sup></a> and <a class="xref fwd" href="ch09-consistency-and-consensus.html#consistency-guarantees" data-tip="Ch 9 · Consistency Guarantees — the spectrum from eventual consistency to linearizability, and consensus · not yet written">Chapter&nbsp;9<sup>→9</sup></a>.</p>
+
+<figure>
+<svg viewBox="0 0 680 150" role="img" aria-label="Figure II-1 redrawn: a database split into two partitions, each with two replicas on two nodes; replication and partitioning combined.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="20" width="200" height="110" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="30" y="38" font-weight="700">node 1</text>
+    <rect x="34" y="50" width="172" height="30" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="44" y="70">partition 1 · replica A</text>
+    <rect x="34" y="90" width="172" height="30" rx="4" fill="var(--read-soft)" stroke="var(--read)"/><text x="44" y="110">partition 2 · replica A</text>
+    <rect x="260" y="20" width="200" height="110" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="270" y="38" font-weight="700">node 2</text>
+    <rect x="274" y="50" width="172" height="30" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="284" y="70">partition 1 · replica B</text>
+    <rect x="274" y="90" width="172" height="30" rx="4" fill="var(--read-soft)" stroke="var(--read)"/><text x="284" y="110">partition 2 · replica B</text>
+    <path d="M206 65 H 274" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <path d="M206 105 H 274" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="500" y="60" font-size="9" opacity=".8">→ across a row: <tspan font-weight="700">replication</tspan></text>
+    <text x="500" y="74" font-size="9" opacity=".7">  (same data, two nodes)</text>
+    <text x="500" y="100" font-size="9" opacity=".8">↓ down a node: <tspan font-weight="700">partitioning</tspan></text>
+    <text x="500" y="114" font-size="9" opacity=".7">  (different data, one node)</text>
+  </g>
+</svg>
+<figcaption>Replication and partitioning are orthogonal: the dataset is cut into two partitions (different data), and each partition is copied onto two nodes (same data). This chapter fixes the partition count at one and studies the copying.</figcaption>
+</figure>
+
+<div class="ed2"><span class="tag">2ND EDITION · replication moves up the bill</span>
+The 2nd edition keeps Part II's replication/partitioning pair (its Chapter 6 is still titled Replication; partitioning is renamed <em>Sharding</em>), but Kleppmann has said replication-for-fault-tolerance stays relevant at every scale and gained relative prominence over sharding — most systems need a second copy long before they need to split the data. Newer multi-region and cloud examples (Cosmos DB's global distribution, Aurora DSQL, Fly.io) join the 1st edition's PostgreSQL/MySQL/Dynamo cast. <em>[system list inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="leaders-and-followers">
+<span class="key-chip">leaders-and-followers</span>
+<h2><a class="self" href="#leaders-and-followers">Leaders and Followers</a></h2>
+
+<p>Every node holding a copy of the database is a <strong>replica</strong>. With several replicas the unavoidable question is: how does every write reach every replica? The most common answer is <strong>leader-based replication</strong> — also called active/passive or master–slave replication:</p>
+<ol>
+<li>One replica is the <strong>leader</strong> (master, primary). Clients send <em>all writes</em> to it; it writes to its local storage first.</li>
+<li>The other replicas are <strong>followers</strong> (read replicas, slaves, secondaries, hot standbys). Whenever the leader writes, it also sends the change to every follower as part of a <strong>replication log</strong> or <em>change stream</em>. Each follower applies the writes in the same order the leader processed them.</li>
+<li>Clients may <strong>read</strong> from the leader or any follower — but writes are accepted only at the leader; followers are read-only from the client's point of view.</li>
+</ol>
+<p>It's built into PostgreSQL (since 9.0), MySQL, Oracle Data Guard, and SQL Server's AlwaysOn Availability Groups; into MongoDB, RethinkDB, and Espresso; and beyond databases into Kafka and RabbitMQ's highly available queues — the same message brokers <a class="xref back" href="ch04-encoding-and-evolution.html#message-passing-dataflow" data-tip="Ch 4 · Message-Passing Dataflow — brokers buffer, redeliver, decouple, fan out; one-way and asynchronous">Chapter&nbsp;4<sup>←4</sup></a> used for dataflow. Replicated block devices like DRBD are similar. (Terminology footnote: in PostgreSQL a <em>hot standby</em> serves reads, a <em>warm standby</em> only applies changes; the book doesn't need the distinction.) Replication is an old topic — the principles were worked out in the 1970s and the constraints of networks haven't changed — but mainstream use of distributed databases is recent, which is why <em>eventual consistency</em> is so widely misunderstood.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · one pen, many photocopiers</span>
+A single-leader system is an office with exactly one pen. Anyone who wants to change the ledger hands their change to the person holding the pen; that person writes it down and then feeds the page through the photocopiers, one for each other office. Anyone can <em>read</em> any office's copy. The one-pen rule buys you the most valuable thing in this chapter — a single, total order of writes, so no two offices ever disagree about what happened first. Everything you'll pay for later (failover, lag) is the price of that one pen.</div>
+
+<h3 id="synchronous-versus-asynchronous-replication"><a class="self" href="#synchronous-versus-asynchronous-replication">Synchronous Versus Asynchronous Replication</a></h3>
+<span class="key-chip">synchronous-versus-asynchronous-replication</span>
+
+<p>When the leader forwards a change to a follower, does it <em>wait</em> for the follower's confirmation before telling the client the write succeeded? In relational databases this is usually a configuration option; elsewhere it's often hardcoded. The book's Figure 5-2 traces a user updating a profile picture with one synchronous and one asynchronous follower — here it is as a stepper:</p>
+
+<figure class="anim" id="anim-sync">
+<svg viewBox="0 0 680 300" role="img" aria-label="Timeline of a write under leader-based replication with one synchronous follower and one asynchronous follower: the leader waits for follower 1's acknowledgment before replying OK to the client, but does not wait for follower 2, which applies the change later; if the synchronous follower is down, the write cannot complete.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="16" y="52">user</text>
+    <text x="16" y="112">leader</text>
+    <text x="16" y="172">follower 1</text>
+    <text x="16" y="186" font-size="8" fill="var(--write)">sync</text>
+    <text x="16" y="242">follower 2</text>
+    <text x="16" y="256" font-size="8" opacity=".7">async</text>
+    <path d="M90 48 H 660 M90 108 H 660 M90 168 H 660 M90 238 H 660" stroke="currentColor" stroke-opacity=".35"/>
+    <text x="600" y="290" font-size="9" opacity=".6">time →</text>
+    <!-- step 1: client sends -->
+    <g data-on="1-6" data-hot="1">
+      <path d="M120 52 L 160 104" stroke="var(--write)" stroke-width="2" marker-end="url(#a5s-w)"/>
+      <text x="96" y="80" font-size="9" fill="var(--write)">set picture</text>
+    </g>
+    <!-- step 2: leader writes locally + forwards -->
+    <g data-on="2-6" data-hot="2">
+      <rect x="156" y="98" width="20" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/>
+      <text x="184" y="98" font-size="8" fill="var(--write)">write local</text>
+      <path d="M176 112 L 250 164" stroke="var(--write)" stroke-width="2" marker-end="url(#a5s-w)"/>
+      <path d="M176 114 L 400 234" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#a5s-w)"/>
+      <text x="196" y="150" font-size="8" fill="var(--write)">replicate</text>
+    </g>
+    <!-- step 3: follower 1 applies + acks -->
+    <g data-on="3-6" data-hot="3">
+      <rect x="248" y="158" width="20" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/>
+      <path d="M270 166 L 330 112" stroke="var(--write)" stroke-width="2" marker-end="url(#a5s-w)"/>
+      <text x="296" y="150" font-size="8" fill="var(--write)">ok</text>
+    </g>
+    <!-- step 4: leader replies ok to user -->
+    <g data-on="4-6" data-hot="4">
+      <path d="M334 106 L 370 54" stroke="var(--write)" stroke-width="2" marker-end="url(#a5s-w)"/>
+      <text x="344" y="86" font-size="9" fill="var(--write)">ok</text>
+      <rect x="180" y="118" width="164" height="14" rx="2" fill="var(--hot)"/>
+      <text x="186" y="129" font-size="8" opacity=".85">leader WAITS for sync follower</text>
+    </g>
+    <!-- step 5: follower 2 finally applies -->
+    <g data-on="5-6" data-hot="5">
+      <rect x="400" y="228" width="20" height="20" rx="3" fill="var(--write-soft)" stroke="var(--write)"/>
+      <path d="M420 236 L 470 112" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#a5s-w)"/>
+      <text x="374" y="270" font-size="9" opacity=".8">applied late — nobody waited</text>
+      <path d="M180 258 H 396" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="2 3"/>
+      <text x="230" y="272" font-size="8" opacity=".7">← replication lag →</text>
+    </g>
+    <!-- step 6: sync follower dead -->
+    <g data-on="6" data-hot="6">
+      <rect x="500" y="150" width="160" height="36" rx="5" fill="var(--panel2)" stroke="var(--bad)" stroke-width="1.5"/>
+      <text x="508" y="165" font-size="9" fill="var(--bad)" font-weight="700">if follower 1 is down…</text>
+      <text x="508" y="179" font-size="8">leader blocks ALL writes</text>
+      <path d="M580 104 L 580 146" stroke="var(--bad)" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <text x="470" y="92" font-size="9" fill="var(--bad)">no ok can be sent</text>
+    </g>
+    <defs>
+      <marker id="a5s-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>REQUEST</strong> The user's client sends "update my profile picture" to the leader — the only node that accepts writes.</li>
+  <li><strong>LEADER WRITES, FORWARDS</strong> The leader applies the change to its own storage, then ships it down the replication log to both followers. Follower 1 is configured synchronous, follower 2 asynchronous.</li>
+  <li><strong>SYNC FOLLOWER ACKS</strong> Follower 1 applies the change and confirms. This confirmation is the thing the leader is waiting for.</li>
+  <li><strong>OK TO THE USER</strong> Only now does the leader report success (and make the write visible to other clients). Guarantee bought: the data is on <em>two</em> nodes, so a leader crash right now loses nothing.</li>
+  <li><strong>THE ASYNC FOLLOWER CATCHES UP</strong> Follower 2 applies the change whenever it gets to it — usually under a second, but with no upper bound: a recovering follower, a saturated system, or a flaky network can push lag to minutes. Nobody waited for it; that gap is <em>replication lag</em>.</li>
+  <li><strong>THE COST OF SYNC</strong> If the synchronous follower crashes or the network to it fails, the leader cannot complete <em>any</em> write until it's back. That's why all-synchronous is impractical: one node outage halts the whole system.</li>
+</ol>
+</figure>
+
+<p>So in practice "synchronous replication" means <strong>one</strong> follower is synchronous and the rest asynchronous; if the sync follower gets slow or unavailable, an async follower is promoted to sync. This guarantees an up-to-date copy on at least two nodes (leader + one follower) and is called <strong>semi-synchronous</strong>. Just as often, leader-based replication is configured <strong>fully asynchronous</strong>: if the leader fails unrecoverably, writes not yet replicated are lost — a write can be confirmed to the client and still not be durable. In exchange the leader keeps accepting writes even if every follower falls behind. Weakened durability sounds like a bad deal, yet fully async is widespread, especially with many or geographically scattered followers.</p>
+
+<h4>Research on replication</h4>
+<p>Because async data loss is a real problem, researchers keep looking for schemes that lose nothing but still perform. <strong>Chain replication</strong> is a synchronous variant used in Microsoft Azure Storage. And there is a deep connection between replica consistency and <em>consensus</em> — getting several nodes to agree on a value — which <a class="xref fwd" href="ch09-consistency-and-consensus.html#fault-tolerant-consensus" data-tip="Ch 9 · Fault-Tolerant Consensus — algorithms (Paxos, Raft, Zab) by which nodes agree on a value despite failures · not yet written">Chapter&nbsp;9<sup>→9</sup></a> explores; this chapter stays with the simpler forms databases actually use.</p>
+
+<h3 id="setting-up-new-followers"><a class="self" href="#setting-up-new-followers">Setting Up New Followers</a></h3>
+<span class="key-chip">setting-up-new-followers</span>
+
+<p>You'll regularly add followers — more replicas, or a replacement for a dead node. Plain file copy won't do: clients write continuously, so a copy that takes minutes sees different parts of the database at different moments and may not make sense. Locking the database for the copy is consistent but kills availability. The standard no-downtime procedure:</p>
+
+<figure>
+<svg viewBox="0 0 680 190" role="img" aria-label="Setting up a new follower in four steps: take a consistent snapshot of the leader at a log position, copy it to the new node, the follower requests all changes since that position from the replication log, and once the backlog is applied it has caught up and streams live changes.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="30" width="150" height="120" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="30" y="48" font-weight="700">leader</text>
+    <rect x="30" y="58" width="130" height="18" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="36" y="71" font-size="8" fill="var(--write)">replication log</text>
+    <g font-size="8">
+      <text x="34" y="92">… 41 42 <tspan font-weight="700" fill="var(--write)">43</tspan> 44 45 46 …</text>
+    </g>
+    <path d="M96 96 V 112" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5f-w)"/>
+    <rect x="40" y="114" width="110" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="48" y="131" font-size="8">snapshot @ LSN 43</text>
+    <text x="180" y="40" font-size="9" fill="var(--write)" font-weight="700">1</text><text x="190" y="40" font-size="9">consistent snapshot, no lock</text>
+    <text x="190" y="54" font-size="8" opacity=".7">tagged with a log position (Postgres LSN,</text>
+    <text x="190" y="66" font-size="8" opacity=".7">MySQL binlog coordinates)</text>
+    <path d="M152 127 H 420" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a5f-w)"/>
+    <text x="230" y="120" font-size="9"><tspan fill="var(--write)" font-weight="700">2</tspan> copy snapshot to new node</text>
+    <rect x="430" y="30" width="230" height="120" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="440" y="48" font-weight="700">new follower</text>
+    <rect x="440" y="114" width="110" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="448" y="131" font-size="8">snapshot @ LSN 43</text>
+    <path d="M440 84 C 320 84, 250 84, 168 84" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#a5f-w)"/>
+    <text x="250" y="96" font-size="9" fill="var(--write)"><tspan font-weight="700">3</tspan> "send me everything after 43"</text>
+    <path d="M168 78 C 250 78, 320 78, 440 78" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a5f-w)"/>
+    <text x="560" y="80" font-size="8">44 45 46 …</text>
+    <text x="560" y="128" font-size="9" fill="var(--ok)" font-weight="700">4 caught up</text>
+    <text x="560" y="140" font-size="8" opacity=".7">now streams live</text>
+    <text x="20" y="176" font-size="9" opacity=".7">the snapshot must be pinned to an exact position in the leader's replication log — otherwise you can't know which changes to replay</text>
+    <defs><marker id="a5f-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>(1) Take a consistent snapshot of the leader — most databases can, since backups need it; MySQL may need a tool like innobackupex. (2) Copy it to the new node. (3) The follower connects to the leader and asks for every change since the snapshot's log position. (4) When the backlog is applied it has <em>caught up</em> and keeps consuming the live stream. Fully automated in some systems; an arcane manual ritual in others.</figcaption>
+</figure>
+
+<h3 id="handling-node-outages"><a class="self" href="#handling-node-outages">Handling Node Outages</a></h3>
+<span class="key-chip">handling-node-outages</span>
+
+<p>Nodes go down — unexpectedly through faults, and just as often on purpose (rebooting for a kernel security patch). Being able to restart individual nodes without downtime is a huge operational win, so the goal is: keep the system as a whole running, and keep the blast radius of any single outage small. With leader-based replication the two cases are very different.</p>
+
+<h4>Follower failure: catch-up recovery</h4>
+<p>Easy. Each follower keeps its received log on local disk. After a crash or a network blip, it knows the last transaction it applied, reconnects to the leader, requests everything since, applies it, and is caught up — exactly the tail end of the new-follower procedure above.</p>
+
+<h4>Leader failure: failover</h4>
+<p>Hard. A follower must be promoted to leader, clients must be reconfigured to send writes to it, and the other followers must start consuming from it. This is <strong>failover</strong>, done manually (an administrator is paged and does the steps) or automatically:</p>
+
+<figure class="anim" id="anim-failover">
+<svg viewBox="0 0 680 300" role="img" aria-label="Automatic failover: the leader stops responding, a timeout declares it dead, the most up-to-date follower is elected leader, clients are rerouted; then the hazards — the old leader had unreplicated writes that must be discarded, and if it comes back believing it is still leader there are two leaders (split brain).">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- nodes -->
+    <g data-on="1-7">
+      <rect x="40" y="90" width="120" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+      <text x="54" y="112" font-weight="700">node A</text>
+    </g>
+    <g data-on="1-2"><text x="54" y="130" font-size="9" fill="var(--write)">LEADER · log @ 108</text></g>
+    <g data-on="3-5"><text x="54" y="130" font-size="9" fill="var(--bad)">silent…</text></g>
+    <g data-on="6-7"><text x="54" y="130" font-size="9" fill="var(--bad)">"I'm still leader!"</text></g>
+    <g data-on="1-7">
+      <rect x="280" y="90" width="120" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+      <text x="294" y="112" font-weight="700">node B</text>
+      <rect x="520" y="90" width="120" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+      <text x="534" y="112" font-weight="700">node C</text>
+    </g>
+    <g data-on="1-4"><text x="294" y="130" font-size="9" opacity=".8">follower · log @ 106</text><text x="534" y="130" font-size="9" opacity=".8">follower · log @ 103</text></g>
+    <g data-on="5-7"><text x="294" y="130" font-size="9" fill="var(--write)">NEW LEADER · @ 106</text><text x="534" y="130" font-size="9" opacity=".8">follower of B</text></g>
+    <!-- step 1: normal flow -->
+    <g data-on="1" data-hot="1">
+      <path d="M160 108 H 274" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5o-w)"/>
+      <path d="M160 116 C 300 160, 460 160, 514 118" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a5o-w)"/>
+      <path d="M100 40 V 84" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5o-w)"/>
+      <text x="60" y="34" font-size="9" fill="var(--write)">clients write here</text>
+      <text x="190" y="100" font-size="8" fill="var(--write)">replication log</text>
+    </g>
+    <!-- step 2: leader dies -->
+    <g data-on="2-7"><path d="M44 94 L 156 142 M156 94 L 44 142" stroke="var(--bad)" stroke-width="2" opacity=".7"/></g>
+    <g data-on="2" data-hot="2"><text x="40" y="170" font-size="9" fill="var(--bad)">crash / power / network — unknown which</text></g>
+    <!-- step 3: timeout -->
+    <g data-on="3" data-hot="3">
+      <path d="M280 150 C 240 190, 200 190, 160 150" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="4 3" fill="none" marker-end="url(#a5o-i)"/>
+      <path d="M520 150 C 400 230, 260 230, 160 156" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="4 3" fill="none" marker-end="url(#a5o-i)"/>
+      <text x="190" y="205" font-size="9">ping… ping… no reply for 30 s</text>
+      <rect x="230" y="216" width="200" height="22" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="240" y="231" font-size="9" font-weight="700">timeout ⇒ declared dead</text>
+    </g>
+    <!-- step 4: election -->
+    <g data-on="4" data-hot="4">
+      <path d="M400 118 H 514" stroke="currentColor" stroke-opacity=".7" stroke-dasharray="3 3" marker-end="url(#a5o-i)"/>
+      <path d="M514 126 H 400" stroke="currentColor" stroke-opacity=".7" stroke-dasharray="3 3" marker-end="url(#a5o-i)"/>
+      <text x="410" y="108" font-size="8">"who's most up to date?"</text>
+      <rect x="250" y="180" width="180" height="40" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="258" y="196" font-size="9" font-weight="700">elect B (log @ 106 &gt; 103)</text>
+      <text x="258" y="210" font-size="8" opacity=".8">minimizes data loss · a consensus problem</text>
+    </g>
+    <!-- step 5: reconfigure -->
+    <g data-on="5" data-hot="5">
+      <path d="M340 40 V 84" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5o-w)"/>
+      <text x="290" y="34" font-size="9" fill="var(--write)">clients rerouted to B</text>
+      <path d="M400 108 H 514" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5o-w)"/>
+      <text x="420" y="100" font-size="8" fill="var(--write)">B → C log</text>
+    </g>
+    <!-- step 6: lost writes -->
+    <g data-on="6" data-hot="6">
+      <rect x="40" y="160" width="230" height="52" rx="5" fill="var(--write-soft)" stroke="var(--write)"/>
+      <text x="48" y="176" font-size="9" fill="var(--write)" font-weight="700">A had writes 107, 108 nobody else saw</text>
+      <text x="48" y="190" font-size="8">B may have conflicting new 107, 108…</text>
+      <text x="48" y="204" font-size="8" fill="var(--bad)">usual fix: DISCARD A's — durability violated</text>
+      <text x="300" y="176" font-size="8" opacity=".8">GitHub 2012: promoted stale MySQL follower</text>
+      <text x="300" y="190" font-size="8" opacity=".8">reused autoincrement keys already in Redis</text>
+      <text x="300" y="204" font-size="8" opacity=".8">⇒ private data shown to wrong users</text>
+    </g>
+    <!-- step 7: split brain -->
+    <g data-on="7" data-hot="7">
+      <path d="M100 40 V 84" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5o-w)"/>
+      <path d="M340 40 V 84" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5o-w)"/>
+      <text x="40" y="34" font-size="9" fill="var(--bad)">some clients still write to A</text>
+      <text x="300" y="34" font-size="9" fill="var(--write)">others write to B</text>
+      <rect x="40" y="160" width="600" height="52" rx="5" fill="var(--panel2)" stroke="var(--bad)" stroke-width="1.5"/>
+      <text x="48" y="178" font-size="9" fill="var(--bad)" font-weight="700">SPLIT BRAIN — two leaders, no conflict resolution ⇒ lost or corrupted data</text>
+      <text x="48" y="194" font-size="8">safety catch: shut one down (fencing / STONITH) — but a badly designed catch has shot both nodes</text>
+      <text x="48" y="206" font-size="8" opacity=".8">and the timeout dilemma: too long = slow recovery; too short = needless failovers during load spikes that make things worse</text>
+    </g>
+    <defs>
+      <marker id="a5o-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a5o-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".6"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>STEADY STATE</strong> Node A leads; clients write to A; A streams its log to followers B and C. B is a little behind (at position 106 of A's 108), C further (103) — normal asynchronous lag.</li>
+  <li><strong>THE LEADER GOES QUIET</strong> A crashes, loses power, or is cut off by the network. Crucially, the others cannot tell which — there is no foolproof way to detect what went wrong.</li>
+  <li><strong>STEP 1 · DETECT</strong> So systems use a timeout: nodes bounce messages back and forth, and a node silent for, say, 30 seconds is presumed dead. (Planned maintenance skips this — you hand over deliberately.)</li>
+  <li><strong>STEP 2 · CHOOSE</strong> A new leader is picked by election among the survivors or appointed by a previously elected controller node. The best candidate has the most of the old leader's writes — B here — to minimize loss. Getting everyone to agree on the choice is <em>consensus</em>, Chapter 9's subject.</li>
+  <li><strong>STEP 3 · RECONFIGURE</strong> Clients must now send writes to B (request routing, Chapter 6) and C must consume B's log. If A comes back it must be made to recognize B and demote itself.</li>
+  <li><strong>HAZARD · UNREPLICATED WRITES</strong> With async replication, B never received A's last writes. When A rejoins, what happens to them? B may already have accepted conflicting writes. The common answer is to discard A's — breaking clients' durability expectations. GitHub's 2012 incident shows the knock-on danger when other systems (a Redis store keyed by those primary keys) had already trusted the discarded state.</li>
+  <li><strong>HAZARD · SPLIT BRAIN, AND THE TIMEOUT KNOB</strong> If A still believes it leads while B leads too, both accept writes with no way to reconcile them. Fencing ("shoot the other node in the head") is the safety catch, but poorly designed it kills both. And the timeout itself is a trade-off with no right answer — which is why many operations teams keep failover manual even when the software could automate it.</li>
+</ol>
+</figure>
+
+<p>Node failures, unreliable networks, and the tension between consistency, durability, availability, and latency are not failover quirks — they are <em>the</em> fundamental problems of distributed systems, treated head-on in <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#detecting-faults" data-tip="Ch 8 · Detecting Faults — why timeouts are the only general tool and why they can't distinguish slow from dead · not yet written">Chapter&nbsp;8<sup>→8</sup></a> (timeouts, fencing tokens) and <a class="xref fwd" href="ch09-consistency-and-consensus.html#fault-tolerant-consensus" data-tip="Ch 9 · Fault-Tolerant Consensus — leader election as a consensus problem; epochs to defeat split brain · not yet written">Chapter&nbsp;9<sup>→9</sup></a> (leader election as consensus).</p>
+
+<h3 id="implementation-of-replication-logs"><a class="self" href="#implementation-of-replication-logs">Implementation of Replication Logs</a></h3>
+<span class="key-chip">implementation-of-replication-logs</span>
+
+<p>What exactly travels from leader to follower? Four answers are used in practice, and the differences matter for correctness, for upgrades, and for who else can read the stream.</p>
+
+<h4>Statement-based replication</h4>
+<p>The leader logs every write <em>statement</em> it executes — each <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> — and followers parse and run the same SQL as if a client had sent it. Compact, but it breaks in several ways: nondeterministic functions (<code>NOW()</code>, <code>RAND()</code>) produce different values on each replica; statements that depend on existing data or autoincrement columns must run in exactly the same order, which is hard with concurrent transactions; and side effects (triggers, stored procedures, UDFs) may differ per replica unless perfectly deterministic. Workarounds exist — the leader can substitute fixed values for nondeterministic calls when logging — but the edge cases are endless. MySQL used it before 5.1 and now switches to row-based replication when it detects nondeterminism; VoltDB keeps statement-based replication safe by <em>requiring</em> deterministic transactions.</p>
+
+<h4>Write-ahead log (WAL) shipping</h4>
+<p><a class="xref back" href="ch03-storage-and-retrieval.html#sstables-and-lsm-trees" data-tip="Ch 3 · SSTables and LSM-Trees — the append-only log segments that are the main storage of a log-structured engine">Chapter&nbsp;3<sup>←3</sup></a> showed that every storage engine already appends every write to a log: the segment files of an LSM engine, or the write-ahead log that a <a class="xref back" href="ch03-storage-and-retrieval.html#b-trees" data-tip="Ch 3 · B-Trees — update-in-place pages protected by a write-ahead log for crash recovery">B-tree<sup>←3</sup></a> writes before touching a page. Either way it's an append-only byte sequence describing all writes — so the leader can simply send that same log over the network, and the follower rebuilds byte-identical data structures. PostgreSQL and Oracle do this. The drawback: the WAL is <em>very</em> low level (which bytes changed in which disk block), so replication is welded to the storage engine and its version. If the on-disk format changes between releases, leader and follower can't run different versions — and that kills the zero-downtime upgrade trick (upgrade followers first, fail over to one, upgrade the old leader). With WAL shipping, upgrades often mean downtime.</p>
+
+<h4>Logical (row-based) log replication</h4>
+<p>Use a <em>different</em> format for replication than for storage — a <strong>logical log</strong> decoupled from engine internals. For a relational database it's a sequence of row-granularity records: an insert carries all column values; a delete carries enough to identify the row (primary key, or all old values if there's none); an update carries the identifier plus new values (at least of changed columns). A multi-row transaction produces several records followed by a commit record. MySQL's binlog in row mode works this way. Because it's decoupled, it stays backward compatible across versions and even across storage engines — and it's easy for <em>external</em> programs to parse: feeding a data warehouse, building custom indexes and caches. That is <strong>change data capture</strong>, which <a class="xref fwd" href="ch11-stream-processing.html#change-data-capture" data-tip="Ch 11 · Change Data Capture — observing all data changes written to a database and extracting them as a stream for other systems · not yet written">Chapter&nbsp;11<sup>→11</sup></a> builds a whole architecture on.</p>
+
+<h4>Trigger-based replication</h4>
+<p>Everything above is done by the database, invisible to application code. Sometimes you need more flexibility — replicate only a subset, replicate into a different kind of database, or apply custom conflict resolution — and replication moves up into the application. Tools like Oracle GoldenGate read the database log for you; otherwise use <strong>triggers</strong> and stored procedures: a trigger fires on a write and logs the change into a separate table, an external process reads that table and does whatever replication logic it likes. Databus for Oracle and Bucardo for Postgres work this way. Higher overhead and more bug-prone than built-in replication — but flexible.</p>
+
+<div class="tablewrap">
+<table>
+<tr><th>log format</th><th>what's shipped</th><th>strengths</th><th>weaknesses</th><th>examples</th></tr>
+<tr><td>statement</td><td>the SQL text</td><td>compact</td><td>nondeterminism, ordering, side effects</td><td>MySQL &lt; 5.1; VoltDB (deterministic txns)</td></tr>
+<tr><td>WAL shipping</td><td>physical block-level bytes</td><td>exact copy; reuses what the engine already writes</td><td>coupled to engine + version ⇒ upgrades need downtime</td><td>PostgreSQL, Oracle</td></tr>
+<tr><td>logical (row-based)</td><td>row inserts/updates/deletes + commit</td><td>version- and engine-independent; parseable externally (CDC)</td><td>a second format to maintain</td><td>MySQL binlog (row mode)</td></tr>
+<tr><td>trigger-based</td><td>whatever your code logs</td><td>subsets, cross-database, custom logic</td><td>overhead, bugs, limitations</td><td>Databus, Bucardo, GoldenGate</td></tr>
+</table>
+</div>
+
+<div class="feynman"><span class="tag">FEYNMAN · what to dictate down the phone</span>
+Three ways to keep a colleague's copy of a spreadsheet in sync over the phone. Read them your <em>keystrokes</em> ("type =RAND() in B2") — cheap, but their random number differs from yours (statement-based). Read them the <em>raw bytes of the file</em> — a perfect copy, but only if they have the exact same spreadsheet version (WAL shipping). Read them <em>what changed, cell by cell</em> ("B2 is now 0.37") — slightly more words, works across versions and even across spreadsheet programs, and anyone listening in can follow along too (logical log). The book's preference, and the reason CDC exists, is the third.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="problems-with-replication-lag">
+<span class="key-chip">problems-with-replication-lag</span>
+<h2><a class="self" href="#problems-with-replication-lag">Problems with Replication Lag</a></h2>
+
+<p>Fault tolerance is only one reason to replicate; the Part II intro also promised scalability and latency. Leader-based replication funnels every write through one node, but <em>reads</em> can go anywhere — and web workloads are mostly reads. So the tempting <strong>read-scaling architecture</strong>: many followers, reads spread across them, load lifted off the leader, users served from a nearby replica. Add capacity by adding followers. This only works with <em>asynchronous</em> replication: synchronous to all followers would mean any one node or network failure blocks every write, and with more nodes, something is always down.</p>
+
+<p>The price: a read from a lagging follower returns <strong>stale</strong> data. Run the same query on leader and follower at the same instant and you may get different answers. It's a temporary state — stop writing and the followers catch up — hence <strong>eventual consistency</strong> (a term coined by Terry et al., popularized by Werner Vogels, adopted as the battle cry of NoSQL; but note that async followers in a relational database are just as eventually consistent). "Eventually" is deliberately vague: there is no bound on lag. In normal operation it's a fraction of a second; near capacity or during network trouble it's seconds or minutes, and then the anomalies stop being theoretical. The book gives three, each with a matching guarantee:</p>
+
+<figure class="anim" id="anim-lag">
+<svg viewBox="0 0 680 320" role="img" aria-label="Three replication-lag anomalies. Read-your-writes: a user writes a comment to the leader then reads from a lagging follower and sees it missing. Monotonic reads: a user reads from a fresh follower and sees a comment, then from a stale one and it has vanished. Consistent prefix: an observer sees the reply before the question because two partitions replicate at different speeds.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- nodes -->
+    <rect x="270" y="20" width="140" height="40" rx="6" fill="none" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="300" y="45" fill="var(--write)" font-weight="700">leader</text>
+    <rect x="120" y="130" width="140" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="134" y="148">follower F1</text>
+    <rect x="420" y="130" width="140" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="434" y="148">follower F2</text>
+    <path d="M300 62 L 200 126" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5l-w)"/>
+    <path d="M380 62 L 480 126" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a5l-w)"/>
+    <g data-on="1-3"><text x="134" y="162" font-size="8" fill="var(--ok)">lag: tiny</text><text x="434" y="162" font-size="8" fill="var(--bad)">lag: large</text></g>
+    <!-- Act 1: read your writes -->
+    <g data-on="1-3"><text x="20" y="22" font-size="9" font-weight="700" opacity=".8">ACT 1 · read-after-write</text></g>
+    <g data-on="1" data-hot="1">
+      <rect x="20" y="230" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+      <text x="30" y="254">user 1234</text>
+      <path d="M60 228 C 30 150, 120 30, 268 34" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a5l-w)"/>
+      <text x="60" y="96" font-size="9" fill="var(--write)">INSERT comment</text>
+      <path d="M414 40 H 470" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5l-w)"/><text x="474" y="44" font-size="9" fill="var(--write)">ok</text>
+    </g>
+    <g data-on="2" data-hot="2">
+      <rect x="20" y="230" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+      <text x="30" y="254">user 1234</text>
+      <path d="M140 244 C 300 244, 420 210, 470 174" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a5l-r)"/>
+      <text x="230" y="236" font-size="9" fill="var(--read)">reload page: SELECT comments</text>
+      <rect x="420" y="180" width="200" height="36" rx="5" fill="var(--read-soft)" stroke="var(--read)"/>
+      <text x="428" y="196" font-size="9" fill="var(--read)" font-weight="700">F2 hasn't got it yet</text>
+      <text x="428" y="209" font-size="8">"my comment is GONE?!"</text>
+    </g>
+    <g data-on="3" data-hot="3">
+      <rect x="20" y="180" width="640" height="120" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="30" y="200" font-size="9" font-weight="700">guarantee: read-after-write (read-your-writes) consistency</text>
+      <text x="30" y="216" font-size="8">you always see your OWN submissions; no promise about other users'. Ways to get it:</text>
+      <text x="30" y="234" font-size="8">• read from the leader anything the user may have modified (e.g. always own profile from leader)</text>
+      <text x="30" y="248" font-size="8">• for 1 minute after a user's last update, read everything from the leader; skip followers &gt;1 min behind</text>
+      <text x="30" y="262" font-size="8">• client remembers timestamp/LSN of its last write; only replicas at least that fresh may serve it</text>
+      <text x="30" y="276" font-size="8">• multi-datacenter: route leader-bound reads to the leader's DC · cross-device: centralize the metadata</text>
+      <text x="30" y="292" font-size="8" opacity=".7">(the same user on laptop + phone may hit different DCs via different network routes — harder)</text>
+    </g>
+    <!-- Act 2: monotonic -->
+    <g data-on="4-5"><text x="20" y="22" font-size="9" font-weight="700" opacity=".8">ACT 2 · monotonic reads</text></g>
+    <g data-on="4" data-hot="4">
+      <rect x="280" y="230" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+      <text x="290" y="254">user 2345</text>
+      <path d="M300 228 C 260 210, 220 190, 200 174" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a5l-r)"/>
+      <text x="150" y="205" font-size="9" fill="var(--read)">① query → F1</text>
+      <text x="150" y="218" font-size="8" fill="var(--ok)">sees 1234's comment</text>
+      <path d="M380 228 C 420 210, 460 190, 480 174" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a5l-r)"/>
+      <text x="450" y="205" font-size="9" fill="var(--read)">② refresh → F2</text>
+      <text x="450" y="218" font-size="8" fill="var(--bad)">comment vanished</text>
+      <text x="200" y="296" font-size="9">random load balancing sent the two reads to different followers: <tspan fill="var(--bad)" font-weight="700">time went backward</tspan></text>
+    </g>
+    <g data-on="5" data-hot="5">
+      <rect x="20" y="180" width="640" height="120" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="30" y="200" font-size="9" font-weight="700">guarantee: monotonic reads</text>
+      <text x="30" y="216" font-size="8">weaker than strong consistency, stronger than eventual: you may see OLD data, but never older data</text>
+      <text x="30" y="230" font-size="8">after you've already seen newer. A user's sequence of reads doesn't rewind.</text>
+      <text x="30" y="252" font-size="8">how: pin each user to one replica — e.g. choose the replica by hash(user id) instead of at random.</text>
+      <text x="30" y="266" font-size="8">different users may use different replicas. If the pinned replica fails, reroute (and accept a possible blip).</text>
+    </g>
+    <!-- Act 3: consistent prefix -->
+    <g data-on="6-7"><text x="20" y="22" font-size="9" font-weight="700" opacity=".8">ACT 3 · consistent prefix reads</text></g>
+    <g data-on="6" data-hot="6">
+      <rect x="120" y="180" width="140" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="128" y="199" font-size="8">partition P (Poons's lines)</text>
+      <rect x="420" y="180" width="140" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="428" y="199" font-size="8">partition C (Cake's lines)</text>
+      <text x="134" y="162" font-size="8" fill="var(--bad)">lag: large</text><text x="434" y="162" font-size="8" fill="var(--ok)">lag: tiny</text>
+      <rect x="280" y="230" width="120" height="40" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/>
+      <text x="292" y="254">observer</text>
+      <path d="M300 228 C 260 220, 220 216, 200 214" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a5l-r)"/>
+      <path d="M380 228 C 420 220, 460 216, 480 214" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a5l-r)"/>
+      <text x="30" y="290" font-size="9">hears: <tspan fill="var(--read)">Mrs Cake: "About ten seconds usually, Mr Poons."</tspan></text>
+      <text x="30" y="304" font-size="9">then:  <tspan fill="var(--read)">Mr Poons: "How far into the future can you see, Mrs Cake?"</tspan> — the answer arrived before the question</text>
+    </g>
+    <g data-on="7" data-hot="7">
+      <rect x="20" y="180" width="640" height="120" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="30" y="200" font-size="9" font-weight="700">guarantee: consistent prefix reads</text>
+      <text x="30" y="216" font-size="8">if writes happen in a certain order, anyone reading them sees them in that order. A causality guarantee.</text>
+      <text x="30" y="236" font-size="8">not a problem when one leader applies all writes in one order (a single-leader, unpartitioned DB).</text>
+      <text x="30" y="250" font-size="8">it bites in PARTITIONED databases (Ch 6): partitions run independently, so there is no global order of writes —</text>
+      <text x="30" y="264" font-size="8">a reader sees some partitions older and some newer.</text>
+      <text x="30" y="284" font-size="8">how: put causally related writes in the same partition (not always efficient), or track causal dependencies</text>
+      <text x="30" y="298" font-size="8">explicitly — the happens-before machinery at the end of this chapter, and Chapter 9's ordering guarantees.</text>
+    </g>
+    <defs>
+      <marker id="a5l-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a5l-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>ACT 1 · A USER WRITES</strong> User 1234 posts a comment. Writes go to the leader, which acknowledges. The leader streams it to follower F1 quickly; F2 is lagging.</li>
+  <li><strong>…THEN READS FROM A STALE FOLLOWER</strong> The user reloads the page. Reads are load-balanced to F2, which hasn't received the comment. To the user their submission has simply vanished — the book's Figure 5-3.</li>
+  <li><strong>GUARANTEE: READ-AFTER-WRITE</strong> Also called <em>read-your-writes</em>: a user always sees their own updates (no promise about others'). Implementations: read possibly-self-modified data from the leader; a one-minute leader window after any update; remember the last write's timestamp or log position and only use replicas that have caught up to it. Multiple datacenters and multiple devices per user make each of these harder.</li>
+  <li><strong>ACT 2 · TIME GOES BACKWARD</strong> User 2345 runs the same query twice — first to a fresh follower (sees 1234's comment), then to a laggy one (it's gone). Seeing something appear and then disappear is worse than never seeing it — the book's Figure 5-4.</li>
+  <li><strong>GUARANTEE: MONOTONIC READS</strong> Never read older data after having read newer. Achieved by routing each user's reads to the same replica (e.g. by hash of user ID) rather than at random.</li>
+  <li><strong>ACT 3 · THE ANSWER BEFORE THE QUESTION</strong> Mr Poons asks Mrs Cake a question; she answers. An observer who reads Poons's words through a slow replica and Cake's through a fast one hears the answer first. Causality violated — the book's Figure 5-5.</li>
+  <li><strong>GUARANTEE: CONSISTENT PREFIX READS</strong> Anyone reading a sequence of writes sees them in the order they happened. Free with one leader and one partition; a real problem once data is partitioned, because independent partitions have no global write order.</li>
+</ol>
+</figure>
+
+<h3 id="reading-your-own-writes"><a class="self" href="#reading-your-own-writes">Reading Your Own Writes</a></h3>
+<span class="key-chip">reading-your-own-writes</span>
+
+<p>The pattern behind Act 1: users submit data (a record, a comment) and then view it — writes must go to the leader, but the view is a read that could come from a follower, which is exactly right for data read often and written rarely. With asynchronous replication the user may look before the follower has caught up and conclude their data was lost. <strong>Read-after-write consistency</strong> (read-your-writes) promises that a user who reloads always sees updates <em>they themselves</em> submitted — nothing about other users' updates. The techniques, from the stepper: read anything the user may have modified from the leader (needs a rule that doesn't require querying — "your own profile is only editable by you, so read it from the leader; everyone else's from a follower"); if most data is user-editable that defeats read scaling, so instead use time — reads go to the leader for a minute after the user's last update, and followers more than a minute behind are excluded; or the client remembers the timestamp of its last write (logical, like a log sequence number, or wall-clock — in which case clock synchronization becomes critical, see <a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#unreliable-clocks" data-tip="Ch 8 · Unreliable Clocks — time-of-day clocks drift and jump; using them for ordering is dangerous · not yet written">Chapter&nbsp;8<sup>→8</sup></a>) and the serving replica must reflect updates at least to that point, else another replica serves the read or it waits. Multi-datacenter deployments add routing complexity, since leader-bound requests must reach the leader's datacenter. <strong>Cross-device</strong> read-after-write (type on your laptop, see it on your phone) is harder still: the last-update timestamp lives on one device and must be centralized, and different devices may take entirely different network routes to different datacenters.</p>
+
+<h3 id="monotonic-reads"><a class="self" href="#monotonic-reads">Monotonic Reads</a></h3>
+<span class="key-chip">monotonic-reads</span>
+
+<p>Act 2: reads from <em>different</em> replicas can make a user see time move backward — a refresh routed to a more-lagged follower makes a comment disappear. <strong>Monotonic reads</strong> guarantees this doesn't happen: weaker than strong consistency, stronger than eventual consistency. You may see stale data, but a user making several reads in sequence never reads older data after newer. Implementation: make each user read from the same replica, chosen by hash of user ID rather than randomly (different users can use different replicas); if that replica fails, reroute.</p>
+
+<h3 id="consistent-prefix-reads"><a class="self" href="#consistent-prefix-reads">Consistent Prefix Reads</a></h3>
+<span class="key-chip">consistent-prefix-reads</span>
+
+<p>Act 3 is about <em>causality</em>: Mrs Cake's answer depends on Mr Poons's question, and an observer must never see the answer first. <strong>Consistent prefix reads</strong> guarantees that if writes happen in some order, readers see them in that order. It's specifically a partitioned-database problem (<a class="xref fwd" href="ch06-partitioning.html#partitioning-of-key-value-data" data-tip="Ch 6 · Partitioning of Key-Value Data — how keys are assigned to partitions, which then operate independently · not yet written">Chapter&nbsp;6<sup>→6</sup></a>): with one leader applying every write in one order, reads trivially see a consistent prefix; but independent partitions have no global ordering, so a reader may see some partitions in an older state and others newer. Fixes: write causally related data to the same partition (not always efficient), or track causal dependencies explicitly — the "happens-before" machinery in <a href="#detecting-concurrent-writes">Detecting Concurrent Writes</a> and the <a class="xref fwd" href="ch09-consistency-and-consensus.html#ordering-and-causality" data-tip="Ch 9 · Ordering and Causality — causal order as the fundamental ordering; Lamport timestamps, total order broadcast · not yet written">ordering guarantees<sup>→9</sup></a> of Chapter 9.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · three promises about a bulletin board</span>
+Think of followers as bulletin boards in different hallways, updated by a runner. Eventual consistency says only "the boards will match — at some point." The three guarantees are three specific, cheap promises you can make on top. <strong>Read-your-writes</strong>: after you pin up a notice, you'll never walk to a board and find yours missing (we'll send you to a board the runner has already visited). <strong>Monotonic reads</strong>: you'll never see a notice, walk to another board, and find it not there yet (we'll always send you to the same board). <strong>Consistent prefix</strong>: you'll never see the reply pinned up before the notice it replies to (related notices travel together). None of these is "everyone sees everything instantly" — they're the minimum a user needs to not feel the system is lying to them.</div>
+
+<h3 id="solutions-for-replication-lag"><a class="self" href="#solutions-for-replication-lag">Solutions for Replication Lag</a></h3>
+<span class="key-chip">solutions-for-replication-lag</span>
+
+<p>Designing on an eventually consistent system, ask: <em>what happens to the application if lag grows to minutes or hours?</em> If "nothing bad" — great. If users get a bad experience, design for a stronger guarantee such as read-after-write. Pretending replication is synchronous when it isn't is a recipe for trouble. The application <em>can</em> provide stronger guarantees than its database (leader reads for certain queries), but handling this in application code is complex and easy to get wrong. It would be better if the database just "did the right thing" — and that is what <strong>transactions</strong> are for: a way for the database to offer stronger guarantees so the application can be simpler. Single-node transactions have existed for decades; many distributed databases abandoned them, claiming they're too costly for performance and availability and that eventual consistency is inevitable at scale. There's some truth there, but it's oversimplified — the book builds a more nuanced view in <a class="xref fwd" href="ch07-transactions.html#weak-isolation-levels" data-tip="Ch 7 · Weak Isolation Levels — what guarantees transactions actually give, and the anomalies each level permits · not yet written">Chapter&nbsp;7<sup>→7</sup></a> and Chapter&nbsp;9, and looks at alternatives in Part III.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · consistency models, explained through baseball</span>
+The 2nd edition reworks this exposition around Doug Terry's "Replicated Data Consistency Explained Through Baseball" and the original <em>session guarantees</em> paper (already cited here as [23] and [24]): read-your-writes, monotonic reads, and consistent prefix are presented as a family of per-session guarantees between eventual and strong consistency, each illustrated by which role at a ballgame (scorekeeper, umpire, radio reporter, sportswriter) needs which one. Same three anomalies, a sharper frame. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="multi-leader-replication">
+<span class="key-chip">multi-leader-replication</span>
+<h2><a class="self" href="#multi-leader-replication">Multi-Leader Replication</a></h2>
+
+<p>Single-leader replication has one big downside: <em>one</em> leader, and all writes go through it. If you can't reach it — a network interruption between you and it — you can't write. (In a partitioned database each partition has a leader, possibly on different nodes, but still exactly one per partition.) The natural extension: let more than one node accept writes. Replication proceeds as before — each node that processes a write forwards it to all the others — and this is a <strong>multi-leader</strong> configuration (master–master, active/active). Each leader is simultaneously a follower of the other leaders.</p>
+
+<h3 id="use-cases-for-multi-leader-replication"><a class="self" href="#use-cases-for-multi-leader-replication">Use Cases for Multi-Leader Replication</a></h3>
+<span class="key-chip">use-cases-for-multi-leader-replication</span>
+
+<p>Within a single datacenter it rarely makes sense — the benefits seldom outweigh the complexity. Three situations justify it.</p>
+
+<h4>Multi-datacenter operation</h4>
+<p>With replicas in several datacenters (to survive a datacenter failure, or to be close to users), single-leader means the leader lives in one datacenter and <em>every write crosses the internet to it</em>. Multi-leader puts a leader in each datacenter: within a datacenter, ordinary leader–follower replication; between datacenters, each leader replicates to the other leaders.</p>
+
+<figure>
+<svg viewBox="0 0 680 230" role="img" aria-label="Multi-leader replication across two datacenters: each datacenter has its own leader with local followers; the two leaders replicate to each other asynchronously with conflict resolution in between; users write to their local datacenter.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="30" width="270" height="170" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="6 4"/>
+    <text x="30" y="48" font-weight="700">datacenter · west</text>
+    <rect x="40" y="70" width="90" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="58" y="92" fill="var(--write)" font-weight="700">leader</text>
+    <rect x="40" y="140" width="90" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="52" y="160" font-size="9">follower</text>
+    <rect x="150" y="140" width="90" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="162" y="160" font-size="9">follower</text>
+    <path d="M85 104 V 136 M120 104 L 190 136" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5m-w)"/>
+    <rect x="390" y="30" width="270" height="170" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="6 4"/>
+    <text x="400" y="48" font-weight="700">datacenter · east</text>
+    <rect x="550" y="70" width="90" height="34" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="568" y="92" fill="var(--write)" font-weight="700">leader</text>
+    <rect x="440" y="140" width="90" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="452" y="160" font-size="9">follower</text>
+    <rect x="550" y="140" width="90" height="30" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6"/><text x="562" y="160" font-size="9">follower</text>
+    <path d="M595 104 V 136 M560 104 L 490 136" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5m-w)"/>
+    <!-- cross-DC -->
+    <path d="M130 80 C 250 60, 430 60, 546 80" stroke="var(--write)" stroke-width="1.8" fill="none" stroke-dasharray="6 3" marker-end="url(#a5m-w)"/>
+    <path d="M546 96 C 430 116, 250 116, 134 96" stroke="var(--write)" stroke-width="1.8" fill="none" stroke-dasharray="6 3" marker-end="url(#a5m-w)"/>
+    <rect x="280" y="76" width="120" height="24" rx="4" fill="var(--panel)" stroke="var(--bad)"/><text x="288" y="92" font-size="8" fill="var(--bad)" font-weight="700">conflict resolution</text>
+    <text x="250" y="56" font-size="8" opacity=".8">async, over the public internet</text>
+    <!-- users -->
+    <text x="26" y="222" font-size="9"><tspan fill="var(--write)">west users write locally</tspan> — no ocean round-trip · each DC keeps working if the link (or the other DC) is down</text>
+    <defs><marker id="a5m-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>The book's Figure 5-6. Comparing single- vs multi-leader across datacenters: <strong>performance</strong> — single-leader adds an inter-datacenter round trip to every write, defeating the point of multiple datacenters; multi-leader handles writes locally and replicates asynchronously, hiding the WAN delay. <strong>Datacenter outages</strong> — single-leader needs a failover to promote a follower elsewhere; multi-leader datacenters keep operating independently and catch up later. <strong>Network problems</strong> — inter-datacenter links are the least reliable part, and single-leader writes depend on them synchronously; multi-leader's async replication shrugs off temporary interruptions.</figcaption>
+</figure>
+
+<p>Some databases support this natively; often it's bolted on by external tools — Tungsten Replicator for MySQL, BDR for PostgreSQL, GoldenGate for Oracle. The big downside is written on the figure: the same data can be modified concurrently in two datacenters, and those <strong>write conflicts</strong> must be resolved. And since multi-leader is often a retrofitted feature, it has subtle configuration pitfalls and surprising interactions with autoincrementing keys, triggers, and integrity constraints — enough that it's widely regarded as dangerous territory to avoid if you can.</p>
+
+<h4>Clients with offline operation</h4>
+<p>The calendar on your phone, laptop, and tablet: you must be able to see meetings (reads) and add them (writes) with or without connectivity, and offline changes must sync when you're back online. Every device holds a local database that acts as a leader, with asynchronous multi-leader replication (the "sync") between all replicas of your calendar. Replication lag may be hours or <em>days</em>. Architecturally this is multi-datacenter replication taken to the extreme — each device is a datacenter and the network between them is dreadful — and the rich history of broken calendar sync shows how hard it is. CouchDB was designed for exactly this mode.</p>
+
+<h4>Collaborative editing</h4>
+<p>Etherpad and Google Docs let several people edit one document at once. It doesn't look like database replication, but it shares everything with the offline case: a user's edit is applied instantly to their local replica (the document state in their browser) and asynchronously replicated to the server and other editors. Guaranteeing no conflicts means locking the document before editing — which is just single-leader replication with transactions on the leader. For fast collaboration you make the unit of change tiny (a keystroke) and skip locks, which allows simultaneous editing and brings every multi-leader challenge, conflict resolution included.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · sync engines, local-first software, and CRDTs</span>
+This is where the 2nd edition grows most. The offline-clients and collaborative-editing use cases become a major thread on <strong>sync engines</strong>, <strong>offline-first / local-first software</strong>, and collaborative editing: Figma's multiplayer architecture, Linear's sync engine, Google Docs, and — reflecting Kleppmann's own research — substantial treatment of <strong>CRDTs</strong> (the 1st edition's one paragraph) alongside operational transformation and newer algorithms such as eg-walker (Automerge-adjacent local-first tooling). The design stance: every client holds a full replica it can write to instantly, and the "replication" between devices is the product's core, not an afterthought. <em>[corroborated by multiple public reviews; specifics inferred from the 2nd-edition references repo]</em></div>
+
+<h3 id="handling-write-conflicts"><a class="self" href="#handling-write-conflicts">Handling Write Conflicts</a></h3>
+<span class="key-chip">handling-write-conflicts</span>
+
+<p>The biggest problem with multi-leader replication. The book's Figure 5-7: two users edit a wiki page's title concurrently — user 1 changes A→B at leader 1, user 2 changes A→C at leader 2. Each write succeeds locally; the conflict surfaces only when the changes are replicated. It cannot happen in a single-leader database.</p>
+
+<figure class="anim" id="anim-conflict">
+<svg viewBox="0 0 680 300" role="img" aria-label="A write conflict in multi-leader replication: two users concurrently change the same title at two leaders; each write succeeds locally; when replicated, each leader receives the other's write and the replicas would diverge unless a convergent resolution rule is applied — last write wins, replica priority, merge, or preserve both versions for the application.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="42">user 1</text>
+    <text x="20" y="112" fill="var(--write)" font-weight="700">leader 1</text>
+    <text x="20" y="192" fill="var(--write)" font-weight="700">leader 2</text>
+    <text x="20" y="262">user 2</text>
+    <path d="M90 38 H 660 M90 108 H 660 M90 188 H 660 M90 258 H 660" stroke="currentColor" stroke-opacity=".35"/>
+    <!-- initial state -->
+    <g data-on="1-6">
+      <rect x="96" y="96" width="60" height="24" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="106" y="113" font-size="9">title=A</text>
+      <rect x="96" y="176" width="60" height="24" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/><text x="106" y="193" font-size="9">title=A</text>
+    </g>
+    <!-- step 1: concurrent writes -->
+    <g data-on="1-6" data-hot="1">
+      <path d="M180 42 L 210 102" stroke="var(--write)" stroke-width="2" marker-end="url(#a5c-w)"/>
+      <text x="150" y="70" font-size="9" fill="var(--write)">set title=B</text>
+      <path d="M180 254 L 210 194" stroke="var(--write)" stroke-width="2" marker-end="url(#a5c-w)"/>
+      <text x="150" y="232" font-size="9" fill="var(--write)">set title=C</text>
+    </g>
+    <!-- step 2: local success -->
+    <g data-on="2-6" data-hot="2">
+      <rect x="214" y="96" width="60" height="24" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="224" y="113" font-size="9" fill="var(--write)">title=B</text>
+      <rect x="214" y="176" width="60" height="24" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="224" y="193" font-size="9" fill="var(--write)">title=C</text>
+      <path d="M240 96 L 262 44" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5c-w)"/><text x="268" y="60" font-size="9" fill="var(--write)">ok</text>
+      <path d="M240 200 L 262 252" stroke="var(--write)" stroke-width="1.4" marker-end="url(#a5c-w)"/><text x="268" y="240" font-size="9" fill="var(--write)">ok</text>
+    </g>
+    <!-- step 3: replicate & detect -->
+    <g data-on="3-6" data-hot="3">
+      <path d="M276 116 C 330 150, 360 160, 390 180" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="5 3" fill="none" marker-end="url(#a5c-w)"/>
+      <path d="M276 180 C 330 146, 360 136, 390 116" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="5 3" fill="none" marker-end="url(#a5c-w)"/>
+      <text x="300" y="152" font-size="8" fill="var(--write)">async replicate</text>
+      <rect x="396" y="96" width="120" height="24" rx="3" fill="var(--panel2)" stroke="var(--bad)"/><text x="402" y="113" font-size="8" fill="var(--bad)">B then C?  conflict!</text>
+      <rect x="396" y="176" width="120" height="24" rx="3" fill="var(--panel2)" stroke="var(--bad)"/><text x="402" y="193" font-size="8" fill="var(--bad)">C then B?  conflict!</text>
+    </g>
+    <!-- step 4: naive divergence -->
+    <g data-on="4" data-hot="4">
+      <rect x="530" y="96" width="120" height="24" rx="3" fill="none" stroke="var(--bad)" stroke-width="1.5"/><text x="538" y="113" font-size="9" fill="var(--bad)">title=C</text>
+      <rect x="530" y="176" width="120" height="24" rx="3" fill="none" stroke="var(--bad)" stroke-width="1.5"/><text x="538" y="193" font-size="9" fill="var(--bad)">title=B</text>
+      <text x="380" y="286" font-size="9" fill="var(--bad)" font-weight="700">"apply in arrival order" ⇒ replicas disagree FOREVER</text>
+    </g>
+    <!-- step 5: convergent resolution -->
+    <g data-on="5" data-hot="5">
+      <rect x="530" y="96" width="120" height="24" rx="3" fill="var(--panel2)" stroke="var(--ok)" stroke-width="1.5"/><text x="538" y="113" font-size="9" fill="var(--ok)">title=C</text>
+      <rect x="530" y="176" width="120" height="24" rx="3" fill="var(--panel2)" stroke="var(--ok)" stroke-width="1.5"/><text x="538" y="193" font-size="9" fill="var(--ok)">title=C</text>
+      <rect x="300" y="124" width="360" height="50" rx="4" fill="var(--panel)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="338" y="140" font-size="8" font-weight="700">convergent rules (same answer everywhere):</text>
+      <text x="338" y="152" font-size="8">• highest write ID / timestamp wins (LWW) — loses B</text>
+      <text x="338" y="163" font-size="8">• highest replica ID wins — also loses data</text>
+      <text x="338" y="173" font-size="8">• merge: "B/C" · or keep both, let the app decide</text>
+    </g>
+    <!-- step 6: custom logic on write / on read -->
+    <g data-on="6" data-hot="6">
+      <rect x="530" y="96" width="120" height="24" rx="3" fill="var(--panel2)" stroke="var(--ok)" stroke-width="1.5"/><text x="538" y="113" font-size="8">{B, C} siblings</text>
+      <rect x="530" y="176" width="120" height="24" rx="3" fill="var(--panel2)" stroke="var(--ok)" stroke-width="1.5"/><text x="538" y="193" font-size="8">{B, C} siblings</text>
+      <rect x="300" y="124" width="360" height="50" rx="4" fill="var(--panel)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="338" y="140" font-size="8" font-weight="700">custom resolution, in application code:</text>
+      <text x="338" y="152" font-size="8">ON WRITE — handler runs when the log shows a</text>
+      <text x="338" y="163" font-size="8">conflict; fast, background, can't ask a user (Bucardo, Perl)</text>
+      <text x="338" y="172" font-size="8">ON READ — keep every version; the next read returns them (CouchDB)</text>
+      <path d="M530 108 C 480 60, 400 48, 300 40" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a5c-r)"/>
+      <text x="300" y="62" font-size="8" fill="var(--read)">read returns both → user picks → write back</text>
+    </g>
+    <defs>
+      <marker id="a5c-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a5c-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>TWO WRITES, TWO LEADERS</strong> The wiki page's title is A everywhere. User 1 sets it to B at leader 1; at the same time user 2 sets it to C at leader 2. Neither leader knows about the other's write.</li>
+  <li><strong>BOTH SUCCEED</strong> Each leader applies its write locally and tells its user "ok." In a single-leader system the second writer would have blocked or been aborted and asked to retry; here both are done — and it may be too late to ask a user to resolve anything.</li>
+  <li><strong>THE CONFLICT SURFACES LATER</strong> Asynchronous replication delivers each write to the other leader. Leader 1 sees B then C; leader 2 sees C then B. Neither order is "more correct." Detection is asynchronous by nature — you <em>could</em> make it synchronous by waiting for all replicas before confirming, but then you've given up the whole point of multi-leader and might as well use one leader.</li>
+  <li><strong>THE NAIVE OUTCOME</strong> If each replica just applies writes in arrival order, leader 1 ends at C and leader 2 at B — permanently inconsistent. Unacceptable: every replication scheme must make the data eventually identical everywhere.</li>
+  <li><strong>CONVERGE</strong> Resolution must be <em>convergent</em> — all replicas reach the same final value. Options: give each write a unique ID (timestamp, random number, UUID, hash) and let the highest win — <strong>last write wins</strong> when the ID is a timestamp; popular and dangerously lossy. Let a higher-numbered replica always win — also lossy. Merge the values (alphabetize and concatenate: "B/C"). Or record the conflict explicitly, preserving everything, for later resolution.</li>
+  <li><strong>CUSTOM LOGIC, ON WRITE OR ON READ</strong> Since the right resolution is application-specific, most tools let you write it. <em>On write</em>: a handler is called as soon as the conflict appears in the replicated log — background, fast, no user prompt (Bucardo takes a Perl snippet). <em>On read</em>: all conflicting versions are stored and returned on the next read; the app prompts the user or resolves automatically and writes back (CouchDB). Note resolution is per row or document, not per transaction — a multi-write transaction's writes are resolved separately.</li>
+</ol>
+</figure>
+
+<h4>Conflict avoidance</h4>
+<p>The simplest strategy — and, since many implementations resolve conflicts badly, the most recommended: make sure all writes to a given record go through the <em>same</em> leader. Route each user to a "home" datacenter (by geography, say) and do all their reads and writes through its leader; from any one user's viewpoint the system is single-leader. It breaks down when you must change a record's home — a datacenter fails, or the user moves — and then concurrent writes on different leaders are back on the table.</p>
+
+<h4>Automatic conflict resolution</h4>
+<p>Hand-written rules get complicated and buggy fast. Amazon's shopping cart is the canonical cautionary tale: for a while its handler preserved items <em>added</em> to a cart but not items <em>removed</em>, so customers saw deleted items reappear. Research toward doing this automatically: <strong>conflict-free replicated datatypes (CRDTs)</strong> — sets, maps, ordered lists, counters that many users can edit concurrently and that resolve conflicts sensibly on their own (Riak 2.0 ships some); <strong>mergeable persistent data structures</strong> — Git-like explicit history with three-way merges (CRDTs use two-way); and <strong>operational transformation</strong> — the algorithm behind Etherpad and Google Docs, designed for concurrent editing of an ordered list such as the characters of a document. Young in databases in 2017, the book predicted wider adoption — see the 2nd-edition aside above.</p>
+
+<h4>What is a conflict?</h4>
+<p>Two writes to the same field, different values — obviously a conflict. Others are subtler. A meeting-room booking system must never let one room be booked by two groups at the same time; two bookings for the same room and slot created on two different leaders conflict <em>even though each passed an availability check</em> — the check ran against a replica that hadn't seen the other booking. No ready-made answer; <a class="xref fwd" href="ch07-transactions.html#write-skew-and-phantoms" data-tip="Ch 7 · Write Skew and Phantoms — two transactions read the same objects and update different ones, breaking an invariant · not yet written">Chapter&nbsp;7<sup>→7</sup></a> has more conflict examples (this one is write skew in disguise) and <a class="xref fwd" href="ch12-future-of-data-systems.html#enforcing-constraints" data-tip="Ch 12 · Enforcing Constraints — uniqueness and other constraints via a totally ordered log, without distributed transactions · not yet written">Chapter&nbsp;12<sup>→12</sup></a> discusses scalable detection and resolution.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · why "last write wins" is a lie about time</span>
+Two people in different cities cross out a word in their copies of a shared document at the "same time." Which edit is later? You could compare their wristwatches — but wristwatches disagree, and anyway neither person <em>knew</em> about the other's edit, so there was no "later"; the edits were <em>concurrent</em>. LWW answers a question that has no answer by inventing one from clock readings, and the losing edit silently ceases to exist even though its author was told "saved." That's fine for a cache. It's not fine for a shopping cart, a booking, or a medical record. The rest of the chapter builds the honest alternative: detect concurrency and keep both.</div>
+
+<h3 id="multi-leader-replication-topologies"><a class="self" href="#multi-leader-replication-topologies">Multi-Leader Replication Topologies</a></h3>
+<span class="key-chip">multi-leader-replication-topologies</span>
+
+<p>A <strong>replication topology</strong> is the set of communication paths along which writes propagate. Two leaders have one plausible topology; with more, choices appear.</p>
+
+<figure>
+<svg viewBox="0 0 680 210" role="img" aria-label="Three multi-leader topologies: circular (each node forwards to one other in a ring), star (a root node forwards to all others), and all-to-all (every leader sends to every other leader).">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="60" y="20" font-weight="700">(a) circular</text>
+    <circle cx="110" cy="70" r="16" fill="var(--write-soft)" stroke="var(--write)"/><text x="105" y="74" font-size="9">1</text>
+    <circle cx="170" cy="120" r="16" fill="var(--write-soft)" stroke="var(--write)"/><text x="165" y="124" font-size="9">2</text>
+    <circle cx="110" cy="170" r="16" fill="var(--write-soft)" stroke="var(--write)"/><text x="105" y="174" font-size="9">3</text>
+    <circle cx="50" cy="120" r="16" fill="var(--write-soft)" stroke="var(--write)"/><text x="45" y="124" font-size="9">4</text>
+    <path d="M122 82 L 158 108" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a5t-w)"/>
+    <path d="M158 132 L 122 158" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a5t-w)"/>
+    <path d="M98 158 L 62 132" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a5t-w)"/>
+    <path d="M62 108 L 98 82" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a5t-w)"/>
+    <text x="30" y="196" font-size="8" opacity=".75">MySQL default</text><text x="30" y="208" font-size="8" opacity=".75">one dead node breaks the ring</text>
+
+    <text x="290" y="20" font-weight="700">(b) star</text>
+    <circle cx="340" cy="120" r="18" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="335" y="124" font-size="9">1</text>
+    <circle cx="280" cy="70" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="276" y="74" font-size="9">2</text>
+    <circle cx="400" cy="70" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="396" y="74" font-size="9">3</text>
+    <circle cx="280" cy="170" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="276" y="174" font-size="9">4</text>
+    <circle cx="400" cy="170" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="396" y="174" font-size="9">5</text>
+    <path d="M326 108 L 292 80 M354 108 L 388 80 M326 132 L 292 160 M354 132 L 388 160" stroke="var(--write)" stroke-width="1.6"/>
+    <path d="M292 80 L 326 108 M388 80 L 354 108 M292 160 L 326 132 M388 160 L 354 132" stroke="var(--write)" stroke-width="1.6"/>
+    <text x="250" y="196" font-size="8" opacity=".75">root forwards to all · generalizes to a tree</text><text x="250" y="208" font-size="8" opacity=".75">root dies ⇒ everyone goes silent</text>
+
+    <text x="510" y="20" font-weight="700">(c) all-to-all</text>
+    <circle cx="560" cy="70" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="556" y="74" font-size="9">1</text>
+    <circle cx="640" cy="70" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="636" y="74" font-size="9">2</text>
+    <circle cx="560" cy="170" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="556" y="174" font-size="9">3</text>
+    <circle cx="640" cy="170" r="14" fill="var(--write-soft)" stroke="var(--write)"/><text x="636" y="174" font-size="9">4</text>
+    <path d="M574 70 H 626 M560 84 V 156 M640 84 V 156 M574 170 H 626 M570 80 L 630 160 M630 80 L 570 160" stroke="var(--write)" stroke-width="1.4"/>
+    <text x="500" y="196" font-size="8" opacity=".75">many paths ⇒ fault tolerant</text><text x="500" y="208" font-size="8" opacity=".75">but messages can overtake each other</text>
+    <defs><marker id="a5t-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>The book's Figure 5-8. <strong>All-to-all</strong> is the most general. <strong>Circular</strong> (MySQL's default) has each node receive from one neighbor and forward — plus its own writes — to the next. <strong>Star</strong> (not the analytics <a class="xref back" href="ch03-storage-and-retrieval.html#stars-and-snowflakes-schemas-for-analytics" data-tip="Ch 3 · Stars and Snowflakes — the data-warehouse schema shape; unrelated to network topology">star schema<sup>←3</sup></a>) has one root forwarding to everyone, and generalizes to a tree.</figcaption>
+</figure>
+
+<p>In circular and star topologies a write passes through several nodes, so nodes forward changes they receive from others. To stop infinite loops every node gets a unique ID and each write in the log is tagged with the IDs of every node it has traversed; a node that receives a change carrying its own ID drops it. The weakness: one failed node interrupts the flow between others until fixed, and rerouting is usually manual. All-to-all's dense connectivity avoids the single point of failure — but has its own trouble: some links are faster than others, so messages can <strong>overtake</strong> each other.</p>
+
+<figure>
+<svg viewBox="0 0 680 202" role="img" aria-label="Writes arriving out of order in all-to-all multi-leader replication: client A inserts a row at leader 1, client B updates that row at leader 3; leader 2 receives the update before the insert it depends on.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="16" y="44">leader 1</text><text x="16" y="104">leader 2</text><text x="16" y="164">leader 3</text>
+    <path d="M90 40 H 660 M90 100 H 660 M90 160 H 660" stroke="currentColor" stroke-opacity=".35"/>
+    <rect x="120" y="28" width="90" height="24" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="126" y="45" font-size="8" fill="var(--write)">A: INSERT x</text>
+    <path d="M210 44 C 300 60, 360 80, 500 96" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a5v-w)"/>
+    <text x="330" y="66" font-size="8" fill="var(--write)">slow link…</text>
+    <path d="M210 46 C 260 90, 300 130, 330 156" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a5v-w)"/>
+    <rect x="336" y="148" width="110" height="24" rx="3" fill="var(--write-soft)" stroke="var(--write)"/><text x="342" y="165" font-size="8" fill="var(--write)">B: UPDATE x</text>
+    <path d="M446 156 C 460 140, 470 120, 480 104" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a5v-w)"/>
+    <text x="486" y="136" font-size="8" fill="var(--write)">fast link</text>
+    <rect x="450" y="88" width="80" height="24" rx="3" fill="var(--panel2)" stroke="var(--bad)"/><text x="456" y="105" font-size="8" fill="var(--bad)">UPDATE x ?!</text>
+    <rect x="536" y="88" width="80" height="24" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="542" y="105" font-size="8">INSERT x</text>
+    <text x="450" y="82" font-size="8" fill="var(--bad)">row doesn't exist yet</text>
+    <text x="20" y="184" font-size="9" opacity=".8">the update depends on the insert (B saw A's row) — a causality problem.</text><text x="20" y="197" font-size="9" opacity=".8">timestamps can't fix it: clocks aren't in sync (Ch 8) ⇒ version vectors</text>
+    <defs><marker id="a5v-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>The book's Figure 5-9. Client A inserts a row at leader 1; client B, reading that row at leader 3, updates it. Leader 2 gets the update first — an update to a row it doesn't have — and the insert later. Same causality problem as consistent prefix reads. Attaching timestamps isn't enough, because clocks can't be trusted to order events at leader 2 (<a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#relying-on-synchronized-clocks" data-tip="Ch 8 · Relying on Synchronized Clocks — why LWW with wall-clock timestamps silently drops writes · not yet written">Chapter&nbsp;8<sup>→8</sup></a>); the correct tool is <strong>version vectors</strong>, at the end of this chapter.</figcaption>
+</figure>
+
+<p>Conflict detection in many multi-leader products is poor: at the time of writing PostgreSQL BDR did not provide causal ordering of writes, and Tungsten Replicator for MySQL didn't even try to detect conflicts. If you run multi-leader, read the documentation carefully and test that the guarantees you believe you have are the ones you actually get.</p>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="leaderless-replication">
+<span class="key-chip">leaderless-replication</span>
+<h2><a class="self" href="#leaderless-replication">Leaderless Replication</a></h2>
+
+<p>Single- and multi-leader replication share an idea: a client sends a write to <em>one</em> node (a leader), the system copies it onward, and a leader decides the order in which writes apply. Some systems abandon the leader entirely and let <strong>any replica accept writes directly</strong>. The earliest replicated systems were leaderless; the idea was forgotten during the relational era and revived when Amazon built its in-house <strong>Dynamo</strong> — hence <strong>Dynamo-style</strong> for Riak, Cassandra, and Voldemort, the open-source datastores it inspired. (Confusingly, AWS's <em>DynamoDB</em> is a different, single-leader architecture.) In some implementations the client sends writes to several replicas itself; in others a coordinator node does it on the client's behalf — but unlike a leader, that coordinator imposes <em>no ordering</em> on writes. That one difference changes everything about how the database is used.</p>
+
+<h3 id="writing-to-the-database-when-a-node-is-down"><a class="self" href="#writing-to-the-database-when-a-node-is-down">Writing to the Database When a Node Is Down</a></h3>
+<span class="key-chip">writing-to-the-database-when-a-node-is-down</span>
+
+<p>Three replicas, one being rebooted. Leader-based: if the leader is the one down, you need a failover to keep writing. Leaderless: <em>there is no failover</em>. The book's Figure 5-10 as a stepper:</p>
+
+<figure class="anim" id="anim-quorum">
+<svg viewBox="0 0 680 320" role="img" aria-label="Quorum write, quorum read, and read repair: a client writes to all three replicas, two acknowledge and one is down; later a client reads from all three, gets version 7 from two and stale version 6 from the recovered replica, and writes the newer value back to it. Then the general rule: w plus r greater than n guarantees the read and write sets overlap.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- replicas -->
+    <rect x="270" y="20" width="120" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="292" y="40" font-weight="700">replica 1</text>
+    <rect x="270" y="130" width="120" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="292" y="150" font-weight="700">replica 2</text>
+    <rect x="270" y="240" width="120" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="292" y="260" font-weight="700">replica 3</text>
+    <g data-on="1"><text x="282" y="60" font-size="9">x = v6</text><text x="282" y="170" font-size="9">x = v6</text><text x="282" y="280" font-size="9">x = v6</text></g>
+    <g data-on="2-7"><text x="282" y="60" font-size="9" fill="var(--write)">x = v7</text><text x="282" y="170" font-size="9" fill="var(--write)">x = v7</text></g>
+    <g data-on="2-5"><text x="282" y="280" font-size="9">x = v6</text></g>
+    <g data-on="6-7"><text x="282" y="280" font-size="9" fill="var(--write)">x = v7</text></g>
+    <!-- down marker -->
+    <g data-on="1-3"><path d="M274 244 L 386 286 M386 244 L 274 286" stroke="var(--bad)" stroke-width="2" opacity=".7"/><text x="400" y="262" font-size="9" fill="var(--bad)">rebooting</text></g>
+    <!-- step 1/2: write -->
+    <g data-on="1-3">
+      <rect x="20" y="130" width="110" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/><text x="30" y="150">user 1234</text><text x="30" y="166" font-size="8">set x = v7</text>
+    </g>
+    <g data-on="2-3" data-hot="2">
+      <path d="M130 140 L 264 52" stroke="var(--write)" stroke-width="2" marker-end="url(#a5q-w)"/>
+      <path d="M130 155 L 264 155" stroke="var(--write)" stroke-width="2" marker-end="url(#a5q-w)"/>
+      <path d="M130 170 L 264 258" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#a5q-w)"/>
+      <text x="160" y="90" font-size="8" fill="var(--write)">write, in parallel, to all 3</text>
+    </g>
+    <g data-on="3" data-hot="3">
+      <path d="M264 62 L 134 125" stroke="var(--ok)" stroke-width="1.6" marker-end="url(#a5q-g)"/><text x="190" y="118" font-size="9" fill="var(--ok)">ok</text>
+      <path d="M264 165 L 134 175" stroke="var(--ok)" stroke-width="1.6" marker-end="url(#a5q-g)"/><text x="190" y="190" font-size="9" fill="var(--ok)">ok</text>
+      <text x="170" y="230" font-size="9" fill="var(--bad)">(no reply)</text>
+      <rect x="20" y="196" width="150" height="26" rx="4" fill="var(--panel2)" stroke="var(--ok)"/><text x="28" y="213" font-size="9" fill="var(--ok)" font-weight="700">2 of 3 ⇒ success</text>
+    </g>
+    <!-- step 4/5: read + repair -->
+    <g data-on="4-6">
+      <rect x="540" y="130" width="120" height="50" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/><text x="550" y="150">user 2345</text><text x="550" y="166" font-size="8">get x</text>
+    </g>
+    <g data-on="4-5" data-hot="4">
+      <path d="M540 140 L 396 52" stroke="var(--read)" stroke-width="2" marker-end="url(#a5q-r)"/>
+      <path d="M540 155 L 396 155" stroke="var(--read)" stroke-width="2" marker-end="url(#a5q-r)"/>
+      <path d="M540 170 L 396 258" stroke="var(--read)" stroke-width="2" marker-end="url(#a5q-r)"/>
+      <text x="420" y="90" font-size="8" fill="var(--read)">read, in parallel, from all 3</text>
+    </g>
+    <g data-on="5" data-hot="5">
+      <text x="440" y="118" font-size="9" fill="var(--read)">v7</text>
+      <text x="460" y="190" font-size="9" fill="var(--read)">v7</text>
+      <text x="440" y="230" font-size="9" fill="var(--bad)">v6 — stale!</text>
+      <rect x="540" y="196" width="130" height="40" rx="4" fill="var(--panel2)" stroke="var(--read)"/>
+      <text x="548" y="212" font-size="8" fill="var(--read)" font-weight="700">version numbers say</text>
+      <text x="548" y="226" font-size="8">v7 is newer ⇒ return v7</text>
+    </g>
+    <g data-on="6" data-hot="6">
+      <path d="M540 175 L 396 270" stroke="var(--write)" stroke-width="2" marker-end="url(#a5q-w)"/>
+      <text x="470" y="236" font-size="9" fill="var(--write)">write v7 back</text>
+      <rect x="540" y="196" width="130" height="40" rx="4" fill="var(--write-soft)" stroke="var(--write)"/>
+      <text x="548" y="212" font-size="8" fill="var(--write)" font-weight="700">READ REPAIR</text>
+      <text x="548" y="226" font-size="8">the reader fixes replica 3</text>
+      <text x="20" y="310" font-size="8" opacity=".8">also: ANTI-ENTROPY — a background process diffs replicas and copies missing data (no order, maybe slow). Voldemort lacks it ⇒ rarely-read values stay stale.</text>
+    </g>
+    <!-- step 7: quorum rule -->
+    <g data-on="7" data-hot="7">
+      <rect x="20" y="90" width="230" height="140" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="30" y="110" font-size="10" font-weight="700">n = 3 replicas</text>
+      <text x="30" y="128" font-size="10"><tspan fill="var(--write)" font-weight="700">w</tspan> = 2  writes needed to succeed</text>
+      <text x="30" y="146" font-size="10"><tspan fill="var(--read)" font-weight="700">r</tspan> = 2  replicas to read from</text>
+      <text x="30" y="172" font-size="11" font-weight="700">w + r &gt; n</text>
+      <text x="30" y="190" font-size="8">⇒ at most n−w = 1 replica is stale</text>
+      <text x="30" y="204" font-size="8">⇒ reading r = 2 must hit ≥1 fresh one</text>
+      <text x="30" y="220" font-size="8" opacity=".8">n=5, w=3, r=3 tolerates 2 nodes down</text>
+      <rect x="420" y="90" width="250" height="140" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".5"/>
+      <text x="430" y="110" font-size="9" font-weight="700">the overlap picture</text>
+      <ellipse cx="500" cy="170" rx="55" ry="38" fill="var(--write-soft)" stroke="var(--write)" opacity=".85"/>
+      <ellipse cx="580" cy="170" rx="55" ry="38" fill="var(--read-soft)" stroke="var(--read)" opacity=".85"/>
+      <text x="458" y="150" font-size="8" fill="var(--write)">w nodes</text>
+      <text x="590" y="150" font-size="8" fill="var(--read)">r nodes</text>
+      <text x="522" y="174" font-size="8" font-weight="700">≥1</text>
+      <text x="430" y="222" font-size="8" opacity=".8">common: n odd (3 or 5), w = r = (n+1)/2</text>
+    </g>
+    <defs>
+      <marker id="a5q-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a5q-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+      <marker id="a5q-g" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--ok)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> Three replicas all hold x at version 6. Replica 3 is down for a reboot. User 1234 wants to write version 7. There's no leader to fail over — so what happens?</li>
+  <li><strong>WRITE TO ALL</strong> The client sends the write to all three replicas in parallel. Replica 3 misses it.</li>
+  <li><strong>TWO OUT OF THREE</strong> Two replicas acknowledge; the client's rule says two suffice, so the write is a success. The client simply ignores the fact that one replica missed it.</li>
+  <li><strong>READ FROM ALL</strong> Replica 3 comes back — still holding v6 — and user 2345 reads x. If reads went to a single node, they might hit the stale one. So reads too go to several nodes in parallel.</li>
+  <li><strong>VERSIONS DECIDE</strong> Two replicas answer v7, one answers v6. Version numbers tell the client which is newer; it returns v7.</li>
+  <li><strong>READ REPAIR (AND ANTI-ENTROPY)</strong> Having noticed replica 3 is stale, the client writes v7 back to it — <em>read repair</em>, great for frequently read values. The other catch-up mechanism is a background <em>anti-entropy</em> process that diffs replicas and copies what's missing — in no particular order, possibly slowly; not every system has one (Voldemort doesn't), and without it rarely read values may never be repaired and have reduced durability.</li>
+  <li><strong>THE QUORUM RULE</strong> Generalize: n replicas; a write needs w acknowledgments; a read queries r nodes. If <strong>w + r &gt; n</strong>, the set written and the set read must overlap in at least one node, so some read replica has the latest value. These are <em>quorum</em> reads and writes (strict quorums, as opposed to the sloppy kind below). Requests still go to all n; w and r only say how many replies to wait for.</li>
+</ol>
+</figure>
+
+<h4>Quorums for reading and writing</h4>
+<p>n, w, r are normally configurable in Dynamo-style databases. A common choice: n odd (3 or 5), w = r = (n+1)/2 rounded up. But you can tune: a read-heavy, write-light workload might set w = n, r = 1 — fast reads, but one failed node stops all writes. There may be more than n nodes in the cluster — any given value lives on only n of them, which is what lets the dataset be partitioned across more machines than one value's replicas (<a class="xref fwd" href="ch06-partitioning.html#partitioning-and-replication" data-tip="Ch 6 · Partitioning and Replication — each key lives on n of the cluster's nodes · not yet written">Chapter&nbsp;6<sup>→6</sup></a>). Availability arithmetic: w &lt; n tolerates an unavailable node for writes; r &lt; n for reads; n=3, w=2, r=2 tolerates one node down; n=5, w=3, r=3 tolerates two. Below w or r available nodes, the operation returns an error. "Unavailable" covers everything — crashed, disk full, network partition between client and node — we only care whether a success response came back.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the pigeonhole guarantee</span>
+Five mailboxes, and you post a letter into any three (w = 3). Later you open any three (r = 3). Since 3 + 3 &gt; 5, at least one mailbox you open must be one you posted to — there aren't enough boxes for the two sets to miss each other. That is the entire quorum argument: no leader, no ordering, just counting. Every subtlety in the next section comes from the assumptions hidden in "you posted to three" — that they were the <em>designated</em> five boxes, that nobody else was posting a different letter at the same moment, and that a box didn't burn down and get rebuilt empty.</div>
+
+<h3 id="limitations-of-quorum-consistency"><a class="self" href="#limitations-of-quorum-consistency">Limitations of Quorum Consistency</a></h3>
+<span class="key-chip">limitations-of-quorum-consistency</span>
+
+<p>With w + r &gt; n you <em>generally</em> read the latest value, because the write set and read set overlap. Usually r and w are majorities (more than n/2), which satisfies the condition while tolerating up to n/2 failures — but quorums needn't be majorities; only the overlap matters, which leaves room for other assignments (Flexible Paxos exploits exactly this). You can also set w + r ≤ n on purpose: reads and writes still go to all n nodes but wait for fewer replies — more stale reads, but lower latency and higher availability, since the database only becomes unavailable when reachable replicas drop below w or r.</p>
+
+<p>Even with w + r &gt; n, edge cases return stale values:</p>
+<ul>
+<li><strong>Sloppy quorums</strong> (below): the w writes may land on different nodes than the r reads, so overlap is no longer guaranteed.</li>
+<li><strong>Concurrent writes</strong>: it's unclear which happened first; the only safe move is to merge them. Picking a winner by timestamp (LWW) loses writes to clock skew.</li>
+<li><strong>A write concurrent with a read</strong>: the write may be on only some replicas; whether the read sees old or new is undetermined.</li>
+<li><strong>Partial write failure</strong>: a write that succeeded on some replicas but fewer than w overall is <em>not rolled back</em> where it succeeded — so a write reported as failed may or may not show up in later reads.</li>
+<li><strong>Restoring from a stale replica</strong>: a node with the new value fails and is rebuilt from a node with the old value; now fewer than w nodes hold the new value and the quorum condition is broken.</li>
+<li><strong>Unlucky timing</strong> even when everything works — the linearizability-and-quorums case in <a class="xref fwd" href="ch09-consistency-and-consensus.html#linearizability" data-tip="Ch 9 · Linearizability — the illusion of a single copy; why strict quorums alone don't provide it · not yet written">Chapter&nbsp;9<sup>→9</sup></a>.</li>
+</ul>
+<p>So quorums <em>appear</em> to guarantee reading the latest value, but in practice it isn't so simple. Dynamo-style databases are optimized for use cases that tolerate eventual consistency; w and r tune the <em>probability</em> of staleness, not an absolute guarantee. In particular you usually do <em>not</em> get read-your-writes, monotonic reads, or consistent prefix reads — those anomalies can all occur. Stronger guarantees need transactions or consensus (Chapters 7 and 9).</p>
+
+<h4>Monitoring staleness</h4>
+<p>Operationally you must know whether your database is returning current results, even if the application tolerates staleness — a replica far behind means something is wrong (network, overloaded node). Leader-based systems make this easy: writes apply in the same order on leader and followers, each node has a position in the log, and <em>leader position − follower position</em> is the lag. Leaderless systems have no fixed order, so it's harder — and with read repair only (no anti-entropy) there is <em>no bound</em> on how old a rarely read value can be. Research (Bailis et al.'s PBS) predicts the expected percentage of stale reads from n, w, r; it isn't common practice, but staleness belongs in every database's standard metrics. Eventual consistency is deliberately vague — for operability you want to quantify "eventual."</p>
+
+<h3 id="sloppy-quorums-and-hinted-handoff"><a class="self" href="#sloppy-quorums-and-hinted-handoff">Sloppy Quorums and Hinted Handoff</a></h3>
+<span class="key-chip">sloppy-quorums-and-hinted-handoff</span>
+
+<p>Well-configured quorums tolerate node failures without failover and tolerate slow nodes because you only wait for w or r replies — attractive for high availability, low latency, and occasional staleness. But a network interruption can cut a client off from many nodes at once. Those nodes are alive and reachable by <em>other</em> clients, but to this client they may as well be dead, and it may no longer reach w or r of the n "home" nodes for a value. In a large cluster (many more than n nodes) the client can probably reach <em>some</em> nodes — just not the right ones. The designers' choice: return errors for everything that can't reach a quorum, or accept writes anyway onto reachable nodes that aren't among the value's designated n?</p>
+
+<figure>
+<svg viewBox="0 0 680 200" role="img" aria-label="Sloppy quorum and hinted handoff: a client cut off from two of a value's three home nodes writes to a reachable neighbor node instead; when the partition heals, the neighbor hands the write off to the proper home node.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="80" width="100" height="44" rx="6" fill="none" stroke="currentColor" stroke-opacity=".7"/><text x="34" y="106">client</text>
+    <rect x="300" y="20" width="110" height="36" rx="5" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="310" y="43">home node 1</text>
+    <rect x="300" y="80" width="110" height="36" rx="5" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="310" y="103">home node 2</text>
+    <rect x="300" y="140" width="110" height="36" rx="5" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/><text x="310" y="163">home node 3</text>
+    <rect x="520" y="80" width="140" height="36" rx="5" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="5 3"/><text x="530" y="103">neighbor node</text>
+    <path d="M120 96 L 294 40" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5h-w)"/>
+    <path d="M200 60 L 230 90 M230 60 L 200 90" stroke="var(--bad)" stroke-width="2.5"/>
+    <path d="M120 100 L 294 98" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5h-w)"/>
+    <path d="M200 84 L 230 114 M230 84 L 200 114" stroke="var(--bad)" stroke-width="2.5"/>
+    <path d="M120 106 L 294 156" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5h-w)"/>
+    <text x="20" y="192" font-size="8" fill="var(--ok)">reachable: 1 of 3 — not enough for w = 2</text>
+    <path d="M120 92 C 250 200, 450 212, 514 112" stroke="var(--write)" stroke-width="1.8" fill="none" stroke-dasharray="6 3" marker-end="url(#a5h-w)"/>
+    <text x="400" y="186" font-size="8" fill="var(--write)">sloppy: write to a reachable non-home node ⇒ w reached</text>
+    <path d="M520 86 C 470 60, 440 50, 414 38" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a5h-w)"/>
+    <text x="520" y="62" font-size="8" fill="var(--write)">later: hinted handoff</text>
+    <text x="520" y="74" font-size="8" opacity=".7">"this was meant for you"</text>
+    <defs><marker id="a5h-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>A <strong>sloppy quorum</strong>: writes and reads still need w and r successes, but the responders may include nodes outside the value's n home nodes. The book's analogy — locked out of your house, you sleep on the neighbor's couch. When the network heals, the neighbor forwards the writes it held to their proper homes: <strong>hinted handoff</strong> (the neighbor politely asks you to go home).</figcaption>
+</figure>
+
+<p>Sloppy quorums are great for <em>write availability</em>: as long as any w nodes are up, writes succeed. But they break the reading guarantee: even with w + r &gt; n, the latest value may sit on nodes outside n until handoff completes, so a read of r home nodes can miss it. A sloppy quorum isn't a quorum in the traditional sense at all — only a durability assurance that the data is on w nodes <em>somewhere</em>. Optional everywhere: on by default in Riak, off by default in Cassandra and Voldemort.</p>
+
+<h4>Multi-datacenter operation</h4>
+<p>Leaderless replication suits multi-datacenter use too, since it's built to tolerate conflicting concurrent writes, network interruptions, and latency spikes. Cassandra and Voldemort keep it inside the normal model: n counts replicas across <em>all</em> datacenters and you configure how many live in each; each write goes to all replicas everywhere, but the client waits only for a quorum within its <em>local</em> datacenter, so cross-datacenter delays don't hurt it, and the remote writes are typically asynchronous. Riak instead keeps all client–node traffic within one datacenter (n is per datacenter) and replicates between clusters asynchronously in the background — much like multi-leader replication.</p>
+
+<h3 id="detecting-concurrent-writes"><a class="self" href="#detecting-concurrent-writes">Detecting Concurrent Writes</a></h3>
+<span class="key-chip">detecting-concurrent-writes</span>
+
+<p>Dynamo-style databases let several clients write the same key concurrently, so conflicts occur <em>even with strict quorums</em> — like multi-leader replication, plus extra conflict sources during read repair and hinted handoff. The core problem: events arrive in different orders at different nodes because of variable delays and partial failures. The book's Figure 5-12: clients A and B both write key X across three nodes. Node 1 gets A's write and never B's (transient outage). Node 2 gets A then B. Node 3 gets B then A. If each node just overwrites on arrival, node 2 ends with B and the others with A — permanently inconsistent. Replicas must <em>converge</em>, and most implementations leave the how to you, the application developer, so you need to understand the internals.</p>
+
+<h4>Last write wins (discarding concurrent writes)</h4>
+<p>One route to convergence: each replica keeps only the most "recent" value and discards "older" ones — given some unambiguous way to say which is more recent. The quotes are the point: in Figure 5-12 neither client knew about the other, so neither write happened "first"; they are <strong>concurrent</strong> and their order is undefined. You can <em>force</em> an order — attach a timestamp, biggest wins, discard the rest — and that is <strong>last write wins (LWW)</strong>, Cassandra's only conflict resolution method and an option in Riak. It converges, at the cost of durability: several concurrent writes to one key, each acknowledged as successful (written to w replicas), and only one survives; the rest are silently gone. Worse, LWW can drop writes that <em>aren't</em> concurrent, because of clock skew (<a class="xref fwd" href="ch08-trouble-with-distributed-systems.html#relying-on-synchronized-clocks" data-tip="Ch 8 · Relying on Synchronized Clocks — timestamps for ordering events: a later write can carry an earlier clock reading · not yet written">Chapter&nbsp;8<sup>→8</sup></a>). Acceptable for caching; a poor choice when losing data isn't. The only safe way to use LWW is to make every key <em>immutable</em> — write once, never update — e.g. Cassandra's recommendation of a UUID per write as the key.</p>
+
+<h4>The "happens-before" relationship and concurrency</h4>
+<p>How do we decide whether two operations are concurrent? In Figure 5-9 earlier, B's update <em>happened after</em> A's insert — B's operation builds on A's (the row B updated is the row A inserted); B is <strong>causally dependent</strong> on A. In Figure 5-12, neither client knew of the other when it started, so there's no causal dependency: the writes are concurrent. Definition: <strong>A happens before B</strong> if B knows about A, depends on A, or builds on A in some way. Two operations are <strong>concurrent</strong> if neither happens before the other — neither knows about the other. For any two operations A and B there are exactly three possibilities: A before B, B before A, or concurrent. If one happened before the other, the later should overwrite the earlier; if concurrent, there's a conflict to resolve. What we need is an algorithm to tell which case we're in.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · concurrency, time, and relativity</span>
+"Concurrent" sounds like "at the same instant," but exact time is irrelevant — and, with the unreliable clocks of Chapter 8, unknowable. Two operations are concurrent if they were <em>unaware of each other</em>, whatever the wall clock says. The book draws the analogy to special relativity: information can't travel faster than light, so two events far enough apart in space and close enough in time cannot have influenced each other. In computers the "speed of light" is far slower and erratic — a slow or interrupted network means two writes minutes apart can still be concurrent, because neither could have known about the other. Causality, not the clock, is what defines "before."</div>
+
+<h4>Capturing the happens-before relationship</h4>
+<p>Start with a single replica and work up. The book's Figure 5-13: two clients add items to the same shopping cart (or two air-traffic controllers add aircraft to a sector, if groceries feel too inane). The server keeps a version number per key. Walk it:</p>
+
+<figure class="anim" id="anim-cart">
+<svg viewBox="0 0 680 330" role="img" aria-label="Two clients concurrently add items to a shopping cart on one server that tracks a version number per key. Each write carries the version from the client's last read; the server overwrites values at or below that version and keeps higher-versioned values as concurrent siblings, so no write is lost; clients merge siblings before writing.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="16" y="44">client 1</text>
+    <text x="16" y="164" font-weight="700">server</text>
+    <text x="16" y="284">client 2</text>
+    <path d="M90 40 H 660 M90 160 H 660 M90 280 H 660" stroke="currentColor" stroke-opacity=".35"/>
+    <!-- op1 -->
+    <g data-on="1-6" data-hot="1">
+      <path d="M120 46 L 140 150" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5k-w)"/>
+      <text x="96" y="80" font-size="8" fill="var(--write)">add milk</text>
+      <text x="96" y="92" font-size="8" fill="var(--write)">[milk]</text>
+      <text x="96" y="104" font-size="8" opacity=".7">(no version)</text>
+      <path d="M146 154 L 166 50" stroke="var(--read)" stroke-width="1.4" marker-end="url(#a5k-r)"/>
+      <text x="158" y="128" font-size="8" fill="var(--read)">v1: [milk]</text>
+    </g>
+    <g data-on="1"><rect x="120" y="166" width="90" height="26" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="126" y="183" font-size="8">v1 [milk]</text></g>
+    <!-- op2 -->
+    <g data-on="2-6" data-hot="2">
+      <path d="M210 274 L 232 170" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5k-w)"/>
+      <text x="186" y="240" font-size="8" fill="var(--write)">add eggs</text>
+      <text x="186" y="252" font-size="8" fill="var(--write)">[eggs]</text>
+      <text x="186" y="264" font-size="8" opacity=".7">(no version)</text>
+      <path d="M238 172 L 258 270" stroke="var(--read)" stroke-width="1.4" marker-end="url(#a5k-r)"/>
+      <text x="248" y="216" font-size="8" fill="var(--read)">v2: [milk] [eggs]</text>
+    </g>
+    <g data-on="2"><rect x="120" y="166" width="150" height="26" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="126" y="183" font-size="8">v1 [milk] · v2 [eggs]</text></g>
+    <!-- op3 -->
+    <g data-on="3-6" data-hot="3">
+      <path d="M320 46 L 340 150" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5k-w)"/>
+      <text x="290" y="80" font-size="8" fill="var(--write)">add flour, based on v1</text>
+      <text x="290" y="92" font-size="8" fill="var(--write)">[milk, flour] @v1</text>
+      <path d="M346 154 L 366 50" stroke="var(--read)" stroke-width="1.4" marker-end="url(#a5k-r)"/>
+      <text x="356" y="128" font-size="8" fill="var(--read)">v3: [milk,flour] [eggs]</text>
+    </g>
+    <g data-on="3"><rect x="120" y="166" width="230" height="26" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="126" y="183" font-size="8"><tspan text-decoration="line-through" opacity=".5">v1 [milk]</tspan> · v2 [eggs] · v3 [milk,flour]</text></g>
+    <!-- op4 -->
+    <g data-on="4-6" data-hot="4">
+      <path d="M420 274 L 442 170" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5k-w)"/>
+      <text x="380" y="240" font-size="8" fill="var(--write)">merge + add ham, based on v2</text>
+      <text x="380" y="252" font-size="8" fill="var(--write)">[eggs, milk, ham] @v2</text>
+      <path d="M448 172 L 468 270" stroke="var(--read)" stroke-width="1.4" marker-end="url(#a5k-r)"/>
+      <text x="452" y="216" font-size="8" fill="var(--read)">v4: [milk,flour] [eggs,milk,ham]</text>
+    </g>
+    <g data-on="4"><rect x="120" y="166" width="300" height="26" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="126" y="183" font-size="8"><tspan text-decoration="line-through" opacity=".5">v2 [eggs]</tspan> · v3 [milk,flour] · v4 [eggs,milk,ham]</text></g>
+    <!-- op5 -->
+    <g data-on="5-6" data-hot="5">
+      <path d="M530 46 L 550 150" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a5k-w)"/>
+      <text x="470" y="80" font-size="8" fill="var(--write)">merge + add bacon, based on v3</text>
+      <text x="470" y="92" font-size="8" fill="var(--write)">[milk,flour,eggs,bacon] @v3</text>
+      <path d="M556 154 L 576 50" stroke="var(--read)" stroke-width="1.4" marker-end="url(#a5k-r)"/>
+      <text x="540" y="128" font-size="8" fill="var(--read)">v5: two siblings</text>
+    </g>
+    <g data-on="5-6"><rect x="120" y="166" width="380" height="26" rx="3" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="126" y="183" font-size="8"><tspan text-decoration="line-through" opacity=".5">v3 [milk,flour]</tspan> · v4 [eggs,milk,ham] · v5 [milk,flour,eggs,bacon]</text></g>
+    <!-- step 6: the algorithm -->
+    <g data-on="6" data-hot="6">
+      <rect x="90" y="196" width="580" height="74" rx="5" fill="var(--panel)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="100" y="212" font-size="9" font-weight="700">the algorithm (server needs only version numbers, never the values):</text>
+      <text x="100" y="226" font-size="8">• server keeps a version per key; every write bumps it and stores the version with the value</text>
+      <text x="100" y="238" font-size="8">• a read returns ALL not-yet-overwritten values + the latest version — clients must read before writing</text>
+      <text x="100" y="250" font-size="8">• a write carries the version from the prior read and must merge everything that read returned</text>
+      <text x="100" y="262" font-size="8">• server overwrites values with version ≤ the one sent (merged in); KEEPS higher ones (concurrent) as siblings</text>
+      <text x="100" y="298" font-size="8" opacity=".8">a write with no version is concurrent with everything ⇒ overwrites nothing, just joins the siblings.</text><text x="100" y="311" font-size="8" opacity=".8">final siblings: [milk,flour,eggs,bacon] and [eggs,milk,ham] — no write lost.</text>
+    </g>
+    <defs>
+      <marker id="a5k-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a5k-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>1 · MILK</strong> Client 1 adds milk. First write to this key: the server stores [milk] as version 1 and echoes the value and version back.</li>
+  <li><strong>2 · EGGS, BLIND</strong> Client 2 adds eggs, unaware of milk (it thinks the cart holds only eggs). The server assigns version 2, keeps [milk] and [eggs] as two separate values, and returns both with version 2.</li>
+  <li><strong>3 · FLOUR, BASED ON v1</strong> Client 1, still oblivious to eggs, sends [milk, flour] with the version it last saw — 1. The version tells the server this write supersedes [milk] (v1) but is concurrent with [eggs] (v2). It overwrites v1, keeps v2, stores [milk, flour] as v3, and returns both survivors.</li>
+  <li><strong>4 · HAM, BASED ON v2</strong> Client 2 last received [milk] and [eggs] at v2, so it merges them, adds ham, and sends [eggs, milk, ham] @ v2. The server overwrites [eggs] (v2) but keeps [milk, flour] (v3) — concurrent — and stores the new value as v4.</li>
+  <li><strong>5 · BACON, BASED ON v3</strong> Client 1 merges what it got at v3 — [milk, flour] and [eggs] — adds bacon, sends it @ v3. That overwrites [milk, flour] ([eggs] was already gone) but is concurrent with [eggs, milk, ham]. Two siblings remain. Clients were never fully up to date, yet nothing was lost.</li>
+  <li><strong>THE ALGORITHM</strong> Version per key; reads return all live values plus the current version; writes carry the version from the prior read and must merge what that read returned; the server overwrites values at or below that version and keeps higher ones as siblings. The server never interprets values — only versions — so the value can be any data structure. Figure 5-14 in the book draws this as a graph of happens-before arrows.</li>
+</ol>
+</figure>
+
+<h4>Merging concurrently written values</h4>
+<p>No data is silently dropped — but clients do the cleanup, merging concurrent values (Riak calls them <strong>siblings</strong>). This is the same problem as multi-leader conflict resolution. Picking one by version or timestamp (LWW) loses data; the smarter application-level approach for a cart is the <em>union</em>: [milk, flour, eggs, bacon] ∪ [eggs, milk, ham] → milk, flour, eggs, bacon, ham without duplicates. But if users can also <em>remove</em> items, union is wrong: an item removed in only one sibling reappears in the merge — Amazon's cart bug. The fix is that a removal can't just delete; it leaves a marker with a version number, a <strong>tombstone</strong> (the same idea as in <a class="xref back" href="ch03-storage-and-retrieval.html#hash-indexes" data-tip="Ch 3 · Hash Indexes — deletion via a tombstone record in the append-only log, dropped at compaction">Chapter&nbsp;3's log compaction<sup>←3</sup></a>), so the merge knows the item was deleted. Because merging in application code is complex and error-prone, data structures that merge themselves — Riak's CRDT datatypes — do it automatically, deletions included.</p>
+
+<h4>Version vectors</h4>
+<p>The cart used one replica. With multiple leaderless replicas a single version number per key isn't enough: we need a version number <strong>per replica <em>and</em> per key</strong>. Each replica increments its own counter on a write and also tracks the counters it has seen from every other replica; the collection is a <strong>version vector</strong>, and it tells the database which values to overwrite and which to keep as siblings. The most interesting variant is the <strong>dotted version vector</strong> used in Riak 2.0. Like the single version number, version vectors travel from database to client on reads and back on writes (Riak calls the encoded string a <em>causal context</em>), and they make it safe to read from one replica and write to another — siblings may result, but nothing is lost if they're merged correctly.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · version vectors vs vector clocks, and where LWW sits</span>
+The 1st edition's sidebar warns that version vectors are "sometimes also called vector clocks" but aren't quite the same, and defers to the references. The 2nd edition draws the line more explicitly — version vectors compare the <em>state</em> of replicas (the right tool here); vector clocks order <em>events</em> — and gives dotted version vectors a fuller treatment alongside the CRDT material. Flexible Paxos appears in the quorum discussion as the formal statement that read and write quorums need only intersect, not be majorities. <em>[inferred from the 2nd-edition references repo]</em></div>
+
+<div class="feynman"><span class="tag">FEYNMAN · the three replication families, side by side</span>
+<strong>Single-leader</strong>: one pen. Easy to understand, no conflicts, a total order of writes for free — but writes have one address, and if the pen-holder vanishes you need a (fraught) succession. <strong>Multi-leader</strong>: a pen per office. Writes are local and fast, offices work through network outages, but two offices <em>will</em> write different things in the same cell and you must decide, convergently, what the cell says. <strong>Leaderless</strong>: no pen, just counting. Post to w boxes, open r boxes, w + r &gt; n. No failover, great availability, but "latest" stops being a fact and becomes something you compute from versions — and siblings are yours to merge. The book's verdict: single-leader is popular because it's simple; the other two are more robust to faulty nodes, interruptions, and latency spikes, at the price of being harder to reason about and offering only weak consistency.</div>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Why replicate</strong>: high availability (survive node/datacenter loss), disconnected operation, latency (data near users), and read scalability. Part II frames it as shared-nothing nodes; replication (same data, many nodes) and partitioning (different data, different nodes) are orthogonal and combined.</li>
+<li><strong>Single-leader</strong>: all writes to one leader, which streams a replication log to followers; reads anywhere. Built into PostgreSQL, MySQL, Oracle, SQL Server, MongoDB, Kafka, RabbitMQ. Its gift is a total order of writes.</li>
+<li><strong>Sync vs async</strong>: a synchronous follower guarantees a second up-to-date copy but one dead sync follower blocks all writes — so practice is <em>semi-synchronous</em> (one sync follower) or fully async, which risks losing acknowledged writes on leader failure.</li>
+<li><strong>Operations</strong>: new followers come from a snapshot pinned to a log position plus catch-up; follower recovery is catch-up from the local log; <strong>failover</strong> = detect (timeout) → choose (election, most up-to-date) → reconfigure — and it's fraught: discarded unreplicated writes (GitHub's key reuse), split brain, the timeout dilemma. Many teams fail over manually.</li>
+<li><strong>Replication logs</strong>: statement-based (nondeterminism), WAL shipping (exact but engine/version-coupled ⇒ upgrade downtime), <strong>logical/row-based</strong> (decoupled, cross-version, parseable ⇒ change data capture), trigger-based (flexible, costly).</li>
+<li><strong>Replication lag</strong> ⇒ eventual consistency with no bound on "eventually." Three anomalies and their guarantees: <strong>read-after-write</strong> (see your own writes: leader reads, time windows, last-write timestamps), <strong>monotonic reads</strong> (no time travel: pin a user to a replica), <strong>consistent prefix reads</strong> (causal order: same-partition writes or explicit causality tracking). Transactions exist so applications needn't hand-roll these.</li>
+<li><strong>Multi-leader</strong>: a leader per datacenter (local writes, survives WAN and datacenter outages), offline clients (every device a leader; calendar sync), collaborative editing. Retrofitted in most databases, riddled with pitfalls, avoided when possible.</li>
+<li><strong>Write conflicts</strong> are detected asynchronously and must resolve <em>convergently</em>: LWW (lossy), replica priority (lossy), merge, or preserve and let the application resolve on write or on read. Avoid conflicts by homing each record on one leader. Automatic resolution: CRDTs, mergeable persistent structures, operational transformation. Some conflicts (double-booked rooms) are invisible to per-record checks.</li>
+<li><strong>Topologies</strong>: circular, star, all-to-all; sparse ones break on one node failure, dense ones let writes overtake each other — a causality problem timestamps can't fix.</li>
+<li><strong>Leaderless (Dynamo-style)</strong>: write to all n, wait for w; read from all, wait for r; <strong>w + r &gt; n</strong> gives overlap. Stale replicas heal by <strong>read repair</strong> and <strong>anti-entropy</strong>. No failover. But quorums are probabilistic in practice: sloppy quorums, concurrent writes, partial failures, and restores all leak staleness; you don't get the session guarantees. <strong>Sloppy quorums + hinted handoff</strong> trade read guarantees for write availability. Monitor staleness even when you tolerate it.</li>
+<li><strong>Concurrency</strong> is about causality, not clocks: A happens-before B if B knows of A; otherwise they're concurrent. LWW forces a fake order and drops data (safe only for immutable keys). The version-number protocol — read before write, send the version, merge what you read, server keeps higher-versioned <strong>siblings</strong> — loses nothing; removals need <strong>tombstones</strong>; multiple replicas need <strong>version vectors</strong> (Riak's dotted version vectors / causal context).</li>
+<li><strong>2nd-edition arc</strong>: replication's prominence rises relative to sharding; the offline/collaborative thread grows into sync engines, local-first software, and CRDTs (Figma, Linear, Automerge-style tooling); consistency models framed via session guarantees and the baseball paper; version vectors vs vector clocks separated cleanly; Flexible Paxos and newer cloud multi-region systems (Cosmos DB, Aurora DSQL) as examples.</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Fifteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="c">
+<p>Why does the book focus Part II on shared-nothing architectures rather than shared-memory or shared-disk?</p>
+<label><input type="radio" name="q1" value="a"> They are always the fastest option</label>
+<label><input type="radio" name="q1" value="b"> Shared-memory machines can't have more than one CPU</label>
+<label><input type="radio" name="q1" value="c"> They require the most caution from the application developer — the database can't hide the distributed trade-offs — so they're where understanding matters most</label>
+<label><input type="radio" name="q1" value="d"> Shared-disk systems no longer exist</label>
+</div>
+
+<div class="q" data-a="b">
+<p>In a "synchronous replication" deployment in practice, what does the configuration usually look like, and why?</p>
+<label><input type="radio" name="q2" value="a"> Every follower is synchronous, so all replicas are always identical</label>
+<label><input type="radio" name="q2" value="b"> One follower is synchronous and the rest asynchronous (semi-synchronous): a second up-to-date copy is guaranteed without letting any single follower outage block all writes</label>
+<label><input type="radio" name="q2" value="c"> The leader is synchronous and followers are read-only</label>
+<label><input type="radio" name="q2" value="d"> Replication is synchronous within a datacenter and disabled across datacenters</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why does setting up a new follower require the snapshot to be associated with an exact position in the leader's replication log?</p>
+<label><input type="radio" name="q3" value="a"> So the follower can verify the snapshot's checksum</label>
+<label><input type="radio" name="q3" value="b"> Because the leader must be locked during the copy</label>
+<label><input type="radio" name="q3" value="c"> To let the follower choose which tables to replicate</label>
+<label><input type="radio" name="q3" value="d"> So the follower knows exactly which changes happened after the snapshot and can request precisely that backlog to catch up</label>
+</div>
+
+<div class="q" data-a="a">
+<p>In the GitHub incident cited in the failover discussion, what went wrong?</p>
+<label><input type="radio" name="q4" value="a"> An out-of-date follower was promoted; its autoincrement counter lagged, so it reused primary keys already assigned by the old leader and referenced in Redis — private data was shown to the wrong users</label>
+<label><input type="radio" name="q4" value="b"> Two leaders ran simultaneously and the fencing mechanism shut both down</label>
+<label><input type="radio" name="q4" value="c"> The timeout was too long and the site was down for an hour</label>
+<label><input type="radio" name="q4" value="d"> WAL shipping between different MySQL versions corrupted the data files</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Which replication log format makes zero-downtime database upgrades hard, and why?</p>
+<label><input type="radio" name="q5" value="a"> Statement-based, because SQL syntax changes between versions</label>
+<label><input type="radio" name="q5" value="b"> Logical (row-based), because rows must be re-encoded</label>
+<label><input type="radio" name="q5" value="c"> WAL shipping, because the log describes low-level disk-block bytes tied to the storage engine's format, so leader and followers can't run different software versions</label>
+<label><input type="radio" name="q5" value="d"> Trigger-based, because triggers can't be upgraded</label>
+</div>
+
+<div class="q" data-a="b">
+<p>A user posts a comment, reloads, and it's missing — then appears a few seconds later. Which guarantee was violated, and what's one way to provide it?</p>
+<label><input type="radio" name="q6" value="a"> Monotonic reads; pin the user to one replica</label>
+<label><input type="radio" name="q6" value="b"> Read-after-write consistency; read data the user may have modified from the leader, or track the timestamp of their last write and only serve from replicas that have caught up to it</label>
+<label><input type="radio" name="q6" value="c"> Consistent prefix reads; write causally related data to the same partition</label>
+<label><input type="radio" name="q6" value="d"> Linearizability; use synchronous replication to all followers</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Monotonic reads is best described as:</p>
+<label><input type="radio" name="q7" value="a"> Weaker than strong consistency, stronger than eventual: a user may see stale data but will never see time go backward across successive reads — achieved by routing each user to the same replica</label>
+<label><input type="radio" name="q7" value="b"> The guarantee that every read returns the most recent write</label>
+<label><input type="radio" name="q7" value="c"> The guarantee that reads never block</label>
+<label><input type="radio" name="q7" value="d"> Reading only from the leader</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why is the Mr Poons / Mrs Cake anomaly (seeing the answer before the question) specifically a problem in <em>partitioned</em> databases?</p>
+<label><input type="radio" name="q8" value="a"> Because partitions use synchronous replication</label>
+<label><input type="radio" name="q8" value="b"> Because followers in partitioned systems can't be monotonic</label>
+<label><input type="radio" name="q8" value="c"> Because partitions share one replication log</label>
+<label><input type="radio" name="q8" value="d"> Because different partitions operate independently with no global ordering of writes, so a reader can see one partition in a newer state and another in an older one — whereas a single leader applying writes in one order trivially gives a consistent prefix</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Multi-leader replication across datacenters beats single-leader on which three axes, per the book?</p>
+<label><input type="radio" name="q9" value="a"> Consistency, simplicity, and integrity constraints</label>
+<label><input type="radio" name="q9" value="b"> Conflict-freedom, read scaling, and cost</label>
+<label><input type="radio" name="q9" value="c"> Write performance (local writes hide inter-datacenter latency), tolerance of datacenter outages (no failover needed), and tolerance of inter-datacenter network problems (async replication shrugs off interruptions)</label>
+<label><input type="radio" name="q9" value="d"> Durability, autoincrement handling, and trigger support</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Why must conflict resolution in multi-leader replication be <em>convergent</em>?</p>
+<label><input type="radio" name="q10" value="a"> So that conflicts are detected synchronously</label>
+<label><input type="radio" name="q10" value="b"> Because with no defined write order, replicas applying writes in arrival order would end up with different final values forever; every scheme must ensure all replicas eventually hold the same data</label>
+<label><input type="radio" name="q10" value="c"> So that the leader with the highest ID always wins</label>
+<label><input type="radio" name="q10" value="d"> To allow the application to prompt the user</label>
+</div>
+
+<div class="q" data-a="d">
+<p>In a circular or star topology, how are infinite replication loops prevented?</p>
+<label><input type="radio" name="q11" value="a"> Each write carries a TTL that decrements per hop</label>
+<label><input type="radio" name="q11" value="b"> Only the root node may forward writes</label>
+<label><input type="radio" name="q11" value="c"> Writes are timestamped and older ones dropped</label>
+<label><input type="radio" name="q11" value="d"> Each node has a unique ID and every write is tagged with the IDs of all nodes it has passed through; a node ignores a change already tagged with its own ID</label>
+</div>
+
+<div class="q" data-a="a">
+<p>With n = 3, w = 2, r = 2, why can a read still return a stale value?</p>
+<label><input type="radio" name="q12" value="a"> Several reasons: a sloppy quorum may put the w writes on non-home nodes; concurrent writes have no clear winner; a write concurrent with a read may be only partially applied; a write that failed overall isn't rolled back where it succeeded; a node restored from a stale replica can drop the new value below w</label>
+<label><input type="radio" name="q12" value="b"> It can't — w + r &gt; n is an absolute guarantee</label>
+<label><input type="radio" name="q12" value="c"> Only if the client reads from a single node</label>
+<label><input type="radio" name="q12" value="d"> Only if anti-entropy is disabled</label>
+</div>
+
+<div class="q" data-a="c">
+<p>What does a sloppy quorum actually guarantee?</p>
+<label><input type="radio" name="q13" value="a"> That a read of r nodes sees the latest write</label>
+<label><input type="radio" name="q13" value="b"> That the write reached all n home nodes</label>
+<label><input type="radio" name="q13" value="c"> Only durability — the data is stored on w nodes <em>somewhere</em>; a read of r home nodes may miss it until hinted handoff has delivered it home</label>
+<label><input type="radio" name="q13" value="d"> Causal ordering of writes</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Why does the book call last write wins "dangerously prone to data loss," and when is it acceptable?</p>
+<label><input type="radio" name="q14" value="a"> Because it is slow; acceptable for batch jobs</label>
+<label><input type="radio" name="q14" value="b"> It forces an arbitrary timestamp order onto concurrent writes, silently discarding writes that were acknowledged as successful, and clock skew can even drop non-concurrent writes; acceptable for caches, or when every key is immutable (e.g. a UUID per write)</label>
+<label><input type="radio" name="q14" value="c"> Because it requires a leader; acceptable in single-leader systems</label>
+<label><input type="radio" name="q14" value="d"> Because it produces siblings; acceptable if the application merges them</label>
+</div>
+
+<div class="q" data-a="d">
+<p>In the shopping-cart algorithm, a client sends [milk, flour] with version 1 while the server holds [milk] at v1 and [eggs] at v2. What does the server do?</p>
+<label><input type="radio" name="q15" value="a"> Rejects the write because the version is stale</label>
+<label><input type="radio" name="q15" value="b"> Overwrites both values with [milk, flour]</label>
+<label><input type="radio" name="q15" value="c"> Merges everything itself into [milk, flour, eggs]</label>
+<label><input type="radio" name="q15" value="d"> Overwrites [milk] (version ≤ 1 was merged in) but keeps [eggs] (v2, concurrent), stores [milk, flour] as v3, and returns both survivors — the server compares only versions, never values</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — c.</span> Kleppmann is explicit: not because shared-nothing is always best, but because it's where the developer must face constraints the database can't hide. (a) is false (the COST paper shows a single thread beating a cluster); (b) and (d) are simply wrong — shared-memory boxes have many CPUs, and shared-disk survives in data warehousing.</div>
+<div class="ak"><span class="which">Q2 — b.</span> All-synchronous means any node outage halts writes, so systems keep exactly one sync follower (promoting an async one if it fails) — semi-synchronous. (a) is impractical; (c) confuses roles; (d) describes nothing in the chapter.</div>
+<div class="ak"><span class="which">Q3 — d.</span> The snapshot is a point in time; the follower must replay exactly the changes after that point (PostgreSQL's log sequence number, MySQL's binlog coordinates). No lock is taken (b), and it has nothing to do with checksums or table selection.</div>
+<div class="ak"><span class="which">Q4 — a.</span> Async lag + failover discarded writes, and the stale counter reused keys — dangerous precisely because another store (Redis) depended on them. (b) is the separate "both nodes shut down" incident; (c) and (d) aren't in the text.</div>
+<div class="ak"><span class="which">Q5 — c.</span> The WAL is the storage engine's physical log, so a format change between versions makes leader/follower version mismatch impossible — no "upgrade followers, fail over, upgrade leader." Logical logs are the fix, being decoupled from engine internals.</div>
+<div class="ak"><span class="which">Q6 — b.</span> The user's own write vanished on reload: read-your-writes. Leader reads for self-modified data, time windows after updates, or last-write timestamps are the book's techniques. (a) is the "time goes backward" anomaly; (c) is the causal one; (d) overshoots and breaks read scaling.</div>
+<div class="ak"><span class="which">Q7 — a.</span> Monotonic reads permits staleness but forbids rewinding; hashing user ID → replica gives it. (b) is strong consistency; (d) is a way to get read-your-writes at the cost of scaling.</div>
+<div class="ak"><span class="which">Q8 — d.</span> Consistent prefix reads is free when one leader defines one order. Partitions break the single order, so different partitions can be seen at different points in time. Fix: co-locate causally related writes, or track causality explicitly.</div>
+<div class="ak"><span class="which">Q9 — c.</span> The book's three-way comparison: performance, datacenter-outage tolerance, network-problem tolerance. Multi-leader is <em>worse</em> on consistency, simplicity, and constraints (a) — it introduces conflicts (b) and misbehaves with autoincrements and triggers (d).</div>
+<div class="ak"><span class="which">Q10 — b.</span> Leader 1 sees B then C, leader 2 sees C then B; naive application diverges permanently. Convergence is the non-negotiable requirement; LWW, replica priority, merging, and preserving conflicts are the ways to get it. (a) would throw away multi-leader's benefit; (c) is one lossy rule, not the reason.</div>
+<div class="ak"><span class="which">Q11 — d.</span> Node-ID tagging per write; the HBase master/master infinite-loop bug is the cited reference. Timestamps (c) can't be trusted for ordering; TTLs (a) aren't the mechanism.</div>
+<div class="ak"><span class="which">Q12 — a.</span> The book lists all of these, plus the linearizability timing edge case deferred to Chapter 9. Quorums tune the probability of stale reads; they're not absolute (b). Reads always go to all n (c); anti-entropy (d) is about catching up, not the quorum condition.</div>
+<div class="ak"><span class="which">Q13 — c.</span> "A sloppy quorum actually isn't a quorum at all in the traditional sense" — writes may land on non-home nodes, so read/write sets needn't overlap. It buys write availability; hinted handoff eventually moves data home.</div>
+<div class="ak"><span class="which">Q14 — b.</span> Concurrent writes have no true order; LWW invents one from timestamps and drops the losers despite their "ok." Clock skew makes it worse (Chapter 8). Caching tolerates loss; otherwise make keys immutable — Cassandra's UUID-key advice. (d) describes the version-number approach, not LWW.</div>
+<div class="ak"><span class="which">Q15 — d.</span> The version from the client's prior read says "I've merged everything ≤ v1." So v1 is superseded, v2 is concurrent and kept as a sibling, and the new value gets v3. The client, not the server, does merging (c); rejecting (a) or overwriting all (b) would lose eggs.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch04-encoding-and-evolution.html">← ch 4 · Encoding and Evolution</a>
+  <a href="index.html">index</a>
+  <a href="ch06-partitioning.html">ch 6 · Partitioning →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>
