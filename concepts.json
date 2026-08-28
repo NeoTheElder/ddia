@@ -656,81 +656,81 @@
   "the-slippery-concept-of-a-transaction": {
    "chapter": 7,
    "title": "The Slippery Concept of a Transaction",
-   "definition": "",
+   "definition": "A transaction groups reads and writes into one all-or-nothing unit (commit or abort-and-retry) to simplify the programming model; neither 'transactions don't scale' nor 'serious data needs them' is true — it's a trade-off whose fine print is the isolation level.",
    "pdf_page": 243
   },
   "the-meaning-of-acid": {
    "chapter": 7,
    "title": "The Meaning of ACID",
-   "definition": "",
+   "definition": "Atomicity = abortability under faults (not concurrency); Consistency = application invariants, not a database property; Isolation = concurrent transactions don't interfere (formally serializability, in practice weaker); Durability = committed data survives crashes via WAL/disk/replication, none perfect.",
    "pdf_page": 244,
    "parent": "the-slippery-concept-of-a-transaction"
   },
   "single-object-and-multi-object-operations": {
    "chapter": 7,
    "title": "Single-Object and Multi-Object Operations",
-   "definition": "",
+   "definition": "Storage engines give atomicity and isolation per object (log + lock) plus atomic increment / compare-and-set, but those aren't transactions; multi-object transactions are needed for foreign keys, denormalized data, and secondary indexes; aborts exist so the app can retry (carefully).",
    "pdf_page": 249,
    "parent": "the-slippery-concept-of-a-transaction"
   },
   "weak-isolation-levels": {
    "chapter": 7,
    "title": "Weak Isolation Levels",
-   "definition": "",
+   "definition": "Most databases run below serializable — read committed, snapshot isolation — each defined by which race conditions it allows: dirty reads/writes, read skew, lost updates, write skew, phantoms; such bugs have lost real money even in 'ACID' databases.",
    "pdf_page": 254
   },
   "read-committed": {
    "chapter": 7,
    "title": "Read Committed",
-   "definition": "",
+   "definition": "No dirty reads (see only committed data — implemented by keeping old + new value, not read locks) and no dirty writes (row-level write locks held to commit); the default in PostgreSQL, Oracle, SQL Server; still allows read skew and lost updates.",
    "pdf_page": 255,
    "parent": "weak-isolation-levels"
   },
   "snapshot-isolation-and-repeatable-read": {
    "chapter": 7,
    "title": "Snapshot Isolation and Repeatable Read",
-   "definition": "",
+   "definition": "Each transaction reads a consistent snapshot as of its start, via MVCC (rows stamped created_by/deleted_by txid, update = delete + create, visibility rules, GC); readers never block writers and vice versa; called 'repeatable read' (PostgreSQL, MySQL) or 'serializable' (Oracle) — nobody knows what repeatable read means.",
    "pdf_page": 258,
    "parent": "weak-isolation-levels"
   },
   "preventing-lost-updates": {
    "chapter": 7,
    "title": "Preventing Lost Updates",
-   "definition": "",
+   "definition": "Concurrent read-modify-write cycles clobber each other; defenses are atomic write operations, explicit SELECT FOR UPDATE, automatic detection (PostgreSQL/Oracle/SQL Server, not MySQL), and compare-and-set — all assuming one up-to-date copy; across replicas, commutative ops and sibling merging.",
    "pdf_page": 263,
    "parent": "weak-isolation-levels"
   },
   "write-skew-and-phantoms": {
    "chapter": 7,
    "title": "Write Skew and Phantoms",
-   "definition": "",
+   "definition": "Two transactions read the same objects and write different ones, jointly breaking an invariant (doctors on call, bookings, usernames); not caught by snapshot isolation; phantoms (a write changes another's search result) leave no row to lock — materializing conflicts is the ugly last resort, serializability the real fix.",
    "pdf_page": 267,
    "parent": "weak-isolation-levels"
   },
   "serializability": {
    "chapter": 7,
    "title": "Serializability",
-   "definition": "",
+   "definition": "The strongest isolation: concurrent execution equals some serial order, preventing every race condition; implemented by actual serial execution, two-phase locking, or optimistic techniques like SSI — each with its own performance envelope.",
    "pdf_page": 272
   },
   "actual-serial-execution": {
    "chapter": 7,
    "title": "Actual Serial Execution",
-   "definition": "",
+   "definition": "Run every transaction on one thread (VoltDB/H-Store, Redis, Datomic): serializable by definition, made feasible by in-memory data and short OLTP transactions shipped as deterministic stored procedures; bounded by one core unless data partitions with no cross-partition transactions.",
    "pdf_page": 273,
    "parent": "serializability"
   },
   "two-phase-locking-2pl": {
    "chapter": 7,
    "title": "Two-Phase Locking (2PL)",
-   "definition": "",
+   "definition": "Shared/exclusive locks acquired during execution and released only at commit — readers block writers and writers block readers; deadlocks detected and aborted; predicate locks (approximated by index-range locks) stop phantoms; serializable but with poor, unstable latency under contention. Not 2PC.",
    "pdf_page": 278,
    "parent": "serializability"
   },
   "serializable-snapshot-isolation-ssi": {
    "chapter": 7,
    "title": "Serializable Snapshot Isolation (SSI)",
-   "definition": "",
+   "definition": "Optimistic serializability on top of snapshot isolation (PostgreSQL ≥ 9.1, FoundationDB): run without blocking, track stale MVCC reads and writes that affect prior reads via non-blocking tripwires, abort at commit if a premise was invalidated by a committed transaction; predictable latency, scales across machines, needs short read-write transactions.",
    "pdf_page": 282,
    "parent": "serializability"
   },
