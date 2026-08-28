@@ -25,12 +25,9 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5, 6** closed on the map. **Chapter 7 is built, pushed
-(`6ff3d54`), and awaiting user review** — ticket 10 is claimed (`Assignee: claude`), not closed.
-On "close it": set `Status: closed`, write `## Resolution` in ticket 10, add a Decisions-so-far
-line to `MAP.md`, commit, push. User's pattern so far: "close it, do the next chapter."
-
-Remaining frontier after that: chapters 8–12 (tickets 11–15, in book order; user may name
+Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7** all closed on the map. Nothing is claimed or
+awaiting review. User's pattern so far: "close it, do the next chapter."
+Remaining frontier: chapters 8–12 (tickets 11–15, in book order; user may name
 a different one) and the **index page** (ticket 16 — `index.html` doesn't exist yet; stubs and
 chapter footers already link to it).
 

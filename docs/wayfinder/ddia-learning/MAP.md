@@ -27,6 +27,7 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
 - [Chapter 6: Partitioning](tickets/09-chapter-06-partitioning.md) — built to template and approved; 6 steppers (key-range hot spot, hash + compound key, local vs global index, hash mod N, fixed-partition join, request routing), 5 figures, 14-question quiz; ch 6 definitions filled; headless-Chrome stepper screenshots adopted as pre-push visual QA.
+- [Chapter 7: Transactions](tickets/10-chapter-07-transactions.md) — built to template and approved; 6 steppers (lost update, read committed, MVCC snapshot, write skew, 2PL + deadlock, SSI tripwires), 5 figures, 15-question quiz; ch 7 definitions filled; full-step screenshot QA (43 shots) before first push.
 
 - [Chapter 5: Replication](tickets/08-chapter-05-replication.md) — built to template and approved; Part II intro folded in as framing; 6 steppers (sync/async, failover, lag anomalies, write conflict, quorums, shopping-cart merge), 13 figures, 15-question quiz; ch 5 definitions filled.
 - [Chapter 4: Encoding and Evolution](tickets/07-chapter-04-encoding-and-evolution.md) — built to template and approved; 6 steppers (rolling upgrade, binary bytes, field tags, Avro resolution, lost field, RPC), 7 figures, 14-question quiz; ch 4 definitions filled.
