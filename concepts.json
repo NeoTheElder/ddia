@@ -737,108 +737,108 @@
   "faults-and-partial-failures": {
    "chapter": 8,
    "title": "Faults and Partial Failures",
-   "definition": "",
+   "definition": "A single computer is all-or-nothing by design; across a network some parts break unpredictably while others work — partial failure — and nondeterministically, so you may not even know whether an operation succeeded.",
    "pdf_page": 295
   },
   "cloud-computing-and-supercomputing": {
    "chapter": 8,
    "title": "Cloud Computing and Supercomputing",
-   "definition": "",
+   "definition": "HPC checkpoints and escalates any node fault into a full stop-and-restart; internet services must stay online on commodity hardware where something is always broken, so they build reliable systems from unreliable parts.",
    "pdf_page": 296,
    "parent": "faults-and-partial-failures"
   },
   "unreliable-networks": {
    "chapter": 8,
    "title": "Unreliable Networks",
-   "definition": "",
+   "definition": "Asynchronous packet networks promise nothing about delivery or timing: a request may be lost, queued, or hit a dead or paused node, and the reply may be lost or delayed — all indistinguishable from 'no response yet'.",
    "pdf_page": 298
   },
   "network-faults-in-practice": {
    "chapter": 8,
    "title": "Network Faults in Practice",
-   "definition": "",
+   "definition": "Network faults are common even in one datacenter (~12/month; redundancy doesn't fix misconfiguration; one-way link failures happen), and untested fault handling deadlocks clusters or deletes data — induce faults deliberately.",
    "pdf_page": 300,
    "parent": "unreliable-networks"
   },
   "detecting-faults": {
    "chapter": 8,
    "title": "Detecting Faults",
-   "definition": "",
+   "definition": "Explicit signals (TCP RST, crash notifications, switch queries, ICMP) help but can't be relied on; only a positive application-level reply proves success, so in general you retry, wait for a timeout, and declare the node dead.",
    "pdf_page": 301,
    "parent": "unreliable-networks"
   },
   "timeouts-and-unbounded-delays": {
    "chapter": 8,
    "title": "Timeouts and Unbounded Delays",
-   "definition": "",
+   "definition": "No correct timeout exists: queueing at switches, receiver OS, hypervisors, and TCP makes delay unbounded; too short declares live nodes dead (duplicate actions, cascading failure), so measure RTT distributions and adapt (Phi Accrual).",
    "pdf_page": 302,
    "parent": "unreliable-networks"
   },
   "synchronous-versus-asynchronous-networks": {
    "chapter": 8,
    "title": "Synchronous Versus Asynchronous Networks",
-   "definition": "",
+   "definition": "Circuit-switched networks reserve bandwidth and never queue (bounded delay); packet switching shares the wire dynamically for bursty traffic at the cost of queueing — latency vs utilization is a cost trade-off, not a law of nature.",
    "pdf_page": 305,
    "parent": "unreliable-networks"
   },
   "unreliable-clocks": {
    "chapter": 8,
    "title": "Unreliable Clocks",
-   "definition": "",
+   "definition": "Every machine has its own drifting quartz clock, imperfectly synchronized by NTP; durations and points in time need different clocks, and message delay makes cross-machine ordering by time unreliable.",
    "pdf_page": 308
   },
   "monotonic-versus-time-of-day-clocks": {
    "chapter": 8,
    "title": "Monotonic Versus Time-of-Day Clocks",
-   "definition": "",
+   "definition": "Time-of-day clocks (CLOCK_REALTIME, currentTimeMillis) are NTP-synced but can jump backwards — for points in time; monotonic clocks (CLOCK_MONOTONIC, nanoTime) only move forward, are slewed not stepped, and have meaningless absolute values — for durations and timeouts.",
    "pdf_page": 309,
    "parent": "unreliable-clocks"
   },
   "clock-synchronization-and-accuracy": {
    "chapter": 8,
    "title": "Clock Synchronization and Accuracy",
-   "definition": "",
+   "definition": "Quartz drifts ~200 ppm (17 s/day unsynced), NTP is limited by network delay and misconfigured servers, leap seconds crash systems (smear them), VM clocks jump; 100 µs accuracy (MiFID II) needs GPS/PTP and monitoring.",
    "pdf_page": 310,
    "parent": "unreliable-clocks"
   },
   "relying-on-synchronized-clocks": {
    "chapter": 8,
    "title": "Relying on Synchronized Clocks",
-   "definition": "",
+   "definition": "Bad clocks fail silently, so monitor offsets; ordering writes by wall-clock timestamp (LWW) silently drops causally later writes — use logical clocks; a clock reading is a confidence interval, which Spanner's TrueTime exposes and commit-waits to get causal cross-datacenter snapshots.",
    "pdf_page": 312,
    "parent": "unreliable-clocks"
   },
   "process-pauses": {
    "chapter": 8,
    "title": "Process Pauses",
-   "definition": "",
+   "definition": "A thread can stop for seconds or minutes at any instruction (GC, VM suspend, steal time, disk/page-fault I/O, SIGSTOP) without noticing, so a lease checked 'just before' acting may have expired; hard real-time avoids this at great cost, servers mitigate GC as planned outages.",
    "pdf_page": 316,
    "parent": "unreliable-clocks"
   },
   "knowledge-truth-and-lies": {
    "chapter": 8,
    "title": "Knowledge, Truth, and Lies",
-   "definition": "",
+   "definition": "A node can't know anything for sure — only infer from messages received or not — so we state a system model, design to its assumptions, and prove algorithms correct within it.",
    "pdf_page": 321
   },
   "the-truth-is-defined-by-the-majority": {
    "chapter": 8,
    "title": "The Truth Is Defined by the Majority",
-   "definition": "",
+   "definition": "A node can't trust its own judgment (asymmetric partitions, GC zombies); decisions including 'you're dead' need a quorum, usually a majority, and a lease holder must be fenced by a monotonically increasing token that the resource itself checks.",
    "pdf_page": 321,
    "parent": "knowledge-truth-and-lies"
   },
   "byzantine-faults": {
    "chapter": 8,
    "title": "Byzantine Faults",
-   "definition": "",
+   "definition": "Nodes that lie (corrupted or malicious responses) are the Byzantine Generals Problem; BFT matters for aerospace and mutually distrusting parties but is impractical in one organization's datacenter — assume honest-but-unreliable nodes and add cheap sanity checks.",
    "pdf_page": 325,
    "parent": "knowledge-truth-and-lies"
   },
   "system-model-and-reality": {
    "chapter": 8,
    "title": "System Model and Reality",
-   "definition": "",
+   "definition": "Timing models (synchronous / partially synchronous / asynchronous) × node models (crash-stop / crash-recovery / Byzantine); correctness = safety properties (must always hold, irreversible when violated) plus liveness ('eventually', may be conditional); models simplify reality, so theory and testing both matter.",
    "pdf_page": 327,
    "parent": "knowledge-truth-and-lies"
   },
