@@ -1,6 +1,6 @@
 # Handoff — DDIA interactive study notes (wayfinder map)
 
-_Written 2026-08-27, updated after the Chapter 7 session (2026-08-28). Continue by opening a session in `~/ddia`
+_Written 2026-08-27, updated after the Chapter 8 session (2026-08-28). Continue by opening a session in `~/ddia`
 (or anywhere) and saying `Use ~/ddia/docs/wayfinder/ddia-learning/HANDOFF.md`, then what to do
 (e.g. "close ch4 and ch5, do chapter 6"). If a `wayfinder` skill is available, `/wayfinder MAP.md`
 also works; otherwise read `MAP.md` + `tickets/` directly._
@@ -25,9 +25,12 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7** all closed on the map. Nothing is claimed or
-awaiting review. User's pattern so far: "close it, do the next chapter."
-Remaining frontier: chapters 8–12 (tickets 11–15, in book order; user may name
+Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7** closed on the map. **Chapter 8 is built, pushed
+(`ac91d52`), and awaiting user review** — ticket 11 is claimed (`Assignee: claude`), not closed.
+On "close it": set `Status: closed`, write `## Resolution` in ticket 11, add a Decisions-so-far
+line to `MAP.md`, commit, push. User's pattern so far: "close it, do the next chapter."
+
+Remaining frontier after that: chapters 9–12 (tickets 12–15, in book order; user may name
 a different one) and the **index page** (ticket 16 — `index.html` doesn't exist yet; stubs and
 chapter footers already link to it).
 
@@ -52,23 +55,25 @@ The assembly/validation Python is in the last few Bash calls of the previous ses
 transcript and is short; re-derive from the description above if needed. Chapter pages weigh
 100–135KB; the pilot and ch 2/ch 4 have 6 steppers, ch 1 has 2 — calibrate by mechanism density.
 
-## Notes for Chapter 8 (next in order)
+## Notes for Chapter 9 (next in order)
 
-- PDF pages 294–341 (0-based; ch 9 starts at 342); sections in `reference/toc.md`; 2nd ed =
-  its Chapter 9 (publisher lists it as one of three heavily revised chapters — read the deltas
-  section carefully).
-- Existing forward links into ch 8 that must resolve: `#faults-and-partial-failures` (×3),
-  `#detecting-faults` (×2), `#relying-on-synchronized-clocks` (×2), `#timeouts-and-unbounded-delays`,
-  `#unreliable-clocks`, `#unreliable-networks`. All slugs already exist in the registry.
-- Ch 7 build notes for calibration: 168KB, 6 steppers (lost-update counter race, read-committed
-  old/new value + write lock, MVCC visibility with txids, write skew doctors, 2PL shared/exclusive
-  + deadlock, SSI tripwires) + 5 static figures (ACID isolation vs atomicity, isolation-level
-  scorecard, copy-on-write B-tree, interactive vs stored procedure, predicate vs index-range lock),
-  15-question quiz.
-- The assembly + validation script from the ch 7 session is worth re-deriving: it splices ch03
-  head/tail, checks tag balance (strip `<!-- -->` first), caption count ≥ max `data-on`/`data-hot`,
-  href resolution, and an SVG text-width heuristic (8px≈4.9, 9px≈5.4, 10px≈6.0 px/char; flag
-  end > 676). Bold 9px mono runs ~10% wider than the heuristic — keep bold banners ≤ ~105 chars.
+- PDF pages 342–409 (0-based; ch 10 starts at 410) — the longest chapter so far; extract and Read
+  in three chunks. Sections in `reference/toc.md`; 2nd ed = its Chapter 10, "significantly
+  expanded" (Raft covered properly) — read the deltas section carefully.
+- Existing forward links into ch 9 that must resolve: `#linearizability` (×3),
+  `#atomic-commit-and-two-phase-commit-2pc` (×3), `#distributed-transactions-and-consensus` (×3),
+  `#fault-tolerant-consensus` (×3), `#consistency-guarantees` (×2), `#ordering-guarantees`,
+  `#ordering-and-causality`, `#membership-and-coordination-services`. All slugs exist in the registry.
+- Ch 8 build notes for calibration: 141KB, 5 steppers (no-response ambiguity Fig 8-1, switch
+  queueing Fig 8-2, LWW timestamp inversion Fig 8-3, TrueTime intervals + commit wait, lease/GC/
+  fencing Figs 8-4+8-5) + 4 static figures (circuit vs packet, wall vs monotonic clock, system-model
+  grid, safety vs liveness) + 2 tables (HPC vs cloud, pause causes), 15-question quiz.
+- Assembly script: `assemble.py` from the ch 7 session, parameterized by `sed` for ch 8 (part-file
+  prefix, title, output path, chapter number, js name). Checks: tag balance (strip comments),
+  caption count ≥ max `data-on`/`data-hot`, href resolution, SVG text-width heuristic (8px≈4.9,
+  9px≈5.4, 10px≈6.0 px/char; flag end > 676; NOTE it does not understand `text-anchor="end"` —
+  either avoid end-anchoring or ignore those hits). Bold 9px mono ≈ 10% wider — keep bold banners
+  ≤ ~105 chars; text inside a box must fit the box, not just the canvas.
 - **Visual QA is worth doing before the first push** — the ch 6 screenshots caught ~10 SVG
   text overflows/overlaps (captions running past x=680, step-N text still visible under step-N+1
   banners, filled highlight rects covering text). Rules of thumb: 9px mono ≈ 5.4px/char, so a
@@ -80,8 +85,9 @@ transcript and is short; re-derive from the description above if needed. Chapter
   `querySelectorAll("figure:not(.anim)")[i]` for statics), clicks `.next` N−1 times, then
   `document.body.innerHTML=""; body.appendChild(f)`; screenshot with
   `--headless=new --hide-scrollbars --window-size=760,620 --screenshot=… file://tmp` (fragment
-  URLs and scrolling do NOT work). Ch 7: 43 shots caught 9 label/arrow overlaps the width
-  heuristic can't see — labels placed on a curve's path, captions colliding on one baseline.
+  URLs and scrolling do NOT work). Ch 7: 43 shots caught 9 label/arrow overlaps; ch 8: 35 shots caught
+  ~12 (labels on a curve's path, an arrow routed through a box, text spilling past a box edge,
+  a `data-on` range that left a stale label visible). Budget ~2 fix rounds per chapter.
 - `concepts.json` is serialized with `indent=1` — dump it that way to keep diffs small.
 
 ## Standing user preferences (also in the map's Notes)
