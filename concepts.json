@@ -1034,88 +1034,88 @@
   "transmitting-event-streams": {
    "chapter": 11,
    "title": "Transmitting Event Streams",
-   "definition": "",
+   "definition": "An event is a small immutable record of something that happened, with a timestamp; producers append, consumers are notified rather than polling; the unbounded counterpart of a batch job's input files.",
    "pdf_page": 461
   },
   "messaging-systems": {
    "chapter": 11,
    "title": "Messaging Systems",
-   "definition": "",
+   "definition": "Publish/subscribe delivery classified by two questions — producers outrunning consumers (drop / buffer / backpressure) and crash durability; direct messaging (UDP, ZeroMQ, webhooks) vs brokers; load balancing vs fan-out; acks + redelivery reorder messages.",
    "pdf_page": 462,
    "parent": "transmitting-event-streams"
   },
   "partitioned-logs": {
    "chapter": 11,
    "title": "Partitioned Logs",
-   "definition": "",
+   "definition": "Log-based brokers (Kafka, Kinesis): a topic is partitioned append-only files with per-partition offsets; partitions, not messages, are assigned to consumers; offsets replace acks; reading is non-destructive so history can be replayed.",
    "pdf_page": 467,
    "parent": "transmitting-event-streams"
   },
   "databases-and-streams": {
    "chapter": 11,
    "title": "Databases and Streams",
-   "definition": "",
+   "definition": "A database write is an event: the replication log is a stream, state machine replication is stream consumption, and every other datastore can be a follower of the database's changelog.",
    "pdf_page": 472
   },
   "keeping-systems-in-sync": {
    "chapter": 11,
    "title": "Keeping Systems in Sync",
-   "definition": "",
+   "definition": "Heterogeneous copies (OLTP, cache, index, warehouse) drift under dual writes — a race with no single leader plus partial failure; the fix is one leader whose ordered changelog everything else follows.",
    "pdf_page": 473,
    "parent": "databases-and-streams"
   },
   "change-data-capture": {
    "chapter": 11,
    "title": "Change Data Capture",
-   "definition": "",
+   "definition": "Extracting a database's ordered stream of changes (by log parsing or triggers) into a log-based broker so derived systems follow it; asynchronous; bootstrapped from a snapshot at a log offset or, with log compaction, from offset 0 with no snapshot.",
    "pdf_page": 475,
    "parent": "databases-and-streams"
   },
   "event-sourcing": {
    "chapter": 11,
    "title": "Event Sourcing",
-   "definition": "",
+   "definition": "The DDD variant: the application deliberately stores immutable high-level events expressing intent, derives mutable state deterministically, cannot compact (snapshots instead), and validates commands synchronously before they become events.",
    "pdf_page": 478,
    "parent": "databases-and-streams"
   },
   "state-streams-and-immutability": {
    "chapter": 11,
    "title": "State, Streams, and Immutability",
-   "definition": "",
+   "definition": "State is the integral of the event stream and the stream is the derivative of state; the log is the truth and the database a cache; immutability gives auditability, recovery, and many read views (CQRS) at the cost of async reads and hard deletion.",
    "pdf_page": 480,
    "parent": "databases-and-streams"
   },
   "processing-streams": {
    "chapter": 11,
    "title": "Processing Streams",
-   "definition": "",
+   "definition": "Operators consume input streams read-only and append derived output streams in acyclic pipelines; like MapReduce jobs except the input never ends, so no sorting and no restart-from-scratch fault tolerance.",
    "pdf_page": 485
   },
   "uses-of-stream-processing": {
    "chapter": 11,
    "title": "Uses of Stream Processing",
-   "definition": "",
+   "definition": "Complex event processing (stored queries, flowing events), stream analytics (windowed aggregates), materialized-view maintenance (a window back to the beginning of time), search on streams (percolator), and the actor/RPC crossover.",
    "pdf_page": 486,
    "parent": "processing-streams"
   },
   "reasoning-about-time": {
    "chapter": 11,
    "title": "Reasoning About Time",
-   "definition": "",
+   "definition": "Processing time (the machine's clock) creates artifacts under lag — a backlog looks like a spike; event time (the timestamp in the event) is truthful but raises when a window is complete; stragglers, three-timestamp clock correction, and tumbling/hopping/sliding/session windows.",
    "pdf_page": 489,
    "parent": "processing-streams"
   },
   "stream-joins": {
    "chapter": 11,
    "title": "Stream Joins",
-   "definition": "",
+   "definition": "Stream-stream (windowed indexes on both sides), stream-table (a CDC-maintained local copy, infinite window), and table-table (two changelogs → a changing materialized join); all keep state from one input and probe it on the other; nondeterministic across streams unless dimensions are versioned (SCD).",
    "pdf_page": 493,
    "parent": "processing-streams"
   },
   "fault-tolerance": {
    "chapter": 11,
    "title": "Fault Tolerance",
-   "definition": "",
+   "definition": "Exactly-once (effectively-once) for a never-ending job: microbatching or barrier checkpointing inside the framework, then atomic commit in a restricted environment or idempotent offset-tagged writes at the boundary; state rebuilt from local replicas, changelog topics, or the input itself.",
    "pdf_page": 497,
    "parent": "processing-streams"
   },
