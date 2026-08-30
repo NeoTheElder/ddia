@@ -1,6 +1,6 @@
 # Handoff — DDIA interactive study notes (wayfinder map)
 
-_Written 2026-08-27, updated after the Chapter 10 session (2026-08-30). Continue by opening a session in `~/ddia`
+_Written 2026-08-27, updated after the Chapter 11 session (2026-08-30). Continue by opening a session in `~/ddia`
 (or anywhere) and saying `Use ~/ddia/docs/wayfinder/ddia-learning/HANDOFF.md`, then what to do
 (e.g. "close ch4 and ch5, do chapter 6"). If a `wayfinder` skill is available, `/wayfinder MAP.md`
 also works; otherwise read `MAP.md` + `tickets/` directly._
@@ -25,14 +25,14 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** closed on the map. **Chapter 10 is built and
-pushed, awaiting user review** — ticket 13 is claimed (`Assignee: claude`), not closed. On "close it":
-set `Status: closed`, write `## Resolution` in ticket 13, add a Decisions-so-far line to `MAP.md`,
-commit, push. User's pattern so far: "close it, do the next chapter."
+Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** closed on the map. **Chapters 10 and 11 are
+built and pushed, both awaiting user review** — tickets 13 and 14 are claimed (`Assignee: claude`),
+not closed (the user said "do the next chapter" without "close it" for ch 10). On "close it" for
+each: set `Status: closed`, write `## Resolution` in the ticket, add a Decisions-so-far line to
+`MAP.md`, commit, push. User's pattern so far: "close it, do the next chapter."
 
-Remaining frontier after that: chapters 11–12 (tickets 14–15, in book order; user may name
-a different one) and the **index page** (ticket 16 — `index.html` doesn't exist yet; stubs and
-chapter footers already link to it).
+Remaining frontier after that: chapter 12 (ticket 15) and the **index page** (ticket 16 —
+`index.html` doesn't exist yet; stubs and chapter footers already link to it).
 
 Every unbuilt chapter has a stub HTML at its final filename, so cross-references never 404.
 
@@ -55,18 +55,28 @@ The assembly/validation Python is in the last few Bash calls of the previous ses
 transcript and is short; re-derive from the description above if needed. Chapter pages weigh
 100–135KB; the pilot and ch 2/ch 4 have 6 steppers, ch 1 has 2 — calibrate by mechanism density.
 
-## Notes for Chapter 11 (next in order)
+## Notes for Chapter 12 (next in order)
 
-- PDF pages 460–509 (0-based; ch 12 starts at 510). Sections in `reference/toc.md`; 2nd ed = its
-  Chapter 12 per the deltas file (line ~363) — read that section.
-- Existing forward links into ch 11 that must resolve: `#transmitting-event-streams` (×3),
-  `#messaging-systems` (×2), `#databases-and-streams` (×2), `#change-data-capture`, `#fault-tolerance`,
-  `#processing-streams`. All slugs exist in the registry.
-- Ch 10 build notes for calibration: 132KB, 5 steppers (Unix pipeline stage by stage, MapReduce job
-  execution Fig 10-1, reduce-side sort-merge join Fig 10-3, MapReduce vs dataflow engine +
-  recompute, Pregel shortest path) + 1 static figure (batch output → serving store) + 3 tables
-  (map-side joins, Hadoop vs MPP, plus an inline pre block), 15-question quiz.
-- Assembly script: `assemble10.py` (sed-parameterized from `assemble9.py`). Caption budget ≤ ~118
+- PDF pages 510–573 (0-based; Glossary starts at 574). Sections in `reference/toc.md`; 2nd ed splits
+  it into its Chapters 13–14 per the deltas file (line ~388) — read that section. ~64 pages, the
+  longest chapter: extract may exceed 25K tokens per Read — read in three chunks.
+- Existing forward links into ch 12 that must resolve (grep `ch12-future-of-data-systems.html#`
+  across `chapters/`): at least `#data-integration`, `#designing-applications-around-dataflow`,
+  `#privacy-and-tracking`, `#batch-and-stream-processing`, `#enforcing-constraints`. All 15 ch 12
+  slugs exist in the registry with empty definitions.
+- Ch 11 build notes for calibration: 206KB (largest so far — the chapter is dense; earlier pages
+  ran 100–170KB), 6 steppers (AMQP redelivery reordering Fig 11-2, partitioned log with offsets /
+  failover / replay Fig 11-3, dual-write race Fig 11-4, CDC log compaction + bootstrap, processing-
+  vs event-time under a redeploy Fig 11-7, stream-stream join) + 7 static figures (load balancing
+  vs fan-out, CDC fan-out, state⇄stream integral/derivative, three timestamps, window types, three
+  join types, checkpoint barriers) + 2 tables + 5 `.ed2` asides, 16-question quiz. 43 screenshots
+  caught 6 collisions in one fix round (labels on arrows, text past box edges, two-column captions
+  colliding at the x=360 midline).
+- Assembly script: `assemble11.py` (sed-parameterized from `assemble10.py`; the parameters are the
+  scratchpad path, title, `p11-` prefix, output filename, `chapter==11`, `ch11.js`). Its overflow
+  heuristic assigns `text-anchor="middle"` to any `<text>` within 900 chars after a middle-anchored
+  `<g>` — so left-anchored labels that follow an axis-label group escape detection; check those by
+  hand. Caption budget ≤ ~118
   chars at x=20 for 9px, and text INSIDE a box must fit the box width (≈ (box width − 20) / 5.4
   chars). Chapters 9 and 10 each needed a trim pass of 20–35 captions — draft captions at ≤ 100
   chars and you'll skip that round.
