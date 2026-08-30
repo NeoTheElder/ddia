@@ -946,88 +946,88 @@
   "batch-processing-with-unix-tools": {
    "chapter": 10,
    "title": "Batch Processing with Unix Tools",
-   "definition": "",
+   "definition": "Batch jobs take a large input, run offline, and produce an output measured by throughput; a Unix pipeline over a web log (awk | sort | uniq -c | sort -rn | head) is already a complete batch system and the template for MapReduce.",
    "pdf_page": 412
   },
   "simple-log-analysis": {
    "chapter": 10,
    "title": "Simple Log Analysis",
-   "definition": "",
+   "definition": "Top-5 pages from an nginx log with awk (extract the URL), sort (make equal URLs adjacent), uniq -c (count), sort -rn, head — sort spills to disk and parallelizes, so it scales past memory where an in-memory hash table would not.",
    "pdf_page": 412,
    "parent": "batch-processing-with-unix-tools"
   },
   "the-unix-philosophy": {
    "chapter": 10,
    "title": "The Unix Philosophy",
-   "definition": "",
+   "definition": "Do one thing well; expect your output to feed an unknown program; build to try early and throw away; prefer tools — enabled by a uniform interface (a file = byte sequence), separation of logic from wiring (stdin/stdout, pipes), and immutable, inspectable inputs; limited to one machine.",
    "pdf_page": 415,
    "parent": "batch-processing-with-unix-tools"
   },
   "mapreduce-and-distributed-filesystems": {
    "chapter": 10,
    "title": "MapReduce and Distributed Filesystems",
-   "definition": "",
+   "definition": "MapReduce is Unix tools distributed over thousands of machines, reading and writing a shared-nothing distributed filesystem (HDFS: per-machine daemons, a NameNode, replicated or erasure-coded blocks) instead of stdin/stdout.",
    "pdf_page": 418
   },
   "mapreduce-job-execution": {
    "chapter": 10,
    "title": "MapReduce Job Execution",
-   "definition": "",
+   "definition": "Read input blocks into records, map each to key-value pairs (mapper near its block), partition by hash of key and sort per reducer (the shuffle), merge and reduce per key, write to HDFS; multi-stage work is a workflow of jobs chained by directory and a scheduler.",
    "pdf_page": 420,
    "parent": "mapreduce-and-distributed-filesystems"
   },
   "reduce-side-joins-and-grouping": {
    "chapter": 10,
    "title": "Reduce-Side Joins and Grouping",
-   "definition": "",
+   "definition": "Sort-merge join: mappers from both inputs emit the join key, the shuffle co-locates all records per key, a secondary sort puts the dimension record first, and the reducer joins with one record in memory; GROUP BY and sessionization use the same pattern; hot keys need skewed/sharded joins or two-stage aggregation.",
    "pdf_page": 424,
    "parent": "mapreduce-and-distributed-filesystems"
   },
   "map-side-joins": {
    "chapter": 10,
    "title": "Map-Side Joins",
-   "definition": "",
+   "definition": "Skip the shuffle when inputs allow it: broadcast hash join (small input in every mapper's memory), partitioned hash join (both inputs partitioned identically), map-side merge join (partitioned and sorted); output layout follows the large input, so partitioning metadata matters.",
    "pdf_page": 429,
    "parent": "mapreduce-and-distributed-filesystems"
   },
   "the-output-of-batch-workflows": {
    "chapter": 10,
    "title": "The Output of Batch Workflows",
-   "definition": "",
+   "definition": "Batch output is a structure, not a report: search indexes and key-value stores for ML/recommendations, built as immutable files inside the job and bulk-loaded with an atomic switch — never written record-by-record to a live database; immutability gives human fault tolerance and safe retries.",
    "pdf_page": 432,
    "parent": "mapreduce-and-distributed-filesystems"
   },
   "comparing-hadoop-to-distributed-databases": {
    "chapter": 10,
    "title": "Comparing Hadoop to Distributed Databases",
-   "definition": "",
+   "definition": "MPP databases run parallel SQL over carefully modeled data with whole-query retry; Hadoop is a general-purpose OS over raw files (data lake, schema-on-read, arbitrary code, many processing models on one cluster) with task-level retry and eager disk writes, designed for Google's preemption-heavy mixed-use clusters.",
    "pdf_page": 435,
    "parent": "mapreduce-and-distributed-filesystems"
   },
   "beyond-mapreduce": {
    "chapter": 10,
    "title": "Beyond MapReduce",
-   "definition": "",
+   "definition": "MapReduce is a clear but slow and laborious abstraction; higher-level APIs fixed ergonomics, while dataflow engines, Pregel, and declarative optimizers fix the execution model itself.",
    "pdf_page": 440
   },
   "materialization-of-intermediate-state": {
    "chapter": 10,
    "title": "Materialization of Intermediate State",
-   "definition": "",
+   "definition": "MapReduce writes every job's output to replicated HDFS (straggler barriers, redundant mappers, needless replication); dataflow engines (Spark, Tez, Flink) run the workflow as one job of operators with in-memory/local-disk hand-off, pipelined start, and recovery by recomputation from lineage — requiring deterministic operators.",
    "pdf_page": 440,
    "parent": "beyond-mapreduce"
   },
   "graphs-and-iterative-processing": {
    "chapter": 10,
    "title": "Graphs and Iterative Processing",
-   "definition": "",
+   "definition": "Iterative graph algorithms (PageRank, transitive closure) don't fit single-pass MapReduce; the Pregel/BSP model keeps vertex state across supersteps, delivers messages exactly once in the next round, works only where messages arrive, checkpoints at round boundaries — but heavy cross-machine traffic means a single machine often wins.",
    "pdf_page": 445,
    "parent": "beyond-mapreduce"
   },
   "high-level-apis-and-languages": {
    "chapter": 10,
    "title": "High-Level APIs and Languages",
-   "definition": "",
+   "definition": "Hive, Pig, Spark and Flink DataFrames offer relational operators, interactive use, and declarative joins/filters that cost-based optimizers turn into the right algorithm, columnar reads, and vectorized loops — batch engines and MPP databases converge while keeping arbitrary code.",
    "pdf_page": 447,
    "parent": "beyond-mapreduce"
   },
