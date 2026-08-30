@@ -1,6 +1,6 @@
 # Handoff — DDIA interactive study notes (wayfinder map)
 
-_Written 2026-08-27, updated after the Chapter 9 session (2026-08-30). Continue by opening a session in `~/ddia`
+_Written 2026-08-27, updated after the Chapter 10 session (2026-08-30). Continue by opening a session in `~/ddia`
 (or anywhere) and saying `Use ~/ddia/docs/wayfinder/ddia-learning/HANDOFF.md`, then what to do
 (e.g. "close ch4 and ch5, do chapter 6"). If a `wayfinder` skill is available, `/wayfinder MAP.md`
 also works; otherwise read `MAP.md` + `tickets/` directly._
@@ -25,10 +25,12 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** all closed on the map. Nothing is claimed or
-awaiting review. User's pattern so far: "close it, do the next chapter."
+Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** closed on the map. **Chapter 10 is built and
+pushed, awaiting user review** — ticket 13 is claimed (`Assignee: claude`), not closed. On "close it":
+set `Status: closed`, write `## Resolution` in ticket 13, add a Decisions-so-far line to `MAP.md`,
+commit, push. User's pattern so far: "close it, do the next chapter."
 
-Remaining frontier: chapters 10–12 (tickets 13–15, in book order; user may name
+Remaining frontier after that: chapters 11–12 (tickets 14–15, in book order; user may name
 a different one) and the **index page** (ticket 16 — `index.html` doesn't exist yet; stubs and
 chapter footers already link to it).
 
@@ -53,23 +55,21 @@ The assembly/validation Python is in the last few Bash calls of the previous ses
 transcript and is short; re-derive from the description above if needed. Chapter pages weigh
 100–135KB; the pilot and ch 2/ch 4 have 6 steppers, ch 1 has 2 — calibrate by mechanism density.
 
-## Notes for Chapter 10 (next in order)
+## Notes for Chapter 11 (next in order)
 
-- PDF pages 410–459 (0-based; ch 11 starts at 460). Part III (Derived Data) opens at 406 — the
-  Part intro (406–409) is short and worth reading for framing (systems of record vs derived data).
-  Sections in `reference/toc.md`; 2nd ed = its Chapter 11 per the deltas file; read that section.
-- Existing forward links into ch 10 that must resolve: `#mapreduce-and-distributed-filesystems`
-  (×2), `#comparing-hadoop-to-distributed-databases`, `#graphs-and-iterative-processing`. All slugs
-  exist in the registry.
-- Ch 9 build notes for calibration: 162KB, 6 steppers (linearizable register timeline Figs 9-2/9-3,
-  non-linearizable strict quorum Fig 9-6, Lamport timestamps Fig 9-8, linearizable CAS via a
-  total-order log, 2PC + coordinator crash Figs 9-9/9-10, epochs + overlapping quorums) + 4 static
-  figures (football Fig 9-1, multi-DC CAP Fig 9-7, total vs partial order, consensus equivalence web)
-  + 2 tables (consensus properties, ZooKeeper features), 16-question quiz.
-- Assembly script: `assemble9.py` (sed-parameterized copy of `assemble.py`; the ch 9 copy also
-  honours `text-anchor="end"` and inherits `text-anchor="middle"` from a parent `<g>`). Caption
-  budget: ≤ ~120 chars at x=20 for 9px, ≤ ~105 for bold. Writing captions long and trimming after
-  cost a full extra round in ch 9 — write them short.
+- PDF pages 460–509 (0-based; ch 12 starts at 510). Sections in `reference/toc.md`; 2nd ed = its
+  Chapter 12 per the deltas file (line ~363) — read that section.
+- Existing forward links into ch 11 that must resolve: `#transmitting-event-streams` (×3),
+  `#messaging-systems` (×2), `#databases-and-streams` (×2), `#change-data-capture`, `#fault-tolerance`,
+  `#processing-streams`. All slugs exist in the registry.
+- Ch 10 build notes for calibration: 132KB, 5 steppers (Unix pipeline stage by stage, MapReduce job
+  execution Fig 10-1, reduce-side sort-merge join Fig 10-3, MapReduce vs dataflow engine +
+  recompute, Pregel shortest path) + 1 static figure (batch output → serving store) + 3 tables
+  (map-side joins, Hadoop vs MPP, plus an inline pre block), 15-question quiz.
+- Assembly script: `assemble10.py` (sed-parameterized from `assemble9.py`). Caption budget ≤ ~118
+  chars at x=20 for 9px, and text INSIDE a box must fit the box width (≈ (box width − 20) / 5.4
+  chars). Chapters 9 and 10 each needed a trim pass of 20–35 captions — draft captions at ≤ 100
+  chars and you'll skip that round.
 - **Visual QA is worth doing before the first push** — the ch 6 screenshots caught ~10 SVG
   text overflows/overlaps (captions running past x=680, step-N text still visible under step-N+1
   banners, filled highlight rects covering text). Rules of thumb: 9px mono ≈ 5.4px/char, so a
@@ -82,7 +82,7 @@ transcript and is short; re-derive from the description above if needed. Chapter
   `document.body.innerHTML=""; body.appendChild(f)`; screenshot with
   `--headless=new --hide-scrollbars --window-size=760,620 --screenshot=… file://tmp` (fragment
   URLs and scrolling do NOT work). Ch 7: 43 shots caught 9 label/arrow overlaps; ch 8: 35 shots caught
-  ~12; ch 9: 41 shots caught ~11 (labels on a curve's path, an arrow routed through a box, text spilling past a box edge,
+  ~12; ch 9: 41 shots caught ~11; ch 10: 33 shots caught 5 (labels on a curve's path, an arrow routed through a box, text spilling past a box edge,
   a `data-on` range that left a stale label visible). Budget ~2 fix rounds per chapter.
 - `concepts.json` is serialized with `indent=1` — dump it that way to keep diffs small.
 
