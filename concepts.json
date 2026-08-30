@@ -845,101 +845,101 @@
   "consistency-guarantees": {
    "chapter": 9,
    "title": "Consistency Guarantees",
-   "definition": "",
+   "definition": "Eventual consistency (convergence) is the weakest useful guarantee — no bound on when, reads may return anything meanwhile; stronger models cost performance or fault tolerance but are easier to use; consistency (replicas) and isolation (concurrent transactions) are related but distinct.",
    "pdf_page": 343
   },
   "linearizability": {
    "chapter": 9,
    "title": "Linearizability",
-   "definition": "",
+   "definition": "The illusion of a single copy of the data with atomic operations — a recency guarantee: once any client has seen a new value, all later reads must see it; also called strong, atomic, or external consistency.",
    "pdf_page": 345
   },
   "what-makes-a-system-linearizable": {
    "chapter": 9,
    "title": "What Makes a System Linearizable?",
-   "definition": "",
+   "definition": "Every operation takes effect at one instant inside its request/response window; joining those instants must give a valid register history that never moves backward in time — so after one read returns the new value, all subsequent reads must; testable from recorded timings.",
    "pdf_page": 346,
    "parent": "linearizability"
   },
   "relying-on-linearizability": {
    "chapter": 9,
    "title": "Relying on Linearizability",
-   "definition": "",
+   "definition": "Needed for locks and leader election (ZooKeeper, etcd), hard uniqueness constraints (one up-to-date value all nodes agree on), and cross-channel timing dependencies such as file storage racing a message queue.",
    "pdf_page": 351,
    "parent": "linearizability"
   },
   "implementing-linearizable-systems": {
    "chapter": 9,
    "title": "Implementing Linearizable Systems",
-   "definition": "",
+   "definition": "Single-leader replication can be linearizable (leader or synchronous-follower reads, if you truly know the leader); consensus systems are; multi-leader isn't; Dynamo-style quorums aren't even with w + r > n unless read repair is synchronous, and CAS still needs consensus.",
    "pdf_page": 353,
    "parent": "linearizability"
   },
   "the-cost-of-linearizability": {
    "chapter": 9,
    "title": "The Cost of Linearizability",
-   "definition": "",
+   "definition": "Under a network fault a linearizable system must make cut-off replicas unavailable (the CAP trade-off — 'consistent or available when partitioned'; the book calls CAP unhelpful), and it is slow always: response time is proportional to network-delay uncertainty, as with multi-core RAM.",
    "pdf_page": 356,
    "parent": "linearizability"
   },
   "ordering-guarantees": {
    "chapter": 9,
    "title": "Ordering Guarantees",
-   "definition": "",
+   "definition": "Ordering underlies replication logs, serializability, and timestamps; it connects causality (a partial order), linearizability (a total order), and consensus.",
    "pdf_page": 360
   },
   "ordering-and-causality": {
    "chapter": 9,
    "title": "Ordering and Causality",
-   "definition": "",
+   "definition": "Causality (cause before effect, question before answer) defines a partial order with branches and merges; linearizability is a total order and implies causal consistency; causal consistency is the strongest model that stays fast and available under network problems.",
    "pdf_page": 360,
    "parent": "ordering-guarantees"
   },
   "sequence-number-ordering": {
    "chapter": 9,
    "title": "Sequence Number Ordering",
-   "definition": "",
+   "definition": "Logical clocks give compact total orders; per-node counters, wall clocks, and block allocation are not causally consistent, Lamport timestamps (counter, node ID) with max-passing are — but timestamp order alone can't enforce uniqueness because you don't know when the order is final.",
    "pdf_page": 364,
    "parent": "ordering-guarantees"
   },
   "total-order-broadcast": {
    "chapter": 9,
    "title": "Total Order Broadcast",
-   "definition": "",
+   "definition": "Reliable, same-order delivery of messages to all nodes with the order fixed at delivery — a replicated log; yields state machine replication, fencing tokens, and linearizable CAS (append, wait for your message, first claim wins); equivalent to consensus and to a linearizable CAS register.",
    "pdf_page": 369,
    "parent": "ordering-guarantees"
   },
   "distributed-transactions-and-consensus": {
    "chapter": 9,
    "title": "Distributed Transactions and Consensus",
-   "definition": "",
+   "definition": "Consensus — several nodes agreeing on one irrevocable decision — underlies leader election and atomic commit; FLP forbids it only in the pure asynchronous model, and 2PC is a consensus algorithm without fault tolerance.",
    "pdf_page": 373
   },
   "atomic-commit-and-two-phase-commit-2pc": {
    "chapter": 9,
    "title": "Atomic Commit and Two-Phase Commit (2PC)",
-   "definition": "",
+   "definition": "Prepare (participants fsync and promise to commit), the coordinator logs its decision (the commit point), then commit/abort to all with infinite retries; two points of no return; a crashed coordinator leaves participants in doubt holding locks; 3PC needs a perfect failure detector.",
    "pdf_page": 375,
    "parent": "distributed-transactions-and-consensus"
   },
   "distributed-transactions-in-practice": {
    "chapter": 9,
    "title": "Distributed Transactions in Practice",
-   "definition": "",
+   "definition": "Heterogeneous XA/2PC gives exactly-once queue+DB processing but is slow (fsyncs, round trips), makes the coordinator an unreplicated single point of failure and app servers stateful, needs manual or atomicity-breaking heuristic resolution of orphaned in-doubt transactions, and amplifies failures; database-internal distributed transactions fare better.",
    "pdf_page": 381,
    "parent": "distributed-transactions-and-consensus"
   },
   "fault-tolerant-consensus": {
    "chapter": 9,
    "title": "Fault-Tolerant Consensus",
-   "definition": "",
+   "definition": "Uniform agreement, integrity, validity (safety) plus termination (liveness, needs a majority); VSR, Paxos, Raft, Zab decide sequences (total order broadcast) using a leader unique only per epoch, with proposal quorums that must overlap election quorums so stale leaders are discovered; costs: synchronous replication, strict majority, fixed membership, timeout-driven churn.",
    "pdf_page": 385,
    "parent": "distributed-transactions-and-consensus"
   },
   "membership-and-coordination-services": {
    "chapter": 9,
    "title": "Membership and Coordination Services",
-   "definition": "",
+   "definition": "ZooKeeper/etcd: small in-memory data replicated by total order broadcast plus linearizable CAS (locks/leases), zxid ordering (fencing), session-based failure detection (ephemeral nodes), and watches — outsourced consensus for leader election and work assignment among 3–5 voters; service discovery doesn't need consensus, membership agreement does.",
    "pdf_page": 391,
    "parent": "distributed-transactions-and-consensus"
   },

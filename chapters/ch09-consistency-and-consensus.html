@@ -1,16 +1,1278 @@
-<title>DDIA Ch 9: Consistency and Consensus</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 9 — Consistency and Consensus</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#consistency-guarantees">consistency-guarantees</a>
+  <a class="l1" href="#linearizability">linearizability</a>
+  <a href="#what-makes-a-system-linearizable">what-makes-it</a>
+  <a href="#relying-on-linearizability">relying-on-it</a>
+  <a href="#implementing-linearizable-systems">implementing</a>
+  <a href="#the-cost-of-linearizability">the-cost (CAP)</a>
+  <a class="l1" href="#ordering-guarantees">ordering</a>
+  <a href="#ordering-and-causality">causality</a>
+  <a href="#sequence-number-ordering">sequence-numbers</a>
+  <a href="#total-order-broadcast">total-order-broadcast</a>
+  <a class="l1" href="#distributed-transactions-and-consensus">txns+consensus</a>
+  <a href="#atomic-commit-and-two-phase-commit-2pc">2pc</a>
+  <a href="#distributed-transactions-in-practice">xa-in-practice</a>
+  <a href="#fault-tolerant-consensus">fault-tolerant-consensus</a>
+  <a href="#membership-and-coordination-services">zookeeper+etcd</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 9: Consistency and Consensus</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;09</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;10</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Consistency and Consensus</h1>
+  <p class="epigraph">Is it better to be alive and wrong or right and dead?
+  <span class="attr">— Jay Kreps, A Few Notes on Kafka and Jepsen (2013)</span></p>
+</header>
+
+<p><a class="xref back" href="ch08-trouble-with-distributed-systems.html#faults-and-partial-failures" data-tip="Ch 8 · Faults and Partial Failures — some parts break unpredictably while others work; you may not even know whether an operation succeeded">Chapter&nbsp;8<sup>←8</sup></a> was the list of everything that can go wrong. The lazy response is to let the whole service fail and show an error. If that's unacceptable, you need <strong>fault tolerance</strong>: keep working correctly while parts are broken. This chapter is about the algorithms that do that, assuming the worst — packets lost, reordered, duplicated, or delayed; clocks approximate; nodes pausing or crashing at any time.</p>
+
+<p>The strategy is the one that worked for transactions in <a class="xref back" href="ch07-transactions.html#the-slippery-concept-of-a-transaction" data-tip="Ch 7 · The Slippery Concept of a Transaction — an abstraction that lets the application ignore crashes, concurrency, and storage faults">Chapter&nbsp;7<sup>←7</sup></a>: find general-purpose abstractions with useful guarantees, implement them once, and let applications lean on them. The central abstraction here is <strong>consensus</strong> — getting all nodes to agree on something — which turns out to be surprisingly hard to do reliably, and surprisingly widely useful once you have it (electing a single leader so there's no <em>split brain</em>, for one). Before tackling it head-on, the chapter maps the space of guarantees: what is possible, what isn't, and what it costs.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Three questions, each harder than it looks, and by the end they turn out to be the same question. <strong>Can we make many copies behave like one?</strong> That's linearizability — and it is expensive precisely when the network is slow or broken. <strong>Can we at least agree on what happened before what?</strong> Causality gives a partial order for free; a total order (every event numbered) needs a leader or Lamport timestamps — but knowing the order isn't enough when you must decide <em>right now</em> whether this username is taken, because a lower-numbered claim might still be in flight. <strong>Can several machines agree on one irrevocable decision, even as some of them die?</strong> That's consensus. And the punchline: a linearizable compare-and-set, a total-order log, atomic commit across nodes, a lock, a uniqueness constraint, and leader election are all <em>equivalent</em> — solve one and you've solved them all. Two-phase commit solves it badly (one coordinator, no fault tolerance); Paxos/Raft/Zab solve it well (majority votes, epochs); ZooKeeper packages the solution so you never have to. Colors as always: <span style="color:var(--write);font-weight:600">ember = writes / proposals</span>, <span style="color:var(--read);font-weight:600">cyan = reads / responses</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="consistency-guarantees">
+<span class="key-chip">consistency-guarantees</span>
+<h2><a class="self" href="#consistency-guarantees">Consistency Guarantees</a></h2>
+
+<p>Look at two replicas at the same instant and you'll likely see different data — writes reach different nodes at different times, whatever the replication scheme (<a class="xref back" href="ch05-replication.html#problems-with-replication-lag" data-tip="Ch 5 · Problems with Replication Lag — reads from asynchronous followers can be stale; eventual consistency has no bound on 'eventually'">Chapter&nbsp;5<sup>←5</sup></a>). Most replicated databases promise at least <strong>eventual consistency</strong>: stop writing, wait some unspecified time, and all reads return the same value — better named <em>convergence</em>. It is a very weak guarantee. It says nothing about <em>when</em>; until then reads may return anything. Write a value and read it back and you may not see it (<a class="xref back" href="ch05-replication.html#reading-your-own-writes" data-tip="Ch 5 · Reading Your Own Writes — read-after-write consistency for a user's own submissions">Chapter&nbsp;5<sup>←5</sup></a>). That is hard for developers because it's nothing like a variable in a single-threaded program, which a database superficially resembles; and the bugs hide until a network fault or high concurrency.</p>
+
+<p>This chapter explores <strong>stronger models</strong>. They cost performance or fault tolerance but are easier to use correctly. There is a family resemblance to transaction isolation levels (<a class="xref back" href="ch07-transactions.html#weak-isolation-levels" data-tip="Ch 7 · Weak Isolation Levels — read committed, snapshot isolation, and the race conditions each allows">Chapter&nbsp;7<sup>←7</sup></a>), but they're mostly separate concerns: isolation is about race conditions between concurrent transactions; distributed consistency is about coordinating <em>replicas</em> under delay and failure. Three movements, deeply linked: <strong>linearizability</strong>, the strongest common model; <strong>ordering</strong>, causality and total order; and <strong>distributed transactions and consensus</strong>.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · isolation ≠ consistency, spelled out</span>
+The 2nd edition (its Chapter 10, "significantly expanded") makes the layering explicit that the 1st edition only gestures at here: <em>isolation levels</em> (read committed → snapshot → serializable) answer "what can concurrent transactions see of each other?"; <em>consistency levels</em> (eventual → causal → linearizable) answer "how do replicas relate?"; and <strong>strict serializability</strong> is the corner where both are maximal. It cites the standard explainers that untangle the two hierarchies and the Spanner/CockroachDB consistency-model write-ups. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="linearizability">
+<span class="key-chip">linearizability</span>
+<h2><a class="self" href="#linearizability">Linearizability</a></h2>
+
+<p>Ask two replicas the same question and get two answers — confusing. Wouldn't it be simpler if the database gave the <strong>illusion of a single copy</strong>? That is <strong>linearizability</strong> (also <em>atomic consistency</em>, <em>strong</em>, <em>immediate</em>, or <em>external consistency</em>): appear as if there were only one copy of the data, and every operation on it were atomic. As soon as one client's write completes, every client's read must see that value — not a stale cache or lagging replica. Linearizability is a <strong>recency guarantee</strong>.</p>
+
+<figure>
+<svg viewBox="0 0 680 190" role="img" aria-label="Figure 9-1 redrawn: after the final score is announced, Alice refreshes and sees the result from an up-to-date replica; she tells Bob; Bob refreshes after hearing her but his request hits a lagging replica that still shows the game in progress — a linearizability violation made visible by the second communication channel, Alice's voice.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="270" y="20" width="140" height="44" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="340" y="38" text-anchor="middle" font-weight="700">leader</text>
+    <text x="340" y="54" text-anchor="middle" font-size="9" fill="var(--write)">final score: Germany 1–0</text>
+    <rect x="60" y="100" width="170" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="145" y="116" text-anchor="middle" font-size="9" font-weight="700">follower 1 (up to date)</text>
+    <text x="145" y="131" text-anchor="middle" font-size="9" fill="var(--write)">Germany 1–0</text>
+    <rect x="450" y="100" width="170" height="40" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/>
+    <text x="535" y="116" text-anchor="middle" font-size="9" font-weight="700">follower 2 (lagging)</text>
+    <text x="535" y="131" text-anchor="middle" font-size="9" opacity=".7">match in progress…</text>
+    <path d="M290 64 L 180 98" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a91-w)"/>
+    <path d="M390 64 L 500 98" stroke="var(--write)" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a91-w)"/>
+    <text x="455" y="72" font-size="8" fill="var(--write)">replication lag</text>
+    <text x="20" y="172" font-size="9" fill="var(--read)">① Alice reloads → follower 1 → "won!"</text>
+    <text x="268" y="172" font-size="9" opacity=".85">② tells Bob (voice channel)</text>
+    <text x="440" y="172" font-size="9" fill="var(--read)">③ Bob reloads → follower 2 → stale</text>
+    <path d="M145 140 L 145 160" stroke="var(--read)" stroke-width="1.6" marker-end="url(#a91-r)"/>
+    <path d="M535 140 L 535 160" stroke="var(--read)" stroke-width="1.6" marker-end="url(#a91-r)"/>
+    <defs>
+      <marker id="a91-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a91-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption>Alice and Bob, same room, 2014 World Cup final. Had they reloaded simultaneously, two different answers would be unremarkable. But Bob reloaded <em>after</em> hearing Alice, so he expects a result at least as recent as hers — and gets a stale one. The violation was only observable because of a second channel (Alice's voice); the pattern recurs below as "cross-channel timing dependencies."</figcaption>
+</figure>
+
+<h3 id="what-makes-a-system-linearizable"><a class="self" href="#what-makes-a-system-linearizable">What Makes a System Linearizable?</a></h3>
+<span class="key-chip">what-makes-a-system-linearizable</span>
+
+<p>"A single copy of the data" needs care to pin down. The book's Figures 9-2 to 9-4 use a <strong>register</strong> x (one key, one row, one document) and draw each client request as a bar from send to response; a client knows only that its request was processed <em>somewhere</em> in that bar. Operations: <code>read(x) ⇒ v</code>, <code>write(x, v) ⇒ r</code>, and later <code>cas(x, v<sub>old</sub>, v<sub>new</sub>) ⇒ r</code> (compare-and-set). Rules: a read that finishes before a write starts returns the old value; a read that starts after the write completes returns the new value; a read that <em>overlaps</em> the write may return either. But that alone would let readers see the value flip back and forth during the write (a <em>regular register</em>). Linearizability adds one more constraint: there is a single instant at which the value atomically flips, so <strong>once any read has returned the new value, every later read must too</strong> — even if the write hasn't finished yet.</p>
+
+<figure class="anim" id="anim-linearizable">
+<svg viewBox="0 0 680 300" role="img" aria-label="Figures 9-2 and 9-3 redrawn: a timeline with a write of x from 0 to 1 by client C, and reads by clients A and B shown as bars. Reads finishing before the write must return 0; reads starting after it must return 1; overlapping reads may return either — until one read returns 1, after which every later read must return 1 too, because the write took effect at a single atomic instant.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <path d="M60 240 H 660" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="640" y="256" text-anchor="end" font-size="9" opacity=".7">time →</text>
+    <text x="20" y="70" font-size="9" font-weight="700">C</text>
+    <text x="20" y="130" font-size="9" font-weight="700">A</text>
+    <text x="20" y="190" font-size="9" font-weight="700">B</text>
+    <!-- C write bar -->
+    <rect x="200" y="55" width="260" height="22" rx="3" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="330" y="70" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">write(x, 1) ⇒ ok</text>
+    <text x="60" y="70" font-size="9" opacity=".7">x = 0 initially</text>
+    <!-- A reads -->
+    <rect x="70" y="115" width="100" height="22" rx="3" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="120" y="130" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ 0</text>
+    <rect x="240" y="115" width="110" height="22" rx="3" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <g data-on="1-2"><text x="295" y="130" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ ?</text></g>
+    <g data-on="3-6"><text x="295" y="130" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ 1</text></g>
+    <rect x="500" y="115" width="110" height="22" rx="3" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="555" y="130" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ 1</text>
+    <!-- B reads -->
+    <rect x="130" y="175" width="120" height="22" rx="3" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <g data-on="1-2"><text x="190" y="190" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ ?</text></g>
+    <g data-on="3-6"><text x="190" y="190" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ 0</text></g>
+    <rect x="360" y="175" width="110" height="22" rx="3" fill="var(--read-soft)" stroke="var(--read)" stroke-width="1.5"/>
+    <g data-on="1-3"><text x="415" y="190" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ ?</text></g>
+    <g data-on="4"><text x="415" y="190" text-anchor="middle" font-size="9" fill="var(--bad)" font-weight="700">read(x) ⇒ 0 ✗</text></g>
+    <g data-on="5-6"><text x="415" y="190" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read(x) ⇒ 1 ✓</text></g>
+    <!-- step highlights -->
+    <g data-on="1" data-hot="1">
+      <rect x="66" y="111" width="108" height="30" rx="4" fill="none" stroke="var(--ok)" stroke-width="2"/>
+      <rect x="496" y="111" width="118" height="30" rx="4" fill="none" stroke="var(--ok)" stroke-width="2"/>
+    </g>
+    <g data-on="2" data-hot="2">
+      <rect x="236" y="111" width="118" height="30" rx="4" fill="none" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3"/>
+      <rect x="126" y="171" width="128" height="30" rx="4" fill="none" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3"/>
+      <rect x="356" y="171" width="118" height="30" rx="4" fill="none" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3"/>
+    </g>
+    <g data-on="3-6">
+      <path d="M330 48 V 232" stroke="var(--write)" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <text x="334" y="46" font-size="8" fill="var(--write)">x flips 0→1 here</text>
+    </g>
+    <g data-on="4-6"><path d="M350 128 C 360 150, 360 165, 365 175" stroke="var(--read)" stroke-width="1.5" fill="none" marker-end="url(#a9l-r)"/></g>
+    <g data-on="4" data-hot="4"><rect x="356" y="171" width="118" height="30" rx="4" fill="none" stroke="var(--bad)" stroke-width="2"/></g>
+    <g data-on="5" data-hot="5"><rect x="356" y="171" width="118" height="30" rx="4" fill="none" stroke="var(--ok)" stroke-width="2"/></g>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="276" font-size="9" opacity=".85">A's first read ends before the write begins ⇒ must return 0. A's last read starts after the write ends ⇒ must return 1.</text></g>
+    <g data-on="2"><text x="20" y="276" font-size="9" opacity=".85">three reads overlap the write. Each could return 0 or 1 — the client can't know when inside its bar the DB acted.</text></g>
+    <g data-on="3" data-hot="3"><text x="20" y="276" font-size="9" opacity=".85">linearizability: imagine ONE instant inside the write's bar where x flips. Reads before it see 0, reads after see 1.</text></g>
+    <g data-on="4"><text x="20" y="276" font-size="9" opacity=".85">A's middle read returned 1. B's next read STARTS after A's RETURNED. If B saw 0 the value flipped back: not allowed.</text></g>
+    <g data-on="5"><text x="20" y="276" font-size="9" opacity=".85">so B must see 1, though C's write hasn't completed. Alice/Bob rule: once anyone has read the new value, everyone must.</text></g>
+    <g data-on="6" data-hot="6"><text x="20" y="276" font-size="9" opacity=".85">each op gets a point inside its bar; joined in order they must form a valid register history that only moves forward.</text><text x="20" y="292" font-size="9" opacity=".85">Fig 9-4 adds cas(). Recording all timings and searching for such an order is how linearizability is tested (Jepsen).</text></g>
+    <defs><marker id="a9l-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker></defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE EASY CASES</strong> Client C writes x from 0 to 1; A and B poll. A read that completes before the write begins must return 0; a read that begins after the write completes must return 1 — the database processed each somewhere inside its bar, so the order is forced.</li>
+  <li><strong>CONCURRENT READS</strong> Three reads overlap the write in time. For each, the database may have acted before or after the write took effect, so 0 or 1 are both acceptable — so far.</li>
+  <li><strong>ONE ATOMIC INSTANT</strong> The extra constraint that makes it linearizable: pretend there is a single point inside the write's bar where x flips from 0 to 1. A's middle read happened to be processed after that point and returned 1; B's first read was processed before it and returned 0. Fine.</li>
+  <li><strong>THE FORBIDDEN CASE</strong> B's second read starts strictly after A's read <em>returned</em> 1. If B now got 0, the register would have flipped back — the value would not look like a single copy. Not linearizable (Figure 9-3's arrow).</li>
+  <li><strong>RECENCY</strong> So B must return 1, although C's write is still in flight. Once any client has seen the new value, all subsequent reads see it. That is exactly Bob's complaint about the football score.</li>
+  <li><strong>THE GENERAL TEST</strong> Figure 9-4 generalizes: mark each operation's effective instant inside its bar and join them; the joined sequence must be a valid register history (each read returns the latest write) and the line must never go backwards in time. Request order ≠ processing order is fine for concurrent requests; a response arriving late is fine; what's forbidden is reading an older value than someone who read earlier. Recording all timings and searching for such an order is expensive but possible — it's what Jepsen-style checkers do.</li>
+</ol>
+</figure>
+
+<div class="feynman"><span class="tag">FEYNMAN · linearizability vs serializability</span>
+Two words that both sound like "can be put in a line," and they are about different things. <strong>Serializability</strong> (<a class="xref back" href="ch07-transactions.html#serializability" data-tip="Ch 7 · Serializability — transactions behave as if executed one after another in some order">Chapter&nbsp;7<sup>←7</sup></a>) is an <em>isolation</em> property of <em>transactions</em> touching many objects: the outcome equals <em>some</em> serial order — not necessarily the real-time one. <strong>Linearizability</strong> is a <em>recency</em> guarantee on a <em>single</em> register: no transactions, no grouping, so it doesn't prevent write skew. Both together is <strong>strict serializability</strong> (strong one-copy serializability). 2PL and actual serial execution are typically linearizable; <a class="xref back" href="ch07-transactions.html#serializable-snapshot-isolation-ssi" data-tip="Ch 7 · Serializable Snapshot Isolation — serializable, but reads come from a snapshot and so are not linearizable">SSI<sup>←7</sup></a> is serializable but <em>not</em> linearizable, because it reads from a snapshot that by design excludes recent writes.</div>
+
+<h3 id="relying-on-linearizability"><a class="self" href="#relying-on-linearizability">Relying on Linearizability</a></h3>
+<span class="key-chip">relying-on-linearizability</span>
+
+<p>A stale football score is harmless. Three situations aren't. <strong>Locking and leader election</strong>: single-leader replication needs exactly one leader; one way is a lock every starting node tries to acquire, and that lock <em>must</em> be linearizable — all nodes must agree who holds it. ZooKeeper and etcd implement such linearizable operations via consensus (with the caveat that their default <em>reads</em> may be stale unless you ask for a quorum read / <code>sync()</code>); Apache Curator adds recipes on top; Oracle RAC uses a linearizable lock per disk page on a dedicated interconnect. <strong>Constraints and uniqueness</strong>: enforcing "one user per username" or "one file per path" at write time — so one of two concurrent creators gets an error — requires linearizability; it's a lock on the name, or a compare-and-set. Likewise non-negative balances, stock levels, unbooked seats: each needs a single up-to-date value all nodes agree on. (Loosely enforced constraints — overbook and compensate — don't; see <a class="xref fwd" href="ch12-future-of-data-systems.html#timeliness-and-integrity" data-tip="Ch 12 · Timeliness and Integrity — many constraints can be enforced loosely and compensated later without linearizability · not yet written">Chapter&nbsp;12<sup>→12</sup></a>. Foreign-key and attribute constraints don't either.) <strong>Cross-channel timing dependencies</strong>: a web server writes a photo to file storage, then puts a "resize this" message on a queue; the resizer fetches the photo. If storage isn't linearizable, the queue can outrun storage's internal replication and the resizer reads an old version or nothing — full-size and thumbnail permanently inconsistent. Two channels (storage + queue), just like replication + Alice's voice. Linearizability is the simplest fix; if you control the second channel, read-your-writes techniques can substitute, with more complexity.</p>
+
+<h3 id="implementing-linearizable-systems"><a class="self" href="#implementing-linearizable-systems">Implementing Linearizable Systems</a></h3>
+<span class="key-chip">implementing-linearizable-systems</span>
+
+<p>"Behave as if there's one copy" — the simplest implementation is literally one copy, which isn't fault-tolerant. So: replication. How do Chapter 5's schemes fare? <strong>Single-leader (potentially linearizable)</strong>: reads from the leader or from synchronously updated followers can be linearizable (partitioning doesn't hurt — it's a single-object guarantee), but not every such database is, by design (snapshot isolation) or by bug; and reading from "the leader" assumes you know who the leader is — a deluded ex-leader serving requests breaks linearizability (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#the-truth-is-defined-by-the-majority" data-tip="Ch 8 · The Truth Is Defined by the Majority — a node may believe it is leader when a quorum has already declared it dead">Chapter&nbsp;8<sup>←8</sup></a>), and asynchronous failover can lose committed writes. <strong>Consensus algorithms (linearizable)</strong>: like single-leader replication plus the machinery that prevents split brain and stale replicas — ZooKeeper and etcd. <strong>Multi-leader (not linearizable)</strong>: concurrent writes on several nodes, asynchronously replicated, produce conflicts — the very symptom of not having a single copy. <strong>Leaderless (probably not linearizable)</strong>: "strong consistency via quorums, w + r &gt; n" is not quite true — LWW on wall clocks is almost certainly nonlinearizable, sloppy quorums ruin it, and even strict quorums fail:</p>
+
+<figure class="anim" id="anim-quorum">
+<svg viewBox="0 0 680 300" role="img" aria-label="Figure 9-6 redrawn: three replicas, n=3, w=3, r=2. A writer sets x=1 on all three but the writes arrive at different times. Reader A reads from replicas 1 and 2 and sees the new value on replica 1. Reader B, starting after A finished, reads from replicas 2 and 3 which still hold 0. The quorum condition holds yet B read an older value than A: not linearizable.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <g id="reps">
+      <rect x="250" y="30" width="180" height="34" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="262" y="52" font-weight="700">replica 1</text>
+      <rect x="250" y="80" width="180" height="34" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="262" y="102" font-weight="700">replica 2</text>
+      <rect x="250" y="130" width="180" height="34" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="262" y="152" font-weight="700">replica 3</text>
+    </g>
+    <g data-on="1-2"><text x="410" y="52" text-anchor="end" font-size="11" font-weight="700">x = 0</text></g>
+    <g data-on="3-6"><text x="410" y="52" text-anchor="end" font-size="11" font-weight="700" fill="var(--write)">x = 1</text></g>
+    <g data-on="1-5"><text x="410" y="102" text-anchor="end" font-size="11" font-weight="700">x = 0</text></g>
+    <g data-on="6"><text x="410" y="102" text-anchor="end" font-size="11" font-weight="700" fill="var(--write)">x = 1</text></g>
+    <g data-on="1-5"><text x="410" y="152" text-anchor="end" font-size="11" font-weight="700">x = 0</text></g>
+    <g data-on="6"><text x="410" y="152" text-anchor="end" font-size="11" font-weight="700" fill="var(--write)">x = 1</text></g>
+    <!-- writer -->
+    <rect x="20" y="80" width="130" height="34" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="85" y="102" text-anchor="middle" font-weight="700">writer</text>
+    <g data-on="2-6">
+      <path d="M150 90 L 248 50" stroke="var(--write)" stroke-width="2" marker-end="url(#a9q-w)"/>
+      <path d="M150 97 L 248 97" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#a9q-w)"/>
+      <path d="M150 104 L 248 145" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#a9q-w)"/>
+      <text x="20" y="130" font-size="9" fill="var(--write)">set x = 1 to all (w = 3)</text>
+      <text x="20" y="144" font-size="9" fill="var(--write)" opacity=".8">dashed = still in flight</text>
+    </g>
+    <!-- reader A -->
+    <rect x="530" y="30" width="130" height="34" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="595" y="52" text-anchor="middle" font-weight="700">reader A</text>
+    <g data-on="4-6">
+      <path d="M430 47 L 528 47" stroke="var(--read)" stroke-width="2" marker-end="url(#a9q-r)"/>
+      <path d="M430 97 C 470 90, 500 70, 528 55" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a9q-r)"/>
+      <text x="530" y="80" font-size="9" fill="var(--read)">reads {1, 2}: 1 and 0</text>
+      <text x="530" y="94" font-size="9" fill="var(--read)" font-weight="700">→ returns newest: 1</text>
+    </g>
+    <!-- reader B -->
+    <rect x="530" y="130" width="130" height="34" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="595" y="152" text-anchor="middle" font-weight="700">reader B</text>
+    <g data-on="5-6">
+      <path d="M430 105 C 470 110, 500 130, 528 140" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a9q-r)"/>
+      <path d="M430 150 L 528 150" stroke="var(--read)" stroke-width="2" marker-end="url(#a9q-r)"/>
+      <text x="530" y="182" font-size="9" fill="var(--read)">reads {2, 3}: 0 and 0</text>
+      <text x="530" y="196" font-size="9" fill="var(--bad)" font-weight="700">→ returns 0 ✗</text>
+    </g>
+    <g data-on="5-6"><text x="440" y="120" font-size="8" opacity=".8">B starts after A returned</text></g>
+    <g data-on="5" data-hot="5"><rect x="20" y="208" width="640" height="40" rx="4" fill="none" stroke="var(--bad)" stroke-width="1.5"/><text x="30" y="224" font-size="9" fill="var(--bad)" font-weight="700">w + r = 3 + 2 &gt; 3, yet B read an OLDER value than A did earlier — the Alice/Bob violation again</text><text x="30" y="240" font-size="9" opacity=".85">quorum overlap only helps once the write COMPLETES; mid-write, the overlapping replica may still hold the old value</text></g>
+    <g data-on="6" data-hot="6"><rect x="20" y="208" width="640" height="40" rx="4" fill="none" stroke="var(--ok)" stroke-width="1.5"/><text x="30" y="224" font-size="9" fill="var(--ok)" font-weight="700">the write finishes; from now on every quorum read returns 1. Linearizable only if readers repair synchronously</text><text x="30" y="240" font-size="9" opacity=".85">and writers read a quorum first — costly; Riak skips it, Cassandra's LWW breaks it under concurrent writes</text></g>
+    <!-- captions -->
+    <g data-on="1" data-hot="1"><text x="20" y="262" font-size="9" opacity=".85">n = 3 replicas, x = 0 everywhere. Writes need w = 3 acks, reads consult r = 2 — a strict quorum (w + r &gt; n).</text></g>
+    <g data-on="2" data-hot="2"><text x="20" y="262" font-size="9" opacity=".85">the writer sends x = 1 to all three replicas. Network delays differ: replica 1 will receive it first, the others later.</text></g>
+    <g data-on="3" data-hot="3"><text x="20" y="262" font-size="9" opacity=".85">replica 1 applies x = 1. Replicas 2 and 3 still hold 0. The write is not yet complete (w = 3 needs all three).</text></g>
+    <g data-on="4" data-hot="4"><text x="20" y="262" font-size="9" opacity=".85">reader A reads replicas 1 and 2, gets {1, 0}, returns the newest: 1. Legal — the read is concurrent with the write.</text></g>
+    <g data-on="5"><text x="20" y="262" font-size="9" opacity=".85">reader B starts AFTER A returned, reads replicas 2 and 3, gets {0, 0}, returns 0. Older than A's value: violation.</text></g>
+    <g data-on="6"><text x="20" y="262" font-size="9" opacity=".85">only linearizable reads/writes can be rescued this way — a linearizable compare-and-set cannot: that needs consensus.</text><text x="20" y="278" font-size="9" opacity=".85">the safe assumption: Dynamo-style leaderless replication does not provide linearizability.</text></g>
+    <defs>
+      <marker id="a9q-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a9q-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> Three replicas holding x = 0, configured with w = 3 and r = 2 — a strict quorum, w + r &gt; n (<a class="xref back" href="ch05-replication.html#writing-to-the-database-when-a-node-is-down" data-tip="Ch 5 · Writing to the Database When a Node Is Down — quorum reads and writes, w + r > n">Chapter&nbsp;5<sup>←5</sup></a>). Intuition says this must be linearizable.</li>
+  <li><strong>THE WRITE FANS OUT</strong> A writer sends x = 1 to all three. The three messages travel at different speeds.</li>
+  <li><strong>PARTIAL ARRIVAL</strong> Replica 1 has x = 1; replicas 2 and 3 still have 0. The write is in progress — the writer hasn't collected its three acks.</li>
+  <li><strong>READER A</strong> Reads a quorum {1, 2}, gets one new and one old value, and returns the newest, 1. Acceptable: the read overlaps the write.</li>
+  <li><strong>READER B</strong> Starts only after A has returned, reads quorum {2, 3}, gets {0, 0}, returns 0. B read an older value than A — precisely what linearizability forbids. Figure 9-6: the quorum condition is met, the execution isn't linearizable.</li>
+  <li><strong>THE FIX AND ITS PRICE</strong> Once the write completes, all is well. To be linearizable throughout, a reader must perform read repair <em>synchronously</em> before answering and a writer must first read a quorum's latest state — costly, so Riak doesn't, and Cassandra's wall-clock LWW breaks it under concurrent writes. And even then only reads and writes can be made linearizable this way; a linearizable compare-and-set requires consensus. Safest assumption: leaderless ≠ linearizable.</li>
+</ol>
+</figure>
+
+<h3 id="the-cost-of-linearizability"><a class="self" href="#the-cost-of-linearizability">The Cost of Linearizability</a></h3>
+<span class="key-chip">the-cost-of-linearizability</span>
+
+<p>Multi-leader replication suits multi-datacenter deployments (<a class="xref back" href="ch05-replication.html#use-cases-for-multi-leader-replication" data-tip="Ch 5 · Use Cases for Multi-Leader Replication — a leader per datacenter, tolerating datacenter and WAN failures">Chapter&nbsp;5<sup>←5</sup></a>). Cut the link between two datacenters, with clients still able to reach each one. Multi-leader: each datacenter keeps working; writes queue and exchange when the link returns. Single-leader: the leader is in one datacenter, and every write and every linearizable read must go to it — so clients attached to the <em>follower</em> datacenter can't write or read linearizably until the link is repaired. They can read stale data or get an error; either way, if the application needs linearizability, it is <strong>unavailable</strong> in that datacenter.</p>
+
+<figure>
+<svg viewBox="0 0 680 220" role="img" aria-label="Figure 9-7 redrawn: two datacenters with a broken link between them; clients can reach their local datacenter. With multi-leader replication both datacenters keep accepting writes. With single-leader replication, clients in the follower datacenter cannot write or read linearizably until the link is restored.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="30" width="280" height="130" rx="8" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="30" y="48" font-weight="700">datacenter 1</text>
+    <rect x="380" y="30" width="280" height="130" rx="8" fill="none" stroke="currentColor" stroke-opacity=".5"/>
+    <text x="390" y="48" font-weight="700">datacenter 2</text>
+    <rect x="110" y="70" width="120" height="30" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="170" y="90" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">leader</text>
+    <rect x="470" y="70" width="120" height="30" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="530" y="90" text-anchor="middle" font-size="9">follower</text>
+    <path d="M230 85 L 320 85" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3"/>
+    <path d="M360 85 L 468 85" stroke="var(--write)" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#a9c-w)"/>
+    <text x="340" y="90" text-anchor="middle" font-size="18" fill="var(--bad)" font-weight="700">✕</text>
+    <text x="340" y="112" text-anchor="middle" font-size="8" fill="var(--bad)">inter-DC link down</text>
+    <text x="40" y="130" font-size="9" fill="var(--read)">clients here: writes ✓ linearizable reads ✓</text>
+    <text x="40" y="146" font-size="9" opacity=".75">business as usual</text>
+    <text x="400" y="130" font-size="9" fill="var(--bad)">clients here: writes ✗ linearizable reads ✗</text>
+    <text x="400" y="146" font-size="9" opacity=".75">stale reads or errors until the link heals</text>
+    <text x="20" y="186" font-size="9" opacity=".85">multi-leader instead: both DCs accept writes, queue replication, reconcile later — available but NOT linearizable.</text>
+    <text x="20" y="204" font-size="9" opacity=".85">this is not about single- vs multi-leader specifically: ANY linearizable system faces it, on any unreliable network.</text>
+    <defs><marker id="a9c-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>The trade-off behind CAP, in one picture. If you require linearizability, replicas cut off from the rest must wait or error — they become unavailable. If you don't, each replica can keep serving independently (multi-leader), staying available but not linearizable. Nothing here depends on the replication scheme or on datacenters; it applies to any linearizable database on any network that can fault.</figcaption>
+</figure>
+
+<h4>The CAP theorem</h4>
+<p>That trade-off — <em>linearizable and unavailable under partition</em>, or <em>available and not linearizable</em> — is the <strong>CAP theorem</strong>, named by Eric Brewer in 2000 though known since the 1970s. It started as a rule of thumb without precise definitions, meant to push database designers beyond linearizable shared-storage clusters toward shared-nothing systems suited to web scale — and it deserves credit for the NoSQL culture shift. But the book calls it <strong>unhelpful</strong>. "Pick 2 of 3" is misleading: partitions are a <em>fault</em>, not a choice; they will happen. When the network works you get both consistency and availability; when it faults you choose — so a better name is "either <em>Consistent or Available when Partitioned</em>." Definitions of <em>availability</em> in CAP discussions contradict each other, and many fault-tolerant "highly available" systems don't meet CAP's idiosyncratic one. Formally it covers one consistency model (linearizability) and one fault (network partitions among live nodes), saying nothing about delays, dead nodes, or other trade-offs. Influential historically; little practical value now, superseded by more precise impossibility results. The CP/AP labels are best avoided.</p>
+
+<h4>Linearizability and network delays</h4>
+<p>Surprisingly few systems are actually linearizable — not even <strong>RAM on a multi-core CPU</strong>: a write on one core isn't guaranteed visible to a read on another core shortly after, without a memory barrier, because each core has its own cache and store buffer, asynchronously flushed to main memory. Several copies, asynchronously updated: linearizability lost. CAP can't explain that choice — we assume reliable communication inside one machine — the reason is <strong>performance</strong>. The same holds for most databases that skip linearizability: performance, not fault tolerance; and it's slow <em>all the time</em>, not just during faults. Could a cleverer algorithm fix that? No: Attiya and Welch proved linearizable read/write response time is at least proportional to the <em>uncertainty</em> in network delay (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#timeouts-and-unbounded-delays" data-tip="Ch 8 · Timeouts and Unbounded Delays — queueing makes network delay highly variable and unbounded">Chapter&nbsp;8<sup>←8</sup></a>). On real networks that is inevitably high. Weaker models can be much faster, which is why <a class="xref fwd" href="ch12-future-of-data-systems.html#aiming-for-correctness" data-tip="Ch 12 · Aiming for Correctness — achieving correctness without linearizability, via dataflow and end-to-end checks · not yet written">Chapter&nbsp;12<sup>→12</sup></a> looks for correctness without linearizability.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · why "one copy" must be slow</span>
+Pretending there is one copy means that before answering any read you must be sure no write anywhere else has completed that you haven't heard about. On a network whose delay is uncertain by <em>u</em>, being sure costs you on the order of <em>u</em> every time — not sometimes, always. It's the same reason your CPU cores don't share one perfectly coherent memory: waiting for every other core before every read would throw away most of the speed. Linearizability isn't a feature you lose when the network breaks; it's a tax you pay whenever the network is merely uncertain, which is always.</div>
+
+<div class="ed2"><span class="tag">2ND EDITION · CAP retired, strict serializability promoted</span>
+The 2nd edition keeps the "stop calling databases CP or AP" stance and cites the formal critiques of CAP, but shifts the positive vocabulary toward <strong>strict serializability / external consistency</strong> as the practical top of both hierarchies — the guarantee Spanner and CockroachDB actually document — with newer explainers of exactly how those systems land between serializable and strictly serializable. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="ordering-guarantees">
+<span class="key-chip">ordering-guarantees</span>
+<h2><a class="self" href="#ordering-guarantees">Ordering Guarantees</a></h2>
+
+<p>A linearizable register acts as if every operation takes effect atomically at one point in time — which implies a well-defined <em>order</em> of operations. Ordering has been everywhere in this book: the leader's job in single-leader replication is to fix the <strong>order of writes</strong> in the log (no leader ⇒ conflicts, <a class="xref back" href="ch05-replication.html#handling-write-conflicts" data-tip="Ch 5 · Handling Write Conflicts — concurrent writes on different leaders must be detected and resolved">Chapter&nbsp;5<sup>←5</sup></a>); <strong>serializability</strong> is about transactions behaving as if run in <em>some</em> order (<a class="xref back" href="ch07-transactions.html#serializability" data-tip="Ch 7 · Serializability — by literal serial execution, by locking, or by aborting conflicts">Chapter&nbsp;7<sup>←7</sup></a>); and <strong>timestamps</strong> were an attempt to impose order on a disorderly world (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#relying-on-synchronized-clocks" data-tip="Ch 8 · Relying on Synchronized Clocks — wall-clock timestamps can't safely order writes across nodes">Chapter&nbsp;8<sup>←8</sup></a>). There are deep connections between ordering, linearizability, and consensus, and this section — the most abstract in the book — draws them.</p>
+
+<h3 id="ordering-and-causality"><a class="self" href="#ordering-and-causality">Ordering and Causality</a></h3>
+<span class="key-chip">ordering-and-causality</span>
+
+<p>Ordering keeps coming up because it preserves <strong>causality</strong>. The book's back-catalogue of examples: seeing an answer before its question (<a class="xref back" href="ch05-replication.html#consistent-prefix-reads" data-tip="Ch 5 · Consistent Prefix Reads — writes that happen in order should be seen in that order">consistent prefix reads<sup>←5</sup></a>); an update overtaking the insert of the row it updates in multi-leader replication; the <em>happened-before</em> relation of <a class="xref back" href="ch05-replication.html#detecting-concurrent-writes" data-tip="Ch 5 · Detecting Concurrent Writes — A happened before B, B before A, or they're concurrent (neither knew of the other)">Chapter&nbsp;5<sup>←5</sup></a> (A before B, B before A, or concurrent — no causal link either way); a <em>consistent</em> snapshot meaning consistent <em>with causality</em> — if it has the answer it has the question, and read skew is a causality violation; write skew in the on-call example, where going off call depends causally on who was observed on call, and SSI catches it by tracking those dependencies; and Alice's exclamation, causally downstream of the score, which Bob's stale read contradicted. Cause precedes effect; a message is sent before it is received; chains of read-then-write define the <strong>causal order</strong>. A system that obeys it is <strong>causally consistent</strong> — snapshot isolation is an example.</p>
+
+<h4>The causal order is not a total order</h4>
+<p>A <strong>total order</strong> lets any two elements be compared (natural numbers: 13 &gt; 5). Sets are only <strong>partially ordered</strong>: {a, b} vs {b, c} is incomparable. Consistency models mirror this. <strong>Linearizability</strong> gives a total order — a single copy, atomic operations, so any two operations can be ranked; a single timeline, <em>no concurrency at all</em>. <strong>Causality</strong> gives a partial order: causally related events are ordered; concurrent ones are incomparable. Concurrency means the timeline branches and merges — like Chapter 5's version graphs, or a Git history with its straight runs, branches, and merge commits.</p>
+
+<figure>
+<svg viewBox="0 0 680 220" role="img" aria-label="Total order versus partial order: a linearizable history is a single straight line of operations, every pair comparable; a causal history is a directed graph with branches and merges, where operations on different branches are concurrent and incomparable, like a Git commit graph.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="22" font-weight="700">total order (linearizable): one timeline</text>
+    <path d="M30 60 H 640" stroke="var(--write)" stroke-width="2" marker-end="url(#a9o-w)"/>
+    <g fill="var(--write)"><circle cx="80" cy="60" r="6"/><circle cx="180" cy="60" r="6"/><circle cx="280" cy="60" r="6"/><circle cx="380" cy="60" r="6"/><circle cx="480" cy="60" r="6"/><circle cx="580" cy="60" r="6"/></g>
+    <g font-size="9" text-anchor="middle"><text x="80" y="82">op1</text><text x="180" y="82">op2</text><text x="280" y="82">op3</text><text x="380" y="82">op4</text><text x="480" y="82">op5</text><text x="580" y="82">op6</text></g>
+    <text x="20" y="104" font-size="9" opacity=".8">any two operations can be compared · no concurrency · the price: coordination and latency</text>
+    <text x="20" y="136" font-weight="700">partial order (causal): branches and merges</text>
+    <g stroke="var(--read)" stroke-width="2" fill="none">
+      <path d="M40 180 L 120 180"/><path d="M120 180 L 200 155"/><path d="M120 180 L 200 205"/><path d="M200 155 L 300 155"/><path d="M200 205 L 300 205"/><path d="M300 155 L 400 180"/><path d="M300 205 L 400 180"/><path d="M400 180 L 500 180"/>
+    </g>
+    <g fill="var(--read)"><circle cx="40" cy="180" r="6"/><circle cx="120" cy="180" r="6"/><circle cx="200" cy="155" r="6"/><circle cx="300" cy="155" r="6"/><circle cx="200" cy="205" r="6"/><circle cx="300" cy="205" r="6"/><circle cx="400" cy="180" r="6"/><circle cx="500" cy="180" r="6"/></g>
+    <text x="520" y="160" font-size="9" fill="var(--read)">ops on different branches</text>
+    <text x="520" y="174" font-size="9" fill="var(--read)">are CONCURRENT:</text>
+    <text x="520" y="188" font-size="9" fill="var(--read)">neither knew of the other,</text>
+    <text x="520" y="202" font-size="9" fill="var(--read)">so they are incomparable</text>
+    <text x="90" y="230" font-size="9" opacity=".8" display="none">.</text>
+    <defs><marker id="a9o-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker></defs>
+  </g>
+</svg>
+<figcaption>Two shapes of history. Linearizability forces every operation onto one line, which is why it has no concurrent operations and why it must wait for the network. Causality only insists that arrows point forward: a branch is two operations that didn't know about each other, a merge is where someone saw both. Version vectors describe the second shape; a single counter describes the first.</figcaption>
+</figure>
+
+<h4>Linearizability is stronger than causal consistency</h4>
+<p><strong>Linearizability implies causality</strong>: any linearizable system preserves causal order automatically, even across multiple communication channels, with no timestamps passed around — that's what makes it simple and appealing. But it costs performance and availability, especially with large network delays, so some systems abandon it. The middle ground: <strong>causal consistency</strong> without linearizability. Causal consistency is the strongest model that <em>doesn't</em> slow down under network delay and <em>stays available</em> under network faults — CAP doesn't apply. Many systems that seem to need linearizability really only need causal consistency, and research databases exploring this (with eventual-consistency-like performance) are a promising direction, though little has reached production.</p>
+
+<h4>Capturing causal dependencies</h4>
+<p>To preserve causality a replica must process an operation only after everything that <em>happened before</em> it; if a predecessor is missing, the operation waits. Determining "happened before" means describing a node's <em>knowledge</em> — "did the node know X when it wrote Y?" — the kind of question asked in a fraud investigation. The techniques generalize <a class="xref back" href="ch05-replication.html#detecting-concurrent-writes" data-tip="Ch 5 · Detecting Concurrent Writes — version vectors carry the version a client read back on its write">version vectors<sup>←5</sup></a> from a single key to the whole database: the application tells the database which version it read (as Chapter 5's client did on every write), just as SSI records which data each transaction read so it can check at commit whether it's still current.</p>
+
+<h3 id="sequence-number-ordering"><a class="self" href="#sequence-number-ordering">Sequence Number Ordering</a></h3>
+<span class="key-chip">sequence-number-ordering</span>
+
+<p>Tracking every causal dependency is impractical — clients read a lot before writing, and it's unclear which reads the write depends on. Instead, order events with <strong>sequence numbers or timestamps</strong> from a <strong>logical clock</strong>: not a quartz oscillator but a counter incremented per operation. They are compact and give a <strong>total order</strong>; and we can make that total order <em>consistent with causality</em> — if A happened before B, A gets the smaller number; concurrent operations are ordered arbitrarily. (A random UUID per operation is also a total order, and useless: it says nothing about what happened first.) In single-leader replication the replication log is exactly this: the leader increments a counter per write, and a follower applying the log in order is always causally consistent, even when lagging.</p>
+
+<h4>Noncausal sequence number generators</h4>
+<p>Without a single leader — multi-leader, leaderless, or partitioned — how do you generate them? Three common ways, all faster and more scalable than a single counter, and all <strong>inconsistent with causality</strong>. <strong>Independent per-node counters</strong> (odd/even, or node-ID bits): nodes process different rates, so one counter lags and an odd number can't be compared causally with an even one. <strong>Physical-clock timestamps</strong>: clock skew, as in Figure 8-3, gives a causally later write a lower timestamp (Spanner's commit wait fixes this, but needs an uncertainty metric most clocks lack). <strong>Preallocated blocks</strong> (A gets 1–1,000, B gets 1,001–2,000): a causally later operation can land in the lower block.</p>
+
+<h4>Lamport timestamps</h4>
+<p>There is a simple generator that <em>is</em> consistent with causality: <strong>Lamport timestamps</strong> (Lamport, 1978 — one of the most-cited papers in the field). Each node has a unique ID and a counter of operations processed; the timestamp is the pair <code>(counter, node ID)</code>, made unique by the ID and totally ordered — bigger counter wins, ties broken by node ID. That alone is the odd/even scheme. The key idea: <strong>every node and every client tracks the maximum counter it has seen and sends it with every request; a node receiving a bigger maximum jumps its own counter forward to it.</strong> Every causal dependency thus produces a larger timestamp.</p>
+
+<figure class="anim" id="anim-lamport">
+<svg viewBox="0 0 680 300" role="img" aria-label="Figure 9-8 redrawn: two nodes with counters and two clients. Client B's writes to node 2 push its counter to 5; client A then writes to node 1 carrying max=5, so node 1 jumps its counter from 1 to 5 and stamps the write 6. Timestamps are (counter, node ID) pairs, totally ordered and consistent with causality.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="240" y="40" width="200" height="60" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="340" y="60" text-anchor="middle" font-weight="700">node 1</text>
+    <text x="260" y="84" font-size="9" opacity=".75">counter:</text>
+    <g data-on="1-3"><text x="330" y="86" font-size="14" font-weight="700">1</text></g>
+    <g data-on="4"><text x="330" y="86" font-size="14" font-weight="700" fill="var(--write)">5</text></g>
+    <g data-on="5-6"><text x="330" y="86" font-size="14" font-weight="700" fill="var(--write)">6</text></g>
+    <rect x="240" y="170" width="200" height="60" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="340" y="190" text-anchor="middle" font-weight="700">node 2</text>
+    <text x="260" y="214" font-size="9" opacity=".75">counter:</text>
+    <g data-on="1"><text x="330" y="216" font-size="14" font-weight="700">4</text></g>
+    <g data-on="2-6"><text x="330" y="216" font-size="14" font-weight="700" fill="var(--write)">5</text></g>
+    <!-- clients -->
+    <rect x="20" y="100" width="130" height="60" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="85" y="120" text-anchor="middle" font-weight="700">client A</text>
+    <text x="30" y="140" font-size="9" opacity=".75">max seen:</text>
+    <g data-on="1-2"><text x="100" y="140" font-size="9" font-weight="700">1</text></g>
+    <g data-on="3-6"><text x="100" y="140" font-size="9" font-weight="700" fill="var(--write)">5</text></g>
+    <rect x="530" y="100" width="130" height="60" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="595" y="120" text-anchor="middle" font-weight="700">client B</text>
+    <text x="540" y="140" font-size="9" opacity=".75">max seen:</text>
+    <g data-on="1"><text x="610" y="140" font-size="9" font-weight="700">4</text></g>
+    <g data-on="2-6"><text x="610" y="140" font-size="9" font-weight="700" fill="var(--write)">5</text></g>
+    <!-- step 2: B writes to node 2 -->
+    <g data-on="2" data-hot="2">
+      <path d="M530 140 C 490 170, 470 190, 442 200" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9lt-w)"/>
+      <path d="M440 210 C 470 210, 500 175, 528 150" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a9lt-r)"/>
+      <text x="470" y="236" font-size="9" fill="var(--write)">write (max = 4)</text>
+      <text x="470" y="250" font-size="9" fill="var(--read)">→ timestamp (5, 2)</text>
+    </g>
+    <!-- step 3: A reads from node 2 -->
+    <g data-on="3" data-hot="3">
+      <path d="M150 140 C 190 170, 210 190, 238 200" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a9lt-r)"/>
+      <path d="M240 210 C 210 210, 180 175, 152 150" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a9lt-r)"/>
+      <text x="100" y="236" font-size="9" fill="var(--read)">read from node 2</text>
+      <text x="100" y="250" font-size="9" fill="var(--read)">→ response carries max 5</text>
+    </g>
+    <!-- step 4: A writes to node 1 with max 5 -->
+    <g data-on="4-5">
+      <path d="M150 120 C 190 100, 210 80, 238 70" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9lt-w)"/>
+      <text x="120" y="70" font-size="9" fill="var(--write)">write (max = 5)</text>
+    </g>
+    <g data-on="4" data-hot="4"><text x="450" y="60" font-size="9" fill="var(--write)" font-weight="700">1 &lt; 5 ⇒ jump to 5</text></g>
+    <g data-on="5" data-hot="5">
+      <path d="M240 90 C 210 90, 180 110, 152 128" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a9lt-r)"/>
+      <text x="450" y="60" font-size="9" fill="var(--write)" font-weight="700">increment ⇒ 6</text>
+      <text x="450" y="76" font-size="9" fill="var(--read)">→ timestamp (6, 1)</text>
+    </g>
+    <g data-on="6" data-hot="6">
+      <rect x="20" y="256" width="640" height="34" rx="4" fill="none" stroke="var(--ok)" stroke-width="1.5"/>
+      <text x="30" y="272" font-size="9" fill="var(--ok)" font-weight="700">(5, 2) &lt; (6, 1): the causally later write got the larger timestamp — without max-passing it would be (2, 1) &lt; (5, 2)</text>
+      <text x="30" y="285" font-size="9" opacity=".85">total order: counter, then node ID · compact · but can't tell concurrent from dependent (version vectors can)</text>
+    </g>
+    <!-- captions -->
+    <g data-on="1" data-hot="1"><text x="20" y="276" font-size="9" opacity=".85">two nodes with their own counters (1 and 4). A timestamp is (counter, node ID). Clients remember the largest seen.</text></g>
+    <g data-on="2"><text x="20" y="276" font-size="9" opacity=".85">client B writes to node 2. Node 2 increments its counter to 5 and returns (5, 2). B now remembers max = 5.</text></g>
+    <g data-on="3"><text x="20" y="276" font-size="9" opacity=".85">client A reads from node 2. The response carries node 2's counter, so A's max becomes 5. A now "knows about" B's write.</text></g>
+    <g data-on="4"><text x="20" y="276" font-size="9" opacity=".85">client A writes to node 1, attaching max = 5. Node 1's counter is only 1 — it immediately jumps to 5.</text></g>
+    <g data-on="5"><text x="20" y="276" font-size="9" opacity=".85">node 1 increments to 6 and stamps A's write (6, 1). Anything A did after seeing (5, 2) is now numbered above it.</text></g>
+    <defs>
+      <marker id="a9lt-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a9lt-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> Two nodes with independent counters (node 1 at 1, node 2 at 4). A Lamport timestamp is the pair (counter, node ID). Every client and node also tracks the maximum counter value it has seen.</li>
+  <li><strong>A WRITE ON NODE 2</strong> Client B writes to node 2, which increments to 5 and returns timestamp (5, 2). B's max is now 5.</li>
+  <li><strong>KNOWLEDGE SPREADS</strong> Client A reads from node 2 and the response carries the counter, so A's max becomes 5. Causally, anything A does next may depend on B's write.</li>
+  <li><strong>THE JUMP</strong> A writes to node 1 and includes max = 5. Node 1's own counter is 1, so it immediately advances to 5 — this is the rule that makes the scheme causal.</li>
+  <li><strong>STAMP</strong> Node 1 increments to 6 and stamps the write (6, 1). A's causally later write has a strictly greater timestamp than B's.</li>
+  <li><strong>WHAT YOU GET AND WHAT YOU DON'T</strong> A total order consistent with causality, in a few bytes. Unlike version vectors, Lamport timestamps cannot tell you whether two operations were concurrent or dependent — they impose an order on everything. More compact, less informative.</li>
+</ol>
+</figure>
+
+<h4>Timestamp ordering is not sufficient</h4>
+<p>Lamport timestamps totally order operations causally — yet they can't solve the <strong>unique username</strong> problem. After the fact it works: collect all creation attempts, the lowest timestamp wins. But a node that has <em>just received</em> a request must decide <em>now</em>, and it doesn't know whether another node is concurrently creating the same username with a lower timestamp. To be sure it would have to ask every other node — and if one is down or unreachable, everything halts. Not fault-tolerant. The problem: <strong>the total order only emerges once all operations are collected</strong>; unknown operations from other nodes may still need inserting earlier in the order. To enforce uniqueness you must also know <em>when the order is finalized</em> — that no one can still slip a claim in ahead of yours. That is the job of total order broadcast.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · distributed ID generation, from Snowflake to ULID</span>
+The 2nd edition attaches the practical cousin of this section — <strong>distributed ID generation</strong> — to the logical-clock discussion: Twitter's Snowflake IDs (timestamp + node + sequence bits), ULIDs and time-ordered UUIDs, and what each does and doesn't promise about ordering (roughly time-ordered, unique, but not causally consistent — exactly the "noncausal generators" caveat above). <em>[inferred from the 2nd-edition references repo]</em></div>
+
+<h3 id="total-order-broadcast"><a class="self" href="#total-order-broadcast">Total Order Broadcast</a></h3>
+<span class="key-chip">total-order-broadcast</span>
+
+<p>On one CPU core a total order is trivial — execution order. Across nodes, getting everyone to agree on one total order is the hard part. Single-leader replication does it by funnelling all operations through one node; the challenges are scaling beyond one leader's throughput and <strong>failover</strong> when the leader dies (<a class="xref back" href="ch05-replication.html#handling-node-outages" data-tip="Ch 5 · Handling Node Outages — failover: detect, elect, reconfigure — with all its hazards">Chapter&nbsp;5<sup>←5</sup></a>). The distributed-systems name for this problem is <strong>total order broadcast</strong> or <em>atomic broadcast</em> (nothing to do with ACID atomicity). It is a message protocol with two safety properties that must hold even under node and network faults: <strong>reliable delivery</strong> — a message delivered to one node is delivered to all; and <strong>totally ordered delivery</strong> — every node receives the messages in the same order. Messages won't flow during a network interruption, but the algorithm retries until they do, and still in order. (Partitioned databases with a leader per partition typically order only <em>within</em> a partition; total order across partitions needs extra coordination.)</p>
+
+<h4>Using total order broadcast</h4>
+<p>ZooKeeper and etcd implement total order broadcast — a hint of its link to consensus. It is exactly what replication needs: each message a write, every replica applying the same writes in the same order — <strong>state machine replication</strong> (<a class="xref fwd" href="ch11-stream-processing.html#databases-and-streams" data-tip="Ch 11 · Databases and Streams — the replication log as a stream of events; state machine replication · not yet written">Chapter&nbsp;11<sup>→11</sup></a>). It implements serializable transactions too: each message a deterministic stored procedure, every partition and replica executing them in the same order (<a class="xref back" href="ch07-transactions.html#actual-serial-execution" data-tip="Ch 7 · Actual Serial Execution — deterministic stored procedures executed one at a time">Chapter&nbsp;7<sup>←7</sup></a>). Crucially, <strong>the order is fixed at delivery</strong>: no message may be retroactively inserted earlier once later ones have been delivered — that's what makes it stronger than timestamp ordering. Another view: total order broadcast <em>is a log</em> (replication log, transaction log, WAL); delivering a message is appending to it, and every node reads the same sequence. Hence also a lock service with fencing tokens: each acquire request is a log entry, its sequence number the monotonically increasing token (ZooKeeper's <code>zxid</code>).</p>
+
+<h4>Implementing linearizable storage using total order broadcast</h4>
+<p>Linearizability has a total order; is it the same thing as total order broadcast? Not quite. Total order broadcast is <em>asynchronous</em> — messages arrive reliably in a fixed order, but with no promise about <em>when</em>, so a recipient may lag; linearizability is a <em>recency</em> guarantee. But you can build linearizable storage on top of it. Picture a linearizable register per username with compare-and-set: initially <code>null</code>; claiming means <code>cas(null → my user ID)</code>, and only one of several concurrent claims succeeds. Implement that CAS with the log:</p>
+
+<figure class="anim" id="anim-tob-cas">
+<svg viewBox="0 0 680 300" role="img" aria-label="Linearizable compare-and-set built from a total-order log: two nodes concurrently append tentative claims for the same username; each then reads the log until its own message is delivered back; whichever claim appears first in the log wins and commits, the other aborts. All nodes see the same order, so all agree on the winner.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="22" font-weight="700">total-order log (delivered to every node in the same order)</text>
+    <path d="M20 60 H 660" stroke="currentColor" stroke-opacity=".5"/>
+    <g stroke="currentColor" stroke-opacity=".4" fill="var(--panel2)">
+      <rect x="30" y="36" width="90" height="24"/><rect x="130" y="36" width="90" height="24"/><rect x="230" y="36" width="90" height="24"/><rect x="330" y="36" width="90" height="24"/><rect x="430" y="36" width="90" height="24"/><rect x="530" y="36" width="90" height="24"/>
+    </g>
+    <text x="75" y="52" text-anchor="middle" font-size="9" opacity=".7">#41 …</text>
+    <text x="175" y="52" text-anchor="middle" font-size="9" opacity=".7">#42 …</text>
+    <g data-on="3-6"><rect x="230" y="36" width="90" height="24" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="275" y="52" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">#43 N2: alice</text></g>
+    <g data-on="3-6"><rect x="330" y="36" width="90" height="24" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="375" y="52" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">#44 N1: alice</text></g>
+    <g data-on="6"><rect x="430" y="36" width="90" height="24" fill="var(--ok)" fill-opacity=".25" stroke="var(--ok)" stroke-width="1.5"/><text x="475" y="52" text-anchor="middle" font-size="9" fill="var(--ok)" font-weight="700">#45 N2: commit</text></g>
+    <!-- nodes -->
+    <rect x="20" y="100" width="280" height="90" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="30" y="118" font-weight="700">node 1 (user X wants "alice")</text>
+    <rect x="380" y="100" width="280" height="90" rx="8" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="390" y="118" font-weight="700">node 2 (user Y wants "alice")</text>
+    <g data-on="2-6"><text x="30" y="138" font-size="9" fill="var(--write)">① append "claim alice (X)"</text></g>
+    <g data-on="2-6"><text x="390" y="138" font-size="9" fill="var(--write)">① append "claim alice (Y)"</text></g>
+    <g data-on="2" data-hot="2">
+      <path d="M250 100 C 260 88, 280 74, 300 62" stroke="var(--write)" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#a9tc-w)"/>
+      <path d="M450 100 C 430 88, 400 74, 380 62" stroke="var(--write)" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#a9tc-w)"/>
+      <text x="305" y="88" font-size="9" fill="var(--write)">who's first?</text>
+    </g>
+    <g data-on="3" data-hot="3"><text x="240" y="90" font-size="9" fill="var(--write)" font-weight="700">the log decides: #43 (Y) then #44 (X)</text></g>
+    <g data-on="4-6"><text x="30" y="156" font-size="9" fill="var(--read)">② read log until #44 comes back</text></g>
+    <g data-on="4-6"><text x="390" y="156" font-size="9" fill="var(--read)">② read log until #43 comes back</text></g>
+    <g data-on="4" data-hot="4">
+      <path d="M275 62 C 260 75, 230 88, 210 98" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a9tc-r)"/>
+      <path d="M375 62 C 400 75, 440 88, 470 98" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a9tc-r)"/>
+      <text x="280" y="78" font-size="9" fill="var(--read)">same order for all</text>
+    </g>
+    <g data-on="5-6"><text x="30" y="176" font-size="9" fill="var(--bad)" font-weight="700">③ first "alice" claim is #43, not mine ⇒ ABORT</text></g>
+    <g data-on="5-6"><text x="390" y="176" font-size="9" fill="var(--ok)" font-weight="700">③ first "alice" claim is #43 = mine ⇒ SUCCESS</text></g>
+    <g data-on="6" data-hot="6">
+      <rect x="20" y="200" width="640" height="46" rx="4" fill="none" stroke="var(--ok)" stroke-width="1.5"/>
+      <text x="30" y="216" font-size="9" fill="var(--ok)" font-weight="700">every node reads the same log, so all agree Y got "alice" — a linearizable CAS with no lock and no single decider</text>
+      <text x="30" y="232" font-size="9" opacity=".85">writes are linearizable; reads from a store fed asynchronously by the log may lag (sequential consistency)</text>
+    </g>
+    <!-- captions -->
+    <g data-on="1" data-hot="1"><text x="20" y="272" font-size="9" opacity=".85">a total-order log: appending is sending a message; every node eventually reads the same entries in the same positions.</text></g>
+    <g data-on="2"><text x="20" y="272" font-size="9" opacity=".85">users X (via node 1) and Y (via node 2) try to register "alice" at the same moment. Each node appends a TENTATIVE claim.</text></g>
+    <g data-on="3"><text x="20" y="272" font-size="9" opacity=".85">the broadcast fixes the order: Y's claim lands at #43, X's at #44. Nobody chose this; the protocol did, once, for all.</text></g>
+    <g data-on="4"><text x="20" y="272" font-size="9" opacity=".85">each node reads the log until its own message comes back — the moment it knows the order is final up to there.</text></g>
+    <g data-on="5" data-hot="5"><text x="20" y="272" font-size="9" opacity=".85">rule: the FIRST claim in the log wins. Node 2 sees its own #43 first ⇒ success; node 1 sees #43 before its #44 ⇒ abort.</text></g>
+    <g data-on="6"><text x="20" y="272" font-size="9" opacity=".85">Y's node may append a commit record. Delivery order is fixed and identical everywhere, so all agree without talking.</text></g>
+    <defs>
+      <marker id="a9tc-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a9tc-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE LOG</strong> Total order broadcast viewed as an append-only log: delivering a message is appending an entry, and every node reads the same entries in the same order.</li>
+  <li><strong>TWO CLAIMS</strong> Users X and Y, on different nodes, try to register the username "alice" concurrently. Each node <em>appends a tentative claim</em> to the log rather than deciding locally.</li>
+  <li><strong>THE ORDER IS FIXED</strong> The broadcast delivers Y's claim at position #43 and X's at #44. This ordering is now permanent — no later message can be inserted before them.</li>
+  <li><strong>WAIT FOR YOUR OWN MESSAGE</strong> Each node reads the log and waits until its own claim is delivered back to it. Only then does it know that every message ordered before its claim is visible.</li>
+  <li><strong>FIRST CLAIM WINS</strong> Rule: the first message claiming a given username wins. Node 2 finds its own #43 first and succeeds; node 1 finds #43 ahead of its #44 and aborts. Because all nodes see the same order, all agree on the outcome — a linearizable compare-and-set.</li>
+  <li><strong>WRITES YES, READS ALMOST</strong> This gives linearizable <em>writes</em>. Reads from a store asynchronously fed by the log may be stale (strictly, <em>sequential consistency</em>). To make reads linearizable: sequence the read through the log too (append a marker, read when it's delivered — roughly etcd's quorum read); or fetch the latest log position linearizably and wait until you've caught up (ZooKeeper's <code>sync()</code>); or read from a replica that is updated synchronously (chain replication). The same log trick also yields serializable multi-object transactions.</li>
+</ol>
+</figure>
+
+<h4>Implementing total order broadcast using linearizable storage</h4>
+<p>And the other direction: given a linearizable register with atomic <strong>increment-and-get</strong> (or CAS), build total order broadcast — for each message, increment-and-get, attach the result as a sequence number, send to all nodes (resending losses), and have recipients deliver in sequence-number order. Unlike Lamport timestamps these numbers have <strong>no gaps</strong>: a node holding message 4 that receives message 6 knows it must wait for 5. That gaplessness is <em>the</em> difference between total order broadcast and timestamp ordering. How hard is a linearizable increment-and-get? Trivial without faults — a variable on one node. Handling that node's network interruptions and failures inevitably leads you to a consensus algorithm. Indeed, it can be proved that <strong>a linearizable CAS/increment register, total order broadcast, and consensus are all equivalent</strong> — a solution to any one transforms into a solution to the others.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · a total order, and knowing it's final</span>
+Two people mail applications for the same license plate. Sorting the applications by postmark gives a total order — but the clerk can't issue the plate to the earlier postmark until they're sure no envelope with an earlier postmark is still in the mail. Lamport timestamps are postmarks: they order everything correctly and tell you nothing about what's still in transit. Total order broadcast is a numbered ticket dispenser at the counter: you get ticket 44, you watch the screen until 44 is called, and by then you <em>know</em> 43 was called first and nothing can ever be called between them. The ticket dispenser that keeps working when the counter staff keep collapsing is consensus.</div>
+
+<div class="ed2"><span class="tag">2ND EDITION · shared logs as an architecture</span>
+The 2nd edition expands the "total order broadcast is a log" idea into <strong>shared-log architectures</strong> — CORFU, Tango, and the Delos lineage at Meta — where a fault-tolerant log is the primitive and databases, metadata stores, and coordination services are state machines replaying it; and it gives <strong>Calvin-style deterministic transactions</strong> (agree on the order of transactions first, then execute deterministically everywhere) as the transactional payoff of this section. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="distributed-transactions-and-consensus">
+<span class="key-chip">distributed-transactions-and-consensus</span>
+<h2><a class="self" href="#distributed-transactions-and-consensus">Distributed Transactions and Consensus</a></h2>
+
+<p><strong>Consensus</strong> — getting several nodes to agree on something — is one of the most fundamental problems in distributed computing and looks easy; many broken systems were built by people who believed that. It arrives this late because it needs everything before it: replication, transactions, system models, linearizability, total order broadcast. Two headline uses: <strong>leader election</strong> (all nodes must agree who the leader is, or split brain diverges the data), and <strong>atomic commit</strong> (a transaction spanning nodes must commit everywhere or abort everywhere — formally slightly different from consensus, since it may only commit if <em>all</em> vote yes, but reducible to it).</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the impossibility of consensus (and why we do it anyway)</span>
+The FLP result (Fischer, Lynch, Paterson) proves no algorithm can <em>always</em> reach consensus if a node might crash. Since nodes do crash, consensus is impossible — and yet this section is full of consensus algorithms. The catch: FLP is proved in the <em>asynchronous</em> model (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#system-model-and-reality" data-tip="Ch 8 · System Model and Reality — the asynchronous model has no clocks and no timeouts at all">Chapter&nbsp;8<sup>←8</sup></a>), for deterministic algorithms with no clocks or timeouts. Allow timeouts — even unreliable suspicion of crashed nodes — or just random numbers, and consensus becomes solvable. FLP is deep theory; in practice, consensus is achieved routinely.</div>
+
+<h3 id="atomic-commit-and-two-phase-commit-2pc"><a class="self" href="#atomic-commit-and-two-phase-commit-2pc">Atomic Commit and Two-Phase Commit (2PC)</a></h3>
+<span class="key-chip">atomic-commit-and-two-phase-commit-2pc</span>
+
+<p>Atomicity (<a class="xref back" href="ch07-transactions.html#the-meaning-of-acid" data-tip="Ch 7 · The Meaning of ACID — atomicity = abortability: a failed transaction leaves no half-finished writes">Chapter&nbsp;7<sup>←7</sup></a>) keeps failed transactions from littering the database with half-done state — vital for multi-object transactions and for secondary indexes, which must stay consistent with the primary data. <strong>On a single node</strong> the storage engine does it: write the data durably (WAL), then append a <em>commit record</em>; on crash recovery, a transaction with a commit record on disk is committed, otherwise rolled back. The deciding instant is when the disk finishes writing that record — one device makes the commit atomic. <strong>Across nodes</strong> — a multi-object transaction in a partitioned database, or a term-partitioned index (<a class="xref back" href="ch06-partitioning.html#partitioning-and-secondary-indexes" data-tip="Ch 6 · Partitioning and Secondary Indexes — a global index entry may live on a different node from the primary data">Chapter&nbsp;6<sup>←6</sup></a>) — simply sending "commit" to everyone fails: one node hits a constraint violation while another commits; one request is lost and times out; one node crashes before its commit record is complete. Nodes diverge, and a commit on one node can't be retracted because it's already visible to other transactions (the basis of <a class="xref back" href="ch07-transactions.html#read-committed" data-tip="Ch 7 · Read Committed — once committed, data is visible to others, who may rely on it">read committed<sup>←7</sup></a>). A node may commit only once it is <em>certain</em> all others will too. Commit is irrevocable (compensating transactions are a separate, application-level matter).</p>
+
+<h4>Introduction to two-phase commit</h4>
+<p><strong>2PC</strong> achieves atomic commit across nodes: all commit or all abort. A classic algorithm, used inside some databases and exposed to applications as <strong>XA transactions</strong> (Java Transaction API) or WS-AtomicTransaction. <em>It is not two-phase locking</em> — 2PL is about serializable isolation (<a class="xref back" href="ch07-transactions.html#two-phase-locking-2pl" data-tip="Ch 7 · Two-Phase Locking — a serializability mechanism, entirely different from 2PC despite the name">Chapter&nbsp;7<sup>←7</sup></a>); think of them as unrelated. 2PC adds a component: the <strong>coordinator</strong> (transaction manager), often a library inside the application process (a Java EE container), sometimes a separate service (Narayana, JOTM, BTM, MSDTC). The application reads and writes on several <strong>participant</strong> nodes as usual; at commit time the coordinator runs <strong>phase 1</strong> — a <em>prepare</em> request to every participant ("can you commit?") — and then <strong>phase 2</strong>: if all said yes, <em>commit</em> to all; if any said no, <em>abort</em> to all. The book's analogy is a wedding: the minister asks each party "do you?", and only after both "I do"s pronounces them married.</p>
+
+<figure class="anim" id="anim-2pc">
+<svg viewBox="0 0 680 320" role="img" aria-label="Two-phase commit (Figures 9-9 and 9-10): the coordinator sends prepare to two database participants; both write their data durably and vote yes, surrendering the right to abort; the coordinator writes its decision to its own log (the commit point) and sends commit to all. Alternative ending: the coordinator crashes after database 2 received commit but before database 1 did, leaving database 1 in doubt, holding locks, unable to commit or abort until the coordinator recovers.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="260" y="30" width="160" height="60" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="340" y="50" text-anchor="middle" font-weight="700">coordinator</text>
+    <g data-on="1-3"><text x="340" y="70" text-anchor="middle" font-size="9" opacity=".7">log: —</text></g>
+    <g data-on="4-6"><text x="340" y="70" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">log: COMMIT txn 7</text></g>
+    <g data-on="7"><text x="340" y="70" text-anchor="middle" font-size="9" fill="var(--bad)" font-weight="700">💥 crashed · log: COMMIT</text></g>
+    <rect x="20" y="170" width="220" height="80" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="130" y="190" text-anchor="middle" font-weight="700">database 1</text>
+    <rect x="440" y="170" width="220" height="80" rx="8" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+    <text x="550" y="190" text-anchor="middle" font-weight="700">database 2</text>
+    <g data-on="1"><text x="130" y="212" text-anchor="middle" font-size="9" opacity=".75">txn 7: writes done, uncommitted</text><text x="550" y="212" text-anchor="middle" font-size="9" opacity=".75">txn 7: writes done, uncommitted</text></g>
+    <!-- step 2: prepare -->
+    <g data-on="2" data-hot="2">
+      <path d="M290 90 C 250 120, 200 150, 150 168" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9p-w)"/>
+      <path d="M390 90 C 430 120, 480 150, 530 168" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9p-w)"/>
+      <text x="150" y="120" font-size="9" fill="var(--write)" font-weight="700">phase 1: PREPARE?</text>
+      <text x="440" y="120" font-size="9" fill="var(--write)" font-weight="700">phase 1: PREPARE?</text>
+    </g>
+    <g data-on="2-7"><text x="130" y="212" text-anchor="middle" font-size="9" fill="var(--write)">fsync data · check constraints</text><text x="550" y="212" text-anchor="middle" font-size="9" fill="var(--write)">fsync data · check constraints</text></g>
+    <!-- step 3: votes -->
+    <g data-on="3" data-hot="3">
+      <path d="M170 168 C 210 140, 260 110, 300 92" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a9p-r)"/>
+      <path d="M510 168 C 470 140, 420 110, 380 92" stroke="var(--read)" stroke-width="2" fill="none" marker-end="url(#a9p-r)"/>
+      <text x="200" y="150" font-size="9" fill="var(--read)" font-weight="700">YES</text>
+      <text x="460" y="150" font-size="9" fill="var(--read)" font-weight="700">YES</text>
+    </g>
+    <g data-on="3-7"><text x="130" y="230" text-anchor="middle" font-size="9" fill="var(--ok)">voted yes: promised to commit</text><text x="550" y="230" text-anchor="middle" font-size="9" fill="var(--ok)">voted yes: promised to commit</text></g>
+    <!-- step 4: commit point -->
+    <g data-on="4" data-hot="4"><rect x="256" y="26" width="168" height="68" rx="9" fill="none" stroke="var(--write)" stroke-width="2"/><text x="430" y="50" font-size="9" fill="var(--write)" font-weight="700">← COMMIT POINT</text><text x="430" y="64" font-size="9" fill="var(--write)">decision fsynced to disk</text></g>
+    <!-- step 5: commit sent -->
+    <g data-on="5" data-hot="5">
+      <path d="M290 90 C 250 120, 200 150, 150 168" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9p-w)"/>
+      <path d="M390 90 C 430 120, 480 150, 530 168" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9p-w)"/>
+      <text x="150" y="120" font-size="9" fill="var(--write)" font-weight="700">phase 2: COMMIT</text>
+      <text x="440" y="120" font-size="9" fill="var(--write)" font-weight="700">phase 2: COMMIT</text>
+    </g>
+    <g data-on="5-6"><text x="130" y="246" text-anchor="middle" font-size="9" fill="var(--ok)" font-weight="700">committed ✓</text><text x="550" y="246" text-anchor="middle" font-size="9" fill="var(--ok)" font-weight="700">committed ✓</text></g>
+    <g data-on="6" data-hot="6"><rect x="20" y="262" width="640" height="34" rx="4" fill="none" stroke="var(--ok)" stroke-width="1.5"/><text x="30" y="278" font-size="9" fill="var(--ok)" font-weight="700">two points of no return: a participant's YES (can no longer abort) and the coordinator's logged decision (irrevocable)</text><text x="30" y="291" font-size="9" opacity=".85">if a commit request is lost the coordinator retries FOREVER; a crashed yes-voter must commit on recovery</text></g>
+    <!-- step 7: coordinator crash -->
+    <g data-on="7" data-hot="7">
+      <path d="M390 90 C 430 120, 480 150, 530 168" stroke="var(--write)" stroke-width="2" fill="none" marker-end="url(#a9p-w)"/>
+      <text x="440" y="120" font-size="9" fill="var(--write)" font-weight="700">COMMIT (arrived)</text>
+      <path d="M290 90 C 250 120, 200 150, 150 168" stroke="var(--write)" stroke-width="2" fill="none" stroke-dasharray="4 3"/>
+      <text x="150" y="120" font-size="9" fill="var(--bad)" font-weight="700">COMMIT never sent</text>
+      <text x="550" y="246" text-anchor="middle" font-size="9" fill="var(--ok)" font-weight="700">committed ✓</text>
+      <text x="130" y="246" text-anchor="middle" font-size="9" fill="var(--bad)" font-weight="700">IN DOUBT: can't commit, can't abort</text>
+      <rect x="20" y="262" width="640" height="34" rx="4" fill="none" stroke="var(--bad)" stroke-width="1.5"/>
+      <text x="30" y="278" font-size="9" fill="var(--bad)" font-weight="700">database 1 must wait for the coordinator to recover and read its log — holding txn 7's row locks the whole time</text>
+      <text x="30" y="291" font-size="9" opacity=".85">a timeout doesn't help: aborting diverges from database 2; committing might diverge from a no-voter</text>
+    </g>
+    <!-- captions -->
+    <g data-on="1" data-hot="1"><text x="20" y="282" font-size="9" opacity=".85">a transaction has written to two databases (participants) under one global transaction ID. Time to commit — atomically.</text></g>
+    <g data-on="2"><text x="20" y="282" font-size="9" opacity=".85">phase 1: PREPARE. Each participant makes sure it could commit under ANY circumstance: data on disk, constraints checked.</text></g>
+    <g data-on="3"><text x="20" y="282" font-size="9" opacity=".85">each replies YES — a promise. From now on it may not abort on its own; a crash or full disk is no excuse later.</text></g>
+    <g data-on="4"><text x="20" y="282" font-size="9" opacity=".85">all yes ⇒ the coordinator decides COMMIT and logs it to disk FIRST: the commit point — a single-node atomic commit.</text></g>
+    <g data-on="5"><text x="20" y="282" font-size="9" opacity=".85">phase 2: COMMIT to every participant; each commits locally. Had any voted NO, this would be ABORT to all instead.</text></g>
+    <defs>
+      <marker id="a9p-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a9p-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> The application obtained a globally unique transaction ID from the coordinator, began a local transaction on each participant tagged with that ID, and did its reads and writes. Anything failing <em>at this stage</em> can be aborted by anyone. Now it wants to commit.</li>
+  <li><strong>PREPARE</strong> Phase 1: the coordinator sends <em>prepare</em> to all participants. Each participant makes sure it can definitely commit under all circumstances — writes everything to disk, checks constraints and conflicts. If a prepare fails or times out, the coordinator sends abort to all.</li>
+  <li><strong>THE FIRST PROMISE</strong> Replying <em>yes</em> means "I will commit if asked, no matter what." The participant surrenders its right to abort — without yet committing. A later crash, power failure, or full disk is not an acceptable excuse.</li>
+  <li><strong>THE COMMIT POINT</strong> With all votes in, the coordinator decides (commit only if every vote was yes) and <strong>writes that decision to its own log on disk before telling anyone</strong>. That write is the second promise — the decision is now irrevocable — and it's just a single-node atomic commit on the coordinator.</li>
+  <li><strong>COMMIT</strong> Phase 2: the coordinator sends the decision to all participants. If a request is lost, it retries <em>forever</em>; there is no going back. A participant that crashed after voting yes must commit when it recovers.</li>
+  <li><strong>WHY IT WORKS</strong> Two points of no return — the participant's yes, the coordinator's logged decision — where single-node commit has one (the commit record). In the wedding analogy: after "I do" you can't retract it, and if you faint before the pronouncement you're still married; you find out by asking the minister for your transaction's status, or by waiting for the retry.</li>
+  <li><strong>COORDINATOR FAILURE</strong> Figure 9-10: the coordinator decided commit, database 2 got the message, then the coordinator crashed. Database 1 is <em>in doubt</em>: it can't abort (database 2 committed), can't commit (another participant might have voted no), and a timeout doesn't help. It can only wait for the coordinator to recover and consult its log — and meanwhile it holds the transaction's locks. This is why the coordinator's log exists, and why 2PC is a <em>blocking</em> protocol.</li>
+</ol>
+</figure>
+
+<h4>Three-phase commit</h4>
+<p>Because it can block on a crashed coordinator, 2PC is a <em>blocking</em> atomic commit protocol. A nonblocking alternative, <strong>3PC</strong>, exists in theory but assumes bounded network delay and response times; with unbounded delays and pauses it can't guarantee atomicity. Nonblocking atomic commit needs a <strong>perfect failure detector</strong>, and on an unbounded-delay network a timeout isn't one — a request can time out with no node crashed. So 2PC endures despite the coordinator problem.</p>
+
+<h3 id="distributed-transactions-in-practice"><a class="self" href="#distributed-transactions-in-practice">Distributed Transactions in Practice</a></h3>
+<span class="key-chip">distributed-transactions-in-practice</span>
+
+<p>Distributed transactions have a mixed reputation: an important safety guarantee, but also operational trouble, killed performance, and overpromising; many cloud services skip them. MySQL's distributed transactions are reported over 10× slower than single-node ones, mostly from the extra <code>fsync</code>s for crash recovery and the extra round trips. Two very different things get conflated. <strong>Database-internal</strong> distributed transactions — all participants run the same database (VoltDB, MySQL Cluster NDB) — can use any protocol and optimizations, and often work well. <strong>Heterogeneous</strong> distributed transactions — two vendors' databases, or a database plus a message broker — must achieve atomic commit across unrelated systems, and that is far harder.</p>
+
+<h4>Exactly-once message processing</h4>
+<p>Heterogeneous transactions integrate systems powerfully: acknowledge a message from a queue if and only if the database transaction that processed it committed, by committing the ack and the writes atomically. If either fails, both abort and the broker redelivers; the message is <em>effectively processed exactly once</em>, retries and all (<a class="xref fwd" href="ch11-stream-processing.html#fault-tolerance" data-tip="Ch 11 · Fault Tolerance (stream processing) — exactly-once semantics via atomic commit or idempotence · not yet written">Chapter&nbsp;11<sup>→11</sup></a>). It only works if <em>every</em> affected system speaks the same atomic commit protocol — an email server that doesn't do 2PC may send the email twice.</p>
+
+<h4>XA transactions</h4>
+<p><strong>X/Open XA</strong> (1991) is the standard for 2PC across heterogeneous technologies, supported by PostgreSQL, MySQL, DB2, SQL Server, Oracle, and brokers like ActiveMQ, HornetQ, MSMQ, IBM MQ. It is <em>not</em> a network protocol — it's a C API for talking to a transaction coordinator (Java's JTA, via JDBC and JMS drivers). An XA-aware driver asks the coordinator whether an operation belongs to a distributed transaction and exposes callbacks for prepare/commit/abort. The coordinator is usually a library inside the application process, tracking participants and logging decisions to <strong>local disk</strong>. If the application process or its machine dies, the coordinator dies with it, prepared transactions are stuck in doubt, and recovery requires restarting <em>that</em> server so the library can read its log and drive the callbacks — the database can't contact the coordinator itself.</p>
+
+<h4>Holding locks while in doubt</h4>
+<p>Why care about in-doubt transactions? <strong>Locks.</strong> Participants hold row-level exclusive locks on modified rows (and, under 2PL, shared locks on read rows) until commit or abort. An in-doubt transaction holds them for as long as it's in doubt — 20 minutes if the coordinator takes 20 minutes to restart, <em>forever</em> if its log is lost until an administrator intervenes. Other transactions can't write those rows (maybe can't read them), so large parts of the application can become unavailable.</p>
+
+<h4>Recovering from coordinator failure</h4>
+<p>In theory a restarted coordinator recovers cleanly from its log. In practice <strong>orphaned in-doubt transactions</strong> happen — log lost or corrupted by a bug — and they sit forever holding locks; even rebooting the database won't release them, since a correct 2PC must preserve in-doubt locks across restarts. An administrator must examine each participant, find which have already committed or aborted, and apply the same outcome to the rest — manual, stressful work during a production outage. Many XA implementations offer <strong>heuristic decisions</strong>: a participant unilaterally commits or aborts an in-doubt transaction. "Heuristic" is a euphemism for <em>probably breaking atomicity</em>; it's for catastrophes only.</p>
+
+<h4>Limitations of distributed transactions</h4>
+<p>The key realization: <strong>the coordinator is itself a database</strong> (it stores transaction outcomes) and deserves the same care. Yet many coordinators aren't replicated — a single point of failure for the whole system. Application servers meant to be <em>stateless</em> become stateful when the coordinator's log lives on their disk — the log is now durable system state as important as the databases. XA is a lowest common denominator: it can't detect deadlocks across systems and doesn't work with SSI, since both would need cross-system protocols. Even database-internal 2PC (which can do distributed SSI) needs <em>all</em> participants to respond, so any broken part fails the transaction: distributed transactions <strong>amplify failures</strong>, the opposite of fault tolerance. Alternatives that keep systems consistent without heterogeneous 2PC come in <a class="xref fwd" href="ch12-future-of-data-systems.html#the-end-to-end-argument-for-databases" data-tip="Ch 12 · The End-to-End Argument for Databases — idempotent operations and unique IDs instead of distributed transactions · not yet written">Chapters&nbsp;11 and 12<sup>→12</sup></a>.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · 2PC is consensus with a dictator</span>
+Two-phase commit does reach agreement: everyone ends up with the same decision. But look who decides — one coordinator, and if that coordinator is unavailable, nobody can decide anything, ever, while holding locks on the rows in question. That is the shape of a consensus algorithm that satisfies agreement, integrity, and validity but not <em>termination</em>: a dictatorship. The section that follows is about replacing the dictator with an <em>elected</em> leader who can be replaced when they stop answering — which requires that the electorate, not the leader, be the source of truth.</div>
+
+<h3 id="fault-tolerant-consensus"><a class="self" href="#fault-tolerant-consensus">Fault-Tolerant Consensus</a></h3>
+<span class="key-chip">fault-tolerant-consensus</span>
+
+<p>Formally: one or more nodes <em>propose</em> values, and the algorithm <em>decides</em> one of them — several customers grab the last seat, each node proposes its customer, the decision names the winner. A consensus algorithm must satisfy four properties:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Property</th><th>Statement</th><th>Kind</th><th>What it rules out</th></tr></thead>
+<tbody>
+<tr><td><strong>Uniform agreement</strong></td><td>No two nodes decide differently</td><td>safety</td><td>split brain — the core idea</td></tr>
+<tr><td><strong>Integrity</strong></td><td>No node decides twice</td><td>safety</td><td>changing your mind after deciding</td></tr>
+<tr><td><strong>Validity</strong></td><td>If a node decides <em>v</em>, some node proposed <em>v</em></td><td>safety</td><td>the trivial "always decide null" algorithm</td></tr>
+<tr><td><strong>Termination</strong></td><td>Every non-crashed node eventually decides</td><td>liveness</td><td>sitting around forever; i.e. this is <em>fault tolerance</em></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Without fault tolerance the first three are easy: hardcode a dictator. That is 2PC — coordinator down, in-doubt participants can't decide. <strong>Termination</strong> says the algorithm must make progress even when nodes fail — and in the consensus model a crashed node is <em>gone forever</em> (buried under 30 feet of mud), so any algorithm that waits for a node to recover fails termination; 2PC does. Of course, if <em>all</em> nodes crash nothing can decide; it can be proved that consensus needs <strong>at least a majority</strong> of nodes working to guarantee termination — that majority forms a quorum. Most implementations still uphold the safety properties even when a majority is down or the network is severed: an outage can stop decisions, never corrupt them. And most assume no Byzantine faults (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#byzantine-faults" data-tip="Ch 8 · Byzantine Faults — nodes that lie; BFT consensus exists if fewer than one-third are faulty">Chapter&nbsp;8<sup>←8</sup></a>); Byzantine-tolerant consensus exists for fewer than one-third faulty nodes.</p>
+
+<h4>Consensus algorithms and total order broadcast</h4>
+<p>The best-known fault-tolerant algorithms: <strong>Viewstamped Replication</strong>, <strong>Paxos</strong>, <strong>Raft</strong>, and <strong>Zab</strong> — similar in spirit, not identical, and hard to implement (don't roll your own). Most don't decide single values; they decide a <em>sequence</em> — i.e. they are <strong>total order broadcast</strong> algorithms. Total order broadcast is equivalent to repeated rounds of consensus, one decision per message: agreement ⇒ same messages in the same order; integrity ⇒ no duplicates; validity ⇒ nothing fabricated; termination ⇒ nothing lost. VSR, Raft, and Zab implement total order broadcast directly since that's more efficient than one-value-at-a-time; Paxos's version is Multi-Paxos.</p>
+
+<h4>Single-leader replication and consensus</h4>
+<p>Isn't single-leader replication total order broadcast? Why didn't Chapter 5 need consensus? Because of <strong>how the leader is chosen</strong>. A leader configured by humans is a dictatorship: only it decides write order, and if it dies, no writes until operators pick another — fine in practice, but it fails termination (progress needs a human). Automatic failover gets closer — but all nodes must agree who the leader is, so you need consensus to elect a leader; and if consensus algorithms are total order broadcast, and total order broadcast is single-leader replication, and single-leader replication needs a leader… <em>to elect a leader we need a leader; to solve consensus we must first solve consensus.</em></p>
+
+<h4>Epoch numbering and quorums</h4>
+<p>The way out: the protocols use a leader but <strong>don't guarantee it is unique</strong> — only unique <em>within an epoch</em>. The <strong>epoch number</strong> (ballot in Paxos, view in VSR, term in Raft) is incremented every time the leader is suspected dead and a vote elects a new one; epochs are totally ordered, and if two leaders from different epochs conflict, the higher epoch wins. Before deciding anything, a leader must check it hasn't been ousted by a higher-epoch leader — and, per <a class="xref back" href="ch08-trouble-with-distributed-systems.html#the-truth-is-defined-by-the-majority" data-tip="Ch 8 · The Truth Is Defined by the Majority — a node cannot trust its own belief that it is leader">Chapter&nbsp;8<sup>←8</sup></a>, it can't trust its own belief. So for every decision it sends the proposal to the others and waits for a <strong>quorum</strong> (usually a majority) to vote in favor; a node votes yes only if it knows of no higher epoch. Two rounds of voting — elect a leader, then approve each proposal — and the key insight is that <strong>the two quorums must overlap</strong>: if a proposal passes, at least one voter also took part in the most recent election, so if no voter reports a higher epoch, the leader knows no newer election has happened and may safely decide.</p>
+
+<figure class="anim" id="anim-epoch">
+<svg viewBox="0 0 680 320" role="img" aria-label="Epoch numbering with overlapping quorums: five nodes; node 1 leads epoch 3. A network glitch makes nodes 3, 4, and 5 suspect the leader; they elect node 4 for epoch 4 with a majority. The old leader, unaware, proposes a value for epoch 3 and asks for votes; nodes 3, 4, and 5 reject it because they know of epoch 4, so it cannot reach a majority. Node 4's proposal for epoch 4 gathers a majority and is decided. Any majority intersects the election majority, so a stale leader is always discovered.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <g id="n5">
+      <rect x="30" y="110" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="80" y="130" text-anchor="middle" font-weight="700">node 1</text>
+      <rect x="160" y="110" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="210" y="130" text-anchor="middle" font-weight="700">node 2</text>
+      <rect x="290" y="110" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="340" y="130" text-anchor="middle" font-weight="700">node 3</text>
+      <rect x="420" y="110" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="470" y="130" text-anchor="middle" font-weight="700">node 4</text>
+      <rect x="550" y="110" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="600" y="130" text-anchor="middle" font-weight="700">node 5</text>
+    </g>
+    <!-- epoch labels per node -->
+    <g data-on="1-2"><g font-size="9" text-anchor="middle"><text x="80" y="150" fill="var(--write)" font-weight="700">epoch 3 · LEADER</text><text x="210" y="150">epoch 3</text><text x="340" y="150">epoch 3</text><text x="470" y="150">epoch 3</text><text x="600" y="150">epoch 3</text></g></g>
+    <g data-on="3-6"><g font-size="9" text-anchor="middle"><text x="80" y="150" fill="var(--write)" font-weight="700">epoch 3 · "leader"</text><text x="210" y="150">epoch 3</text><text x="340" y="150" fill="var(--ok)" font-weight="700">epoch 4</text><text x="470" y="150" fill="var(--ok)" font-weight="700">epoch 4 · LEADER</text><text x="600" y="150" fill="var(--ok)" font-weight="700">epoch 4</text></g></g>
+    <!-- step 2: partition -->
+    <g data-on="2-6"><path d="M275 96 L 275 180" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 4"/><text x="200" y="92" font-size="9" fill="var(--bad)">network glitch: 3, 4, 5 can't hear node 1</text></g>
+    <!-- step 3: election -->
+    <g data-on="3" data-hot="3">
+      <path d="M340 110 C 360 70, 440 70, 460 108" stroke="var(--ok)" stroke-width="1.8" fill="none" marker-end="url(#a9e-g)"/>
+      <path d="M600 110 C 580 70, 500 70, 480 108" stroke="var(--ok)" stroke-width="1.8" fill="none" marker-end="url(#a9e-g)"/>
+      <text x="380" y="62" font-size="9" fill="var(--ok)" font-weight="700">votes for node 4, epoch 4: 3 of 5 = majority</text>
+    </g>
+    <!-- step 4: old leader proposes -->
+    <g data-on="4" data-hot="4">
+      <path d="M130 140 L 158 140" stroke="var(--write)" stroke-width="2" marker-end="url(#a9e-w)"/>
+      <path d="M80 110 C 150 40, 280 40, 340 108" stroke="var(--write)" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#a9e-w)"/>
+      <path d="M90 110 C 200 20, 420 20, 470 108" stroke="var(--write)" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#a9e-w)"/>
+      <text x="30" y="196" font-size="9" fill="var(--write)" font-weight="700">node 1: "epoch 3, decide x = A?"</text>
+      <text x="200" y="178" font-size="9" fill="var(--ok)">2: yes</text>
+      <text x="330" y="182" font-size="9" fill="var(--bad)" font-weight="700">3: NO, epoch 4 exists</text>
+      <text x="470" y="182" font-size="9" fill="var(--bad)" font-weight="700">4: NO</text>
+      <rect x="20" y="212" width="640" height="34" rx="4" fill="none" stroke="var(--bad)" stroke-width="1.5"/>
+      <text x="30" y="228" font-size="9" fill="var(--bad)" font-weight="700">2 of 5 in favor: no majority. The stale leader cannot decide — it learns it was ousted and steps down</text>
+      <text x="30" y="241" font-size="9" opacity=".85">any majority overlaps the election majority, so at least one voter always knows about the higher epoch</text>
+    </g>
+    <!-- step 5: new leader proposes -->
+    <g data-on="5" data-hot="5">
+      <path d="M420 140 L 392 140" stroke="var(--write)" stroke-width="2" marker-end="url(#a9e-w)"/>
+      <path d="M520 140 L 548 140" stroke="var(--write)" stroke-width="2" marker-end="url(#a9e-w)"/>
+      <text x="380" y="200" font-size="9" fill="var(--write)" font-weight="700">node 4: "epoch 4, decide x = B?"</text>
+      <text x="330" y="182" font-size="9" fill="var(--ok)">3: yes</text>
+      <text x="590" y="182" font-size="9" fill="var(--ok)">5: yes</text>
+      <rect x="20" y="212" width="640" height="34" rx="4" fill="none" stroke="var(--ok)" stroke-width="1.5"/>
+      <text x="30" y="228" font-size="9" fill="var(--ok)" font-weight="700">3 of 5 in favor and no higher epoch reported ⇒ node 4 may safely DECIDE x = B</text>
+      <text x="30" y="241" font-size="9" opacity=".85">two votes: one to elect, one per proposal — and their quorums must intersect. That is the whole trick</text>
+    </g>
+    <g data-on="6" data-hot="6">
+      <rect x="20" y="212" width="640" height="34" rx="4" fill="none" stroke="var(--write)" stroke-width="1.5"/>
+      <text x="30" y="228" font-size="9" fill="var(--write)" font-weight="700">vs 2PC: the leader is ELECTED, a MAJORITY suffices (not unanimity), and a recovery step brings nodes back in sync</text>
+      <text x="30" y="241" font-size="9" opacity=".85">when the glitch heals, nodes 1 and 2 learn of epoch 4 and catch up on its decisions — safety was never at risk</text>
+    </g>
+    <!-- captions -->
+    <g data-on="1" data-hot="1"><text x="20" y="282" font-size="9" opacity=".85">five nodes. Node 1 is leader for epoch 3; every decision it makes carries the epoch number and needs a majority of votes.</text></g>
+    <g data-on="2" data-hot="2"><text x="20" y="282" font-size="9" opacity=".85">a transient network problem: nodes 3–5 stop hearing node 1's heartbeats and, after a timeout, suspect it dead. It isn't.</text></g>
+    <g data-on="3"><text x="20" y="282" font-size="9" opacity=".85">they hold an election with an incremented epoch, 4. Node 4 gets 3 of 5 votes — a majority — and leads epoch 4.</text></g>
+    <g data-on="4"><text x="20" y="282" font-size="9" opacity=".85">node 1 still thinks it leads and proposes under epoch 3. Node 2 agrees; 3 and 4 refuse — they know a higher epoch exists.</text></g>
+    <g data-on="5"><text x="20" y="282" font-size="9" opacity=".85">node 4 proposes under epoch 4; nodes 3 and 5 vote yes. Majority, no higher epoch seen ⇒ decided. Uniform agreement holds.</text></g>
+    <g data-on="6"><text x="20" y="282" font-size="9" opacity=".85">epochs make "leader" a weaker claim — unique per epoch, not globally — and quorum overlap makes that claim safe.</text></g>
+    <defs>
+      <marker id="a9e-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a9e-g" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--ok)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> Five nodes; node 1 is leader in epoch 3. Every proposal it makes carries its epoch and must gather a majority (3 of 5) to be decided.</li>
+  <li><strong>SUSPICION</strong> A network glitch hides node 1 from nodes 3, 4, and 5. Their timeouts fire and they suspect the leader is dead — wrongly, but they cannot know that.</li>
+  <li><strong>ELECTION</strong> They vote, with an incremented epoch number, 4. Node 4 wins with 3 of 5 — a majority. Epochs are totally ordered and monotonically increasing; whoever holds the higher epoch prevails in a conflict.</li>
+  <li><strong>THE STALE LEADER IS STOPPED</strong> Node 1 proposes a value under epoch 3. Node 2 votes yes, but any node that knows of epoch 4 refuses. Node 1 cannot reach a majority. It learns it was ousted and steps down. This is why the leader must collect votes rather than trust its own belief.</li>
+  <li><strong>THE NEW LEADER DECIDES</strong> Node 4 proposes under epoch 4 and gets nodes 3 and 5: a majority with no higher epoch reported, so it decides safely. Because the proposal quorum and the election quorum <em>must intersect</em>, a leader that gets a majority can be sure no newer election has happened.</li>
+  <li><strong>CONTRAST WITH 2PC</strong> Superficially similar voting, but: the leader is <em>elected</em>, not fixed; a <em>majority</em> suffices rather than every participant; and a defined recovery process brings lagging nodes (1 and 2, once the glitch heals) back into a consistent state. Those three differences are what make consensus fault-tolerant.</li>
+</ol>
+</figure>
+
+<h4>Limitations of consensus</h4>
+<p>Consensus is a breakthrough — concrete safety in an uncertain world, while still making progress with a majority up — and it yields total order broadcast and therefore fault-tolerant linearizable operations. But it isn't used everywhere, because: voting on every proposal is a form of <strong>synchronous replication</strong> (<a class="xref back" href="ch05-replication.html#synchronous-versus-asynchronous-replication" data-tip="Ch 5 · Synchronous Versus Asynchronous Replication — many databases accept possible loss on failover for speed">Chapter&nbsp;5<sup>←5</sup></a>), and many databases prefer asynchronous speed at the risk of losing committed data on failover; a <strong>strict majority</strong> is required — 3 nodes to survive 1 failure, 5 for 2 — and the minority side of a network split is blocked; most algorithms assume a <strong>fixed membership</strong>, and dynamic membership extensions are less well understood; failure detection by <strong>timeouts</strong> means that on high-latency or geo-distributed networks nodes falsely suspect the leader, and frequent elections can leave the system electing more than working; and some algorithms are fragile in specific ways — Raft has been shown to bounce leadership endlessly or force the leader to resign repeatedly when a single link is flaky. Robustness to unreliable networks is still an open research problem.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · Raft, properly</span>
+The 1st edition centers ZooKeeper's Zab and treats Raft in passing. The 2nd edition covers <strong>Raft in depth</strong> — "In Search of an Understandable Consensus Algorithm," Ongaro's thesis, "Raft Refloated," and "Paxos vs Raft: Have We Reached Consensus on Distributed Consensus?" — as the algorithm most readers will actually meet (etcd, CockroachDB, TiKV, Kafka's KRaft). Expect the epoch/quorum story above told in Raft's vocabulary: terms, leader election, log replication, and the joint-consensus approach to membership change. etcd shares the coordination-service stage with ZooKeeper, with its Jepsen analyses cited. <em>[inferred from the 2nd-edition references repo]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="concept" id="membership-and-coordination-services">
+<span class="key-chip">membership-and-coordination-services</span>
+<h2><a class="self" href="#membership-and-coordination-services">Membership and Coordination Services</a></h2>
+
+<p>ZooKeeper and etcd are described as "distributed key-value stores" or "coordination and configuration services," and their API looks like a database — read and write keys, iterate. So why the elaborate consensus machinery? You rarely use ZooKeeper directly — it's a poor general-purpose database — but HBase, Hadoop YARN, OpenStack Nova, and Kafka all rely on it. It holds a <em>small</em> amount of data, in memory (written to disk for durability), replicated to every node by fault-tolerant total order broadcast. Modeled on Google's Chubby lock service, it adds a set of features that together make distributed coordination tractable:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Feature</th><th>What it gives you</th><th>Needs consensus?</th></tr></thead>
+<tbody>
+<tr><td><strong>Linearizable atomic operations</strong></td><td>Compare-and-set ⇒ a lock: of several concurrent attempts, exactly one succeeds, even through node failure or network interruption. Usually a <em>lease</em> with an expiry so a dead client's lock is released.</td><td>yes — the only one that truly does</td></tr>
+<tr><td><strong>Total ordering of operations</strong></td><td>Every operation gets a monotonically increasing transaction ID (<code>zxid</code>) and version (<code>cversion</code>) — the fencing token of <a class="xref back" href="ch08-trouble-with-distributed-systems.html#the-truth-is-defined-by-the-majority" data-tip="Ch 8 · The Truth Is Defined by the Majority — fencing tokens let the resource reject a stale lease holder">Chapter&nbsp;8<sup>←8</sup></a>.</td><td>falls out of total order broadcast</td></tr>
+<tr><td><strong>Failure detection</strong></td><td>Long-lived client sessions with heartbeats; survive brief interruptions and server failures; if heartbeats stop past the session timeout, the session is declared dead and its <em>ephemeral nodes</em> (locks) vanish automatically.</td><td>no</td></tr>
+<tr><td><strong>Change notifications</strong></td><td>Clients <em>watch</em> keys and learn when another client joins (writes a value) or fails (its ephemeral nodes disappear) — no polling.</td><td>no</td></tr>
+</tbody>
+</table>
+</div>
+
+<h4>Allocating work to nodes</h4>
+<p>Two textbook uses. <strong>Choosing a leader or primary</strong> among several instances of a service — single-leader databases, but also job schedulers and other stateful systems — with automatic takeover when it fails. <strong>Assigning partitions to nodes</strong> for any partitioned resource (database, message streams, file storage, actor system): rebalance onto new nodes as they join (<a class="xref back" href="ch06-partitioning.html#rebalancing-partitions" data-tip="Ch 6 · Rebalancing Partitions — moving partitions between nodes as membership changes">Chapter&nbsp;6<sup>←6</sup></a>), take over work when nodes fail. Done with atomic operations, ephemeral nodes, and notifications, the application recovers from faults without human intervention. It isn't easy even with Apache Curator's recipes, but it beats implementing consensus from scratch, which has a poor track record. Note the scale trick: an application may grow to thousands of nodes, and majority votes across thousands would be hopeless; ZooKeeper runs on a <em>fixed</em> 3 or 5 nodes, votes among those, and serves many clients — <strong>outsourced</strong> consensus, ordering, and failure detection. Its data changes slowly ("10.1.1.23 leads partition 7" — minutes or hours), not thousands of times per second; replicating fast-changing application state is a job for other tools (Apache BookKeeper).</p>
+
+<h4>Service discovery</h4>
+<p>ZooKeeper, etcd, and Consul are also used for <strong>service discovery</strong> — which IP serves this service? — because in the cloud VMs come and go and services register their endpoints on startup. But discovery doesn't obviously need consensus: DNS, the traditional answer, is heavily cached, absolutely not linearizable, and nobody minds slightly stale results — what matters is that it stays available and robust to interruptions. Leader election, however, <em>does</em> need consensus, and if the consensus system already knows the leader, it can help other services find it; some offer <strong>read-only caching replicas</strong> that receive the decision log asynchronously without voting, serving reads that don't need to be linearizable.</p>
+
+<h4>Membership services</h4>
+<p>ZooKeeper sits in a long line of research on <strong>membership services</strong>, back to the 1980s and air-traffic-control systems: determine which nodes are currently live members of the cluster. Unbounded delays make failure detection unreliable (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#detecting-faults" data-tip="Ch 8 · Detecting Faults — timeouts cannot distinguish a slow node from a dead one">Chapter&nbsp;8<sup>←8</sup></a>), but coupling it with consensus lets nodes <em>agree</em> on who's alive. A live node may still be wrongly declared dead — yet agreement on membership is invaluable: "the leader is the lowest-numbered member" only works if everyone agrees who the members are.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · why ZooKeeper is a database that isn't for your data</span>
+ZooKeeper is a notary's office with three or five notaries who vote on every stamp. You would never keep your inventory there — each stamp costs a round of voting. But you go there for the handful of facts that must be <em>agreed</em> rather than merely stored: who is in charge of partition 7, who holds this lock, who is still alive. The notaries also keep a numbered ledger (fencing tokens), notice when a client stops showing up (sessions and ephemeral nodes), and call you when a fact you care about changes (watches). Everything else in your system can then be fast and sloppy, because the few decisions that have to be right are outsourced to the office that's slow and right.</div>
+
+<figure>
+<svg viewBox="0 0 680 230" role="img" aria-label="The equivalence web from the chapter summary: consensus at the center, with linearizable compare-and-set registers, total order broadcast, atomic commit, locks and leases, uniqueness constraints, and membership/leader election all reducible to it and to each other. Below: three ways to cope when the single leader fails — wait, human failover, or a consensus algorithm.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <ellipse cx="340" cy="90" rx="70" ry="26" fill="var(--write-soft)" stroke="var(--write)" stroke-width="2"/>
+    <text x="340" y="94" text-anchor="middle" font-weight="700" fill="var(--write)">CONSENSUS</text>
+    <g font-size="9" text-anchor="middle">
+      <rect x="20" y="30" width="150" height="26" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="95" y="47">linearizable CAS register</text>
+      <rect x="20" y="124" width="150" height="26" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="95" y="141">total order broadcast</text>
+      <rect x="510" y="30" width="150" height="26" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="585" y="47">atomic commit (2PC…)</text>
+      <rect x="510" y="124" width="150" height="26" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="585" y="141">locks and leases</text>
+      <rect x="180" y="170" width="150" height="26" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="255" y="187">uniqueness constraint</text>
+      <rect x="345" y="170" width="168" height="26" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="429" y="187">membership / leader election</text>
+    </g>
+    <g stroke="var(--write)" stroke-width="1.4" fill="none">
+      <path d="M170 45 L 278 78"/><path d="M170 135 L 278 102"/><path d="M510 45 L 402 78"/><path d="M510 135 L 402 102"/><path d="M260 170 L 315 116"/><path d="M420 170 L 365 116"/>
+    </g>
+    <text x="20" y="90" font-size="9" opacity=".8">⇄ each reducible</text>
+    <text x="20" y="104" font-size="9" opacity=".8">to the others</text>
+    <text x="20" y="222" font-size="9" opacity=".85">all trivial with one deciding node; when it fails: ① wait (XA, no termination) ② humans fail over ③ consensus</text>
+  </g>
+</svg>
+<figcaption>The chapter's closing insight. Every box is "straightforward if you let a single node decide" — which is what a single-leader database does, and why it can offer linearizable operations, uniqueness constraints, and an ordered log. When that node fails or is unreachable there are only three responses: block until it returns (XA coordinators), have a human choose a new leader (many relational databases — consensus by act of God), or run a consensus algorithm. Even a single-leader database therefore needs consensus — just less often, for leadership changes. The leader "kicks the can down the road."</figcaption>
+</figure>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>Eventual consistency</strong> (convergence) is the weakest useful guarantee: no bound on when, and reads may return anything meanwhile. Stronger models cost performance or fault tolerance but are easier to use correctly. Consistency models (replica coordination) and isolation levels (concurrent-transaction races) are related but distinct.</li>
+<li><strong>Linearizability</strong> = the illusion of a single copy with atomic operations: a <em>recency</em> guarantee. Once any read returns a new value, all later reads must; every operation takes effect at one instant inside its request/response window, and joining those instants gives a valid history that never moves backward in time. Testable from recorded timings.</li>
+<li><strong>Linearizability ≠ serializability</strong>: the latter orders multi-object transactions in <em>some</em> order; the former is per-register recency. Both = strict serializability. 2PL and serial execution are linearizable; SSI is not (snapshot reads).</li>
+<li><strong>Where it's required</strong>: locks and leader election (ZooKeeper/etcd), hard uniqueness constraints (one up-to-date value everyone agrees on), and cross-channel dependencies (file storage + message queue racing).</li>
+<li><strong>Implementations</strong>: single-leader can be linearizable (leader or sync-follower reads, if you really know the leader); consensus systems are; multi-leader isn't; Dynamo-style quorums aren't even with w + r &gt; n (a reader can see the new value while a later reader sees the old) unless read repair is synchronous — and CAS needs consensus regardless.</li>
+<li><strong>The cost</strong>: under a network fault, a linearizable system must make cut-off replicas unavailable; a non-linearizable one can keep every replica serving. That is CAP — better said "Consistent <em>or</em> Available when Partitioned"; the book calls "pick 2 of 3" misleading and CAP largely unhelpful. Beyond faults, linearizability is slow <em>always</em>: response time ∝ network-delay uncertainty (Attiya–Welch), the same reason multi-core RAM isn't linearizable.</li>
+<li><strong>Causality</strong> is a partial order (branches and merges; concurrent ops incomparable); linearizability is a total order (one timeline). Linearizability implies causal consistency; causal consistency is the strongest model that stays fast and available under network problems, and often all you actually need.</li>
+<li><strong>Sequence numbers</strong> from a logical clock give a compact total order. Per-node counters, wall-clock timestamps, and block allocation are <em>not</em> causally consistent; <strong>Lamport timestamps</strong> (counter, node ID) are, by carrying the max counter seen on every message and jumping forward — but they can't distinguish concurrent from dependent (version vectors can).</li>
+<li><strong>Timestamps aren't enough</strong> for uniqueness: the total order only emerges after all operations are known; you must know when it's <em>final</em>. That is <strong>total order broadcast</strong>: reliable, same-order delivery to all nodes, order fixed at delivery — i.e. a replicated log. It gives state machine replication, serializable deterministic transactions, and fencing tokens.</li>
+<li><strong>Log ⇄ linearizable storage</strong>: CAS via the log (append a claim, wait for it to come back, first claim wins); linearizable reads by sequencing through the log, syncing to the latest position, or sync replicas. Conversely, increment-and-get builds a gapless log. Linearizable CAS, total order broadcast, and consensus are <strong>equivalent</strong>.</li>
+<li><strong>2PC</strong>: prepare (participants fsync and promise) → coordinator logs the decision (commit point) → commit/abort to all, retried forever. Two points of no return. A crashed coordinator leaves participants <em>in doubt</em>, holding locks; 3PC needs a perfect failure detector, so 2PC persists. Not 2PL.</li>
+<li><strong>XA in practice</strong>: heterogeneous 2PC (exactly-once queue + DB processing) via a C API and a coordinator library on the app server; slow (fsyncs, round trips), coordinator is an unreplicated single point of failure and makes "stateless" servers stateful, orphaned in-doubt transactions need manual or <em>heuristic</em> (atomicity-breaking) resolution, and it amplifies failures. Database-internal distributed transactions fare better.</li>
+<li><strong>Consensus</strong> = uniform agreement, integrity, validity (safety) + termination (liveness, needs a majority alive). FLP forbids it only in the pure asynchronous model. VSR, Paxos, Raft, Zab decide sequences (total order broadcast). They use a leader but guarantee uniqueness only <em>per epoch</em>; every decision needs a quorum that must <em>overlap</em> the election quorum, so a stale leader is always discovered. Unlike 2PC: elected leader, majority not unanimity, recovery process.</li>
+<li><strong>Limits</strong>: synchronous-replication cost; strict majority (3 for 1 failure, 5 for 2); mostly fixed membership; timeout-based detection causes leadership churn on flaky networks (Raft's known edge cases).</li>
+<li><strong>ZooKeeper/etcd</strong>: small in-memory data replicated by total order broadcast, plus linearizable CAS (locks/leases), zxid ordering (fencing), session-based failure detection (ephemeral nodes), and watches — outsourced consensus for leader election and work assignment among 3–5 voters serving thousands of clients. Service discovery doesn't need consensus (DNS is fine); membership agreement does.</li>
+<li><strong>2nd-edition arc</strong> (Ch 10, significantly expanded): Raft covered properly (etcd alongside ZooKeeper); shared-log architectures (CORFU, Tango, Delos) and Calvin-style deterministic transactions; distributed ID generation (Snowflake, ULID) tied to logical clocks; CAP further retired in favour of strict serializability / external consistency as documented by Spanner and CockroachDB; isolation vs consistency hierarchies clearly layered.</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Sixteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="c">
+<p>Why does the book suggest "convergence" as a better name for eventual consistency?</p>
+<label><input type="radio" name="q1" value="a"> Because replicas converge within a bounded time</label>
+<label><input type="radio" name="q1" value="b"> Because it guarantees read-your-writes</label>
+<label><input type="radio" name="q1" value="c"> Because the only promise is that, if writes stop, replicas eventually reach the same value — nothing about when, and reads may return anything until then</label>
+<label><input type="radio" name="q1" value="d"> Because it is equivalent to linearizability in the absence of faults</label>
+</div>
+
+<div class="q" data-a="d">
+<p>In the register timeline, client A's read returns the new value 1 while C's write is still in progress; client B then starts a read after A's returned. What must B's read return in a linearizable system, and why?</p>
+<label><input type="radio" name="q2" value="a"> 0, because the write has not completed</label>
+<label><input type="radio" name="q2" value="b"> Either 0 or 1, because B's read overlaps the write</label>
+<label><input type="radio" name="q2" value="c"> Whatever the majority of replicas hold</label>
+<label><input type="radio" name="q2" value="d"> 1: the value flips at a single instant, and once any read has observed the new value, every subsequent read must too — otherwise the register would appear to flip back</label>
+</div>
+
+<div class="q" data-a="b">
+<p>What is the difference between serializability and linearizability?</p>
+<label><input type="radio" name="q3" value="a"> They are synonyms; "strict serializability" is marketing</label>
+<label><input type="radio" name="q3" value="b"> Serializability is a transaction isolation property (equivalent to <em>some</em> serial order of multi-object transactions); linearizability is a recency guarantee on single-register reads and writes; both together is strict serializability</label>
+<label><input type="radio" name="q3" value="c"> Linearizability applies to transactions; serializability to single objects</label>
+<label><input type="radio" name="q3" value="d"> Serializability requires synchronized clocks; linearizability does not</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Why is serializable snapshot isolation (SSI) not linearizable?</p>
+<label><input type="radio" name="q4" value="a"> Because it deliberately reads from a consistent snapshot that excludes writes more recent than the snapshot, so reads are not guaranteed to be the latest value</label>
+<label><input type="radio" name="q4" value="b"> Because it uses two-phase locking</label>
+<label><input type="radio" name="q4" value="c"> Because it only works on a single node</label>
+<label><input type="radio" name="q4" value="d"> Because it aborts transactions</label>
+</div>
+
+<div class="q" data-a="c">
+<p>In the photo-resizing example, what makes the race condition possible, and what is the simplest fix?</p>
+<label><input type="radio" name="q5" value="a"> The message queue loses messages; fix with acknowledgments</label>
+<label><input type="radio" name="q5" value="b"> The resizer is too slow; fix with more workers</label>
+<label><input type="radio" name="q5" value="c"> Two communication channels — file storage and the queue — and the queue can outrun the storage's internal replication, so the resizer reads an old or missing image; a linearizable storage service removes the race</label>
+<label><input type="radio" name="q5" value="d"> Thumbnails are written before originals; fix by reordering writes</label>
+</div>
+
+<div class="q" data-a="b">
+<p>With n = 3, w = 3, r = 2, why can a strict-quorum Dynamo-style system still be nonlinearizable?</p>
+<label><input type="radio" name="q6" value="a"> Because w + r > n does not hold</label>
+<label><input type="radio" name="q6" value="b"> While a write is propagating, one reader's quorum may include the updated replica and return the new value, and a later reader's quorum may hit only not-yet-updated replicas and return the old value — the quorum overlap only guarantees intersection once the write is complete</label>
+<label><input type="radio" name="q6" value="c"> Because sloppy quorums are always used</label>
+<label><input type="radio" name="q6" value="d"> Because reads are routed to the leader</label>
+</div>
+
+<div class="q" data-a="d">
+<p>What is the book's overall verdict on the CAP theorem?</p>
+<label><input type="radio" name="q7" value="a"> It is the essential tool for classifying databases as CP or AP</label>
+<label><input type="radio" name="q7" value="b"> It proves that linearizable systems cannot exist</label>
+<label><input type="radio" name="q7" value="c"> It applies only to multi-datacenter deployments</label>
+<label><input type="radio" name="q7" value="d"> Historically influential for encouraging shared-nothing designs, but "pick 2 of 3" is misleading (partitions are faults, not choices), its definitions of availability are contradictory, its formal scope is narrow (one consistency model, one fault type), and it is now best avoided</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Why is linearizability slow even when the network is working fine?</p>
+<label><input type="radio" name="q8" value="a"> Attiya and Welch proved linearizable read/write response time is at least proportional to the uncertainty in network delay — the same reason multi-core CPU memory (with per-core caches) is not linearizable: performance, not fault tolerance</label>
+<label><input type="radio" name="q8" value="b"> Because it requires writing to disk on every read</label>
+<label><input type="radio" name="q8" value="c"> Because CAP forces it to be unavailable</label>
+<label><input type="radio" name="q8" value="d"> It isn't; linearizability is only slow during network partitions</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Why is the causal order a partial order rather than a total order?</p>
+<label><input type="radio" name="q9" value="a"> Because clocks cannot be synchronized</label>
+<label><input type="radio" name="q9" value="b"> Because causality only applies within one node</label>
+<label><input type="radio" name="q9" value="c"> Because concurrent operations — where neither happened before the other — are incomparable; the history branches and merges like a Git graph, whereas linearizability puts every operation on one timeline</label>
+<label><input type="radio" name="q9" value="d"> Because it is defined using sets rather than numbers</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Which single rule makes Lamport timestamps consistent with causality, unlike independent per-node counters?</p>
+<label><input type="radio" name="q10" value="a"> Ties are broken by node ID</label>
+<label><input type="radio" name="q10" value="b"> Every node and client carries the maximum counter it has seen on every request, and a node receiving a larger maximum immediately advances its own counter to it — so every causal dependency yields a larger timestamp</label>
+<label><input type="radio" name="q10" value="c"> Counters are synchronized with NTP</label>
+<label><input type="radio" name="q10" value="d"> Blocks of numbers are preallocated to each node</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Lamport timestamps totally order all operations. Why are they still insufficient to enforce a unique-username constraint?</p>
+<label><input type="radio" name="q11" value="a"> Because they are not unique</label>
+<label><input type="radio" name="q11" value="b"> Because they cannot be compared across nodes</label>
+<label><input type="radio" name="q11" value="c"> Because usernames are strings, not numbers</label>
+<label><input type="radio" name="q11" value="d"> Because the total order only emerges after all operations are collected: a node deciding <em>now</em> can't know whether another node is concurrently creating the same name with a lower timestamp, and checking with every node isn't fault-tolerant — it must know when the order is final</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Which two safety properties define total order broadcast, and what makes it stronger than timestamp ordering?</p>
+<label><input type="radio" name="q12" value="a"> Reliable delivery (delivered to one node ⇒ delivered to all) and totally ordered delivery (same order everywhere); the order is fixed at delivery time — no message can be retroactively inserted earlier once later ones have been delivered</label>
+<label><input type="radio" name="q12" value="b"> Low latency and high throughput; it uses UDP</label>
+<label><input type="radio" name="q12" value="c"> Exactly-once delivery and encryption; messages are signed</label>
+<label><input type="radio" name="q12" value="d"> Linearizable reads and writes; it uses a single leader</label>
+</div>
+
+<div class="q" data-a="c">
+<p>How is a linearizable compare-and-set (e.g. claiming a username) built on top of a total-order log?</p>
+<label><input type="radio" name="q13" value="a"> Each node locks the username locally, then appends</label>
+<label><input type="radio" name="q13" value="b"> Nodes exchange Lamport timestamps and the lowest wins</label>
+<label><input type="radio" name="q13" value="c"> Append a tentative claim, read the log until your own message is delivered back, and check: if the first claim for that username in the log is yours, commit; otherwise abort — all nodes see the same order, so all agree on the winner</label>
+<label><input type="radio" name="q13" value="d"> The coordinator sends prepare and commit messages to all nodes</label>
+</div>
+
+<div class="q" data-a="b">
+<p>In 2PC, what are the two "points of no return," and what happens if the coordinator crashes between them?</p>
+<label><input type="radio" name="q14" value="a"> Sending prepare and sending commit; participants abort after a timeout</label>
+<label><input type="radio" name="q14" value="b"> A participant voting "yes" (it can no longer abort unilaterally) and the coordinator writing its decision to its log (irrevocable); a participant that voted yes without hearing the decision is <em>in doubt</em>, must hold its locks, and can only wait for the coordinator to recover and read its log</label>
+<label><input type="radio" name="q14" value="c"> Beginning the transaction and reading data; participants commit unilaterally</label>
+<label><input type="radio" name="q14" value="d"> There are none; 2PC is nonblocking</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Why does the book say the XA transaction coordinator "is itself a kind of database"?</p>
+<label><input type="radio" name="q15" value="a"> Because it stores the application's tables</label>
+<label><input type="radio" name="q15" value="b"> Because it speaks SQL</label>
+<label><input type="radio" name="q15" value="c"> Because it runs on the database server</label>
+<label><input type="radio" name="q15" value="d"> Because its log of commit/abort decisions is durable state needed to resolve in-doubt transactions, yet it is often unreplicated (a single point of failure) and lives on application servers that were supposed to be stateless</label>
+</div>
+
+<div class="q" data-a="a">
+<p>How do epoch numbers and overlapping quorums let a consensus algorithm use a leader without needing consensus to have a unique leader?</p>
+<label><input type="radio" name="q16" value="a"> The leader is guaranteed unique only within an epoch; each election increments the epoch; every proposal needs a quorum vote, and voters refuse if they know a higher epoch — since any two majorities intersect, a proposal quorum always contains someone who saw the latest election, so a stale leader can never get its proposal decided</label>
+<label><input type="radio" name="q16" value="b"> The epoch is a synchronized clock timestamp, so the newest leader always wins by time</label>
+<label><input type="radio" name="q16" value="c"> All nodes must vote yes on every proposal, like 2PC</label>
+<label><input type="radio" name="q16" value="d"> A human operator assigns the epoch number</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — c.</span> "Eventually" is unbounded (so not (a)); read-your-writes is a separate, stronger guarantee (b); and it is far weaker than linearizability even without faults (d).</div>
+<div class="ak"><span class="which">Q2 — d.</span> Figure 9-3's arrow. (b) would be correct for a <em>regular</em> register, where concurrent reads may see either value — linearizability adds exactly the constraint that rules it out. (c) describes no model in the chapter.</div>
+<div class="ak"><span class="which">Q3 — b.</span> The book's boxed "Linearizability Versus Serializability." (c) inverts them. Neither needs synchronized clocks (d).</div>
+<div class="ak"><span class="which">Q4 — a.</span> Snapshot reads are the whole point of SSI's performance — and the whole reason it isn't linearizable. 2PL (b) and serial execution <em>are</em> typically linearizable.</div>
+<div class="ak"><span class="which">Q5 — c.</span> Figure 9-5: two channels, like replication + Alice's voice. Linearizability isn't the only fix (read-your-writes techniques work when you control the channel), but it's the simplest.</div>
+<div class="ak"><span class="which">Q6 — b.</span> Figure 9-6. The condition does hold (a). Fixes — synchronous read repair, writers reading a quorum first — cost performance, and even then CAS still needs consensus.</div>
+<div class="ak"><span class="which">Q7 — d.</span> The "Unhelpful CAP Theorem" sidebar. Linearizable systems exist (b); the trade-off appears on any unreliable network, not just across datacenters (c); the CP/AP labels (a) are explicitly discouraged.</div>
+<div class="ak"><span class="which">Q8 — a.</span> The CPU-cache example is the book's demonstration that the reason is performance, not CAP-style fault tolerance. (d) is the common misconception this section exists to correct.</div>
+<div class="ak"><span class="which">Q9 — c.</span> Concurrent = neither knew of the other = incomparable, like sets that aren't subsets of each other. In a linearizable store there are no concurrent operations at all.</div>
+<div class="ak"><span class="which">Q10 — b.</span> Figure 9-8: node 1 jumps from 1 to 5 on receiving max = 5. Node-ID tiebreaking (a) gives uniqueness, not causality; (c) and (d) are noncausal generators.</div>
+<div class="ak"><span class="which">Q11 — d.</span> "Timestamp ordering is not sufficient": after-the-fact ordering works, deciding-now doesn't. This is what motivates total order broadcast.</div>
+<div class="ak"><span class="which">Q12 — a.</span> The two properties must hold even under faults (retry until the network recovers, still in order). "Fixed at delivery" is exactly the finality timestamps lack.</div>
+<div class="ak"><span class="which">Q13 — c.</span> The log decides once, for everyone. This gives linearizable writes; reads need one of three extra tricks (sequence through the log, sync to latest position, synchronous replica). (d) is 2PC — a different mechanism.</div>
+<div class="ak"><span class="which">Q14 — b.</span> Figure 9-10. Timing out and aborting (a) could diverge from a participant that already committed; unilateral commit could diverge from one that voted no. 2PC is blocking (d), and 3PC's nonblocking promise needs a perfect failure detector.</div>
+<div class="ak"><span class="which">Q15 — d.</span> The "Limitations of distributed transactions" list: unreplicated coordinators, stateful application servers, lowest-common-denominator protocol, failure amplification.</div>
+<div class="ak"><span class="which">Q16 — a.</span> Two votes (elect, then per-proposal) with intersecting quorums. (b) would reintroduce clock problems; (c) is 2PC's unanimity requirement, which is exactly what consensus relaxes; (d) is "consensus by act of God," the manual-failover option.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch08-trouble-with-distributed-systems.html">← ch 8 · The Trouble with Distributed Systems</a>
+  <a href="index.html">index</a>
+  <a href="ch10-batch-processing.html">ch 10 · Batch Processing →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>
