@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA — Interactive Study Notes</title>
+<style>
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
+
+/* ---------- index page ---------- */
+.totals { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .74rem; color: var(--muted); letter-spacing: .04em; border-top: 1px dashed var(--rule); border-bottom: 1px dashed var(--rule); padding: .7em 0; }
+.chapgrid { display: grid; gap: .9rem; margin: 1.4rem 0 .5rem; }
+.chapcard { display: grid; grid-template-columns: 3rem 1fr; gap: 1rem; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; text-decoration: none; color: inherit; }
+.chapcard:hover { border-color: var(--read); }
+.chapcard .num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 1.5rem; color: var(--muted); line-height: 1.2; }
+.chapcard .body { min-width: 0; }
+.chapcard .ctitle { display: block; font-weight: 700; font-size: 1.08rem; color: var(--read); }
+.chapcard .gist { display: block; font-size: .88em; color: var(--ink); margin-top: .25em; }
+.chapcard .stats { display: block; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); margin-top: .5em; letter-spacing: .03em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any part or chapter">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#about">about</a>
+  <a class="l1" href="#part-1">part-i-foundations</a>
+  <a href="ch01-reliable-scalable-maintainable.html">01 reliable-scalable</a>
+  <a href="ch02-data-models-query-languages.html">02 data-models</a>
+  <a href="ch03-storage-and-retrieval.html">03 storage</a>
+  <a href="ch04-encoding-and-evolution.html">04 encoding</a>
+  <a class="l1" href="#part-2">part-ii-distributed</a>
+  <a href="ch05-replication.html">05 replication</a>
+  <a href="ch06-partitioning.html">06 partitioning</a>
+  <a href="ch07-transactions.html">07 transactions</a>
+  <a href="ch08-trouble-with-distributed-systems.html">08 trouble</a>
+  <a href="ch09-consistency-and-consensus.html">09 consensus</a>
+  <a class="l1" href="#part-3">part-iii-derived</a>
+  <a href="ch10-batch-processing.html">10 batch</a>
+  <a href="ch11-stream-processing.html">11 streams</a>
+  <a href="ch12-future-of-data-systems.html">12 future</a>
+</nav>
+
+<main>
+<header class="chap">
+  <div class="eyebrow">
+    <span>ddia&nbsp;·&nbsp;study&nbsp;notes</span>
+    <span>1st&nbsp;ed&nbsp;structure&nbsp;·&nbsp;2nd&nbsp;ed&nbsp;deltas&nbsp;folded&nbsp;in</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>Designing Data-Intensive Applications</h1>
+  <p class="epigraph">Interactive study notes on Martin Kleppmann's book — one self-contained page per chapter, with click-through animations, cross-linked concepts, and quizzes.
+  <span class="attr">Personal reference · not affiliated with the author</span></p>
+</header>
+
+<section class="concept" id="about" style="margin-top:1.5rem">
+<p>Each chapter page walks <strong>every section of the book</strong> in order: Feynman-style explanations, hand-drawn figures, steppers you can click (or arrow-key) through, backward/forward cross-references with hover definitions, core takeaways, and an MCQ quiz with an explained answer key. The 1st edition's 12-chapter structure is kept; what the 2nd edition (2025) changed is folded in as marked asides on every page.</p>
+
+<div class="feynman"><span class="tag">HOW TO READ THESE PAGES</span>
+One color language runs through all twelve chapters: <span style="color:var(--write);font-weight:600">ember = the write path</span> — mutation, appends, derivation — and <span style="color:var(--read);font-weight:600">cyan = the read path</span> — lookups, queries, consumers. Dotted-underline terms are cross-references: hover for the definition, click to jump to the chapter that owns the concept. Every animated figure is a story told in steps — click <em>next</em>, or focus the figure and use ← →. Quizzes grade in place; the answer key explains the distractors too.</div>
+
+<p class="totals">12 chapters · 67 steppers · 55 static figures · 180 quiz questions · 169 cross-linked concepts — all chapters built ✓</p>
+</section>
+
+<section class="concept" id="part-1">
+<span class="key-chip">part-i</span>
+<h2><a class="self" href="#part-1">Part I — Foundations of Data Systems</a></h2>
+<div class="chapgrid">
+
+<a class="chapcard" href="ch01-reliable-scalable-maintainable.html">
+  <span class="num">01</span>
+  <span class="body">
+    <span class="ctitle">Reliable, Scalable, and Maintainable Applications</span>
+    <span class="gist">The book's three concerns and their vocabulary: faults vs failures, load parameters and Twitter's fan-out, response-time percentiles, operability–simplicity–evolvability.</span>
+    <span class="stats">2 steppers · 5 figures · 14 quiz Qs · 14 concepts · 2nd ed: Ch 1–2 (split: Trade-Offs / Nonfunctional Requirements)</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch02-data-models-query-languages.html">
+  <span class="num">02</span>
+  <span class="body">
+    <span class="ctitle">Data Models and Query Languages</span>
+    <span class="gist">Relational vs document vs graph — the object-relational mismatch, many-to-many relationships, and declarative querying from SQL to Cypher, SPARQL, and Datalog.</span>
+    <span class="stats">6 steppers · 2 figures · 14 quiz Qs · 15 concepts · 2nd ed: Ch 3</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch03-storage-and-retrieval.html">
+  <span class="num">03</span>
+  <span class="body">
+    <span class="ctitle">Storage and Retrieval</span>
+    <span class="gist">How storage engines actually work: hash indexes, SSTables and LSM-trees vs B-trees, OLTP vs OLAP, and column-oriented storage with compression. The pilot chapter.</span>
+    <span class="stats">7 steppers · 7 figures · 16 quiz Qs · 14 concepts · 2nd ed: Ch 4</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch04-encoding-and-evolution.html">
+  <span class="num">04</span>
+  <span class="body">
+    <span class="ctitle">Encoding and Evolution</span>
+    <span class="gist">Bytes on the wire and schema change without downtime: JSON vs Thrift/Protobuf vs Avro, backward/forward compatibility, and dataflow through databases, services, and messages.</span>
+    <span class="stats">6 steppers · 1 figure · 14 quiz Qs · 10 concepts · 2nd ed: Ch 5</span>
+  </span>
+</a>
+
+</div>
+</section>
+
+<section class="concept" id="part-2">
+<span class="key-chip">part-ii</span>
+<h2><a class="self" href="#part-2">Part II — Distributed Data</a></h2>
+<div class="chapgrid">
+
+<a class="chapcard" href="ch05-replication.html">
+  <span class="num">05</span>
+  <span class="body">
+    <span class="ctitle">Replication</span>
+    <span class="gist">Single-leader, multi-leader, and leaderless replication; replication lag and its anomalies, write conflicts, quorums, and detecting concurrent writes with version vectors.</span>
+    <span class="stats">6 steppers · 7 figures · 15 quiz Qs · 19 concepts · 2nd ed: Ch 6</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch06-partitioning.html">
+  <span class="num">06</span>
+  <span class="body">
+    <span class="ctitle">Partitioning</span>
+    <span class="gist">Sharding key-value data by range or hash, hot spots, document- vs term-partitioned secondary indexes, rebalancing strategies, and request routing.</span>
+    <span class="stats">6 steppers · 5 figures · 14 quiz Qs · 13 concepts · 2nd ed: Ch 7 (renamed Sharding)</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch07-transactions.html">
+  <span class="num">07</span>
+  <span class="body">
+    <span class="ctitle">Transactions</span>
+    <span class="gist">What ACID actually means, the weak isolation levels everyone really runs (read committed, snapshot isolation), lost updates and write skew, and three roads to serializability.</span>
+    <span class="stats">6 steppers · 5 figures · 15 quiz Qs · 12 concepts · 2nd ed: Ch 8</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch08-trouble-with-distributed-systems.html">
+  <span class="num">08</span>
+  <span class="body">
+    <span class="ctitle">The Trouble with Distributed Systems</span>
+    <span class="gist">Everything that goes wrong: partial failures, unreliable networks and timeouts, drifting clocks, process pauses, fencing tokens, Byzantine faults, and system models.</span>
+    <span class="stats">5 steppers · 4 figures · 15 quiz Qs · 16 concepts · 2nd ed: Ch 9</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch09-consistency-and-consensus.html">
+  <span class="num">09</span>
+  <span class="body">
+    <span class="ctitle">Consistency and Consensus</span>
+    <span class="gist">Linearizability and its cost, causality and Lamport timestamps, total order broadcast, two-phase commit, and fault-tolerant consensus — the chapter the others lean on.</span>
+    <span class="stats">6 steppers · 4 figures · 16 quiz Qs · 15 concepts · 2nd ed: Ch 10</span>
+  </span>
+</a>
+
+</div>
+</section>
+
+<section class="concept" id="part-3">
+<span class="key-chip">part-iii</span>
+<h2><a class="self" href="#part-3">Part III — Derived Data</a></h2>
+<div class="chapgrid">
+
+<a class="chapcard" href="ch10-batch-processing.html">
+  <span class="num">10</span>
+  <span class="body">
+    <span class="ctitle">Batch Processing</span>
+    <span class="gist">The Unix philosophy at datacenter scale: MapReduce and HDFS, reduce-side and map-side joins, batch outputs as immutable structures, and the dataflow engines beyond.</span>
+    <span class="stats">5 steppers · 1 figure · 15 quiz Qs · 13 concepts · 2nd ed: Ch 11</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch11-stream-processing.html">
+  <span class="num">11</span>
+  <span class="body">
+    <span class="ctitle">Stream Processing</span>
+    <span class="gist">Unbounded batch: message brokers vs partitioned logs, change data capture and event sourcing, state as the integral of the stream, event time, joins, and exactly-once.</span>
+    <span class="stats">6 steppers · 7 figures · 16 quiz Qs · 13 concepts · 2nd ed: Ch 12</span>
+  </span>
+</a>
+
+<a class="chapcard" href="ch12-future-of-data-systems.html">
+  <span class="num">12</span>
+  <span class="body">
+    <span class="ctitle">The Future of Data Systems</span>
+    <span class="gist">Where it all converges: derive everything from ordered logs, unbundle the database, get correctness end-to-end instead of from any single layer — then ask whether the system should exist at all.</span>
+    <span class="stats">6 steppers · 7 figures · 16 quiz Qs · 15 concepts · 2nd ed: Ch 13–14 (split: Streaming Philosophy / Doing the Right Thing)</span>
+  </span>
+</a>
+
+</div>
+</section>
+
+<footer class="chap">
+  <a href="ch01-reliable-scalable-maintainable.html">start with ch 1 →</a>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

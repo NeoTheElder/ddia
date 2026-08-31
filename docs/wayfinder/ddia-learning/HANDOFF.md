@@ -25,14 +25,14 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** closed on the map. **All 12 chapters are now
-built and pushed. Chapters 10, 11, and 12 await user review** — tickets 13, 14, 15 are claimed
-(`Assignee: claude`), not closed (the user keeps saying "do the next chapter" without "close it").
-On "close it" for each: set `Status: closed`, write `## Resolution` in the ticket, add a
-Decisions-so-far line to `MAP.md`, commit, push. User's pattern so far: "close it, do the next chapter."
-
-Remaining frontier after that: the **index page** (ticket 16 — `index.html` doesn't exist yet;
-every stub and chapter footer already links to it).
+**All 12 chapters and the index page are built and pushed.** Closed on the map: chapters 3 (pilot),
+1, 2, 4, 5, 6, 7, 8, 9, and 12. **Chapters 10 and 11 still await user review** — tickets 13 and 14
+are claimed (`Assignee: claude`), not closed (the user said "do the next chapter" without "close it"
+for those two). **The index page (`chapters/index.html`, ticket 16) is built and awaits user
+review.** On "close it" for each: set `Status: closed`, write `## Resolution` in the ticket, add a
+Decisions-so-far line to `MAP.md`, commit, push. Once 13, 14, and 16 are closed, the map's
+destination is fully reached; what remains after that is the standing enrichment workflow and the
+map's "Not yet specified" items (shared animation library, revision workflow).
 
 Every unbuilt chapter has a stub HTML at its final filename, so cross-references never 404.
 
@@ -55,18 +55,20 @@ The assembly/validation Python is in the last few Bash calls of the previous ses
 transcript and is short; re-derive from the description above if needed. Chapter pages weigh
 100–135KB; the pilot and ch 2/ch 4 have 6 steppers, ch 1 has 2 — calibrate by mechanism density.
 
-## Notes for the index page (ticket 16, the last one)
+## Notes on the index page build (ticket 16, awaiting review)
 
-- `index.html` doesn't exist; every chapter footer and stub links to it (`href="index.html"`), and
-  ch 1's header eyebrow links `← index` too. It must live at repo root? No — links are relative
-  from `chapters/`, so the file goes at `chapters/index.html`. Verify with a link check before push.
-- Content per the map's Destination: an index of the 12 chapter artifacts. Natural shape: the locked
-  template's design language (sparse-index nav aesthetic, ember/cyan), one card/row per chapter with
-  title, 1st/2nd-ed mapping, stepper/figure/quiz counts, and links. Registry `concepts.json` has
-  per-chapter `file`, `title`, `second_ed`, `pdf_page` — generate the rows from it.
-- All 169 registry definitions are now filled (ch 12's were the last). The "Not yet specified"
-  items on the map (shared animation library, revision workflow) remain open — index build may
-  surface them but shouldn't decide them unilaterally.
+- Built at `chapters/index.html` (links throughout the repo are relative from `chapters/`, so it
+  lives there, not at repo root). 21.6KB: ch03's CSS spliced verbatim (title swapped) plus a small
+  index-only block (`.chapgrid`/`.chapcard`/`.totals`) inserted before `</style>`; body is a
+  sparse-index nav (parts + chapters), template header, a "how to read these pages" Feynman box,
+  a totals strip (12 chapters · 67 steppers · 55 static figures · 180 quiz questions · 169
+  concepts), and one card per chapter (number, title, gist, stats, 2nd-ed mapping) grouped by the
+  book's three parts; script is the theme toggle only. Ember/cyan kept strictly semantic.
+- All 169 registry definitions are filled (ch 12's were the last). The "Not yet specified"
+  items on the map (shared animation library, revision workflow) remain open.
+- Headless-Chrome QA note: `--window-size` clamps to a 500px minimum width — a "420px" shot is a
+  500px layout cropped to 420, which looks like horizontal overflow but isn't. Verify with
+  `document.documentElement.scrollWidth` (dump-dom + injected script) instead.
 - Ch 12 build notes for calibration: 186KB, 6 steppers (unfriend/message causality race, CREATE
   INDEX ≡ follower ≡ CDC bootstrap, write/read-path boundary shifting, end-to-end duplicate
   suppression, uniqueness via log, multi-partition transfer without 2PC) + 7 static figures
