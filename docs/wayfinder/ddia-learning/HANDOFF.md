@@ -1,6 +1,6 @@
 # Handoff — DDIA interactive study notes (wayfinder map)
 
-_Written 2026-08-27, updated after the Chapter 11 session (2026-08-30). Continue by opening a session in `~/ddia`
+_Written 2026-08-27, updated after the Chapter 12 session (2026-08-31). Continue by opening a session in `~/ddia`
 (or anywhere) and saying `Use ~/ddia/docs/wayfinder/ddia-learning/HANDOFF.md`, then what to do
 (e.g. "close ch4 and ch5, do chapter 6"). If a `wayfinder` skill is available, `/wayfinder MAP.md`
 also works; otherwise read `MAP.md` + `tickets/` directly._
@@ -25,14 +25,14 @@ study. Everything canonical lives in the repo — read these rather than this do
 
 ## State right now
 
-Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** closed on the map. **Chapters 10 and 11 are
-built and pushed, both awaiting user review** — tickets 13 and 14 are claimed (`Assignee: claude`),
-not closed (the user said "do the next chapter" without "close it" for ch 10). On "close it" for
-each: set `Status: closed`, write `## Resolution` in the ticket, add a Decisions-so-far line to
-`MAP.md`, commit, push. User's pattern so far: "close it, do the next chapter."
+Built chapters: **3 (pilot), 1, 2, 4, 5, 6, 7, 8, 9** closed on the map. **All 12 chapters are now
+built and pushed. Chapters 10, 11, and 12 await user review** — tickets 13, 14, 15 are claimed
+(`Assignee: claude`), not closed (the user keeps saying "do the next chapter" without "close it").
+On "close it" for each: set `Status: closed`, write `## Resolution` in the ticket, add a
+Decisions-so-far line to `MAP.md`, commit, push. User's pattern so far: "close it, do the next chapter."
 
-Remaining frontier after that: chapter 12 (ticket 15) and the **index page** (ticket 16 —
-`index.html` doesn't exist yet; stubs and chapter footers already link to it).
+Remaining frontier after that: the **index page** (ticket 16 — `index.html` doesn't exist yet;
+every stub and chapter footer already links to it).
 
 Every unbuilt chapter has a stub HTML at its final filename, so cross-references never 404.
 
@@ -55,16 +55,26 @@ The assembly/validation Python is in the last few Bash calls of the previous ses
 transcript and is short; re-derive from the description above if needed. Chapter pages weigh
 100–135KB; the pilot and ch 2/ch 4 have 6 steppers, ch 1 has 2 — calibrate by mechanism density.
 
-## Notes for Chapter 12 (next in order)
+## Notes for the index page (ticket 16, the last one)
 
-- PDF pages 510–573 (0-based; Glossary starts at 574). Sections in `reference/toc.md`; 2nd ed splits
-  it into its Chapters 13–14 per the deltas file (line ~388) — read that section. ~64 pages, the
-  longest chapter: extract may exceed 25K tokens per Read — read in three chunks.
-- Existing forward links into ch 12 that must resolve (grep `ch12-future-of-data-systems.html#`
-  across `chapters/`): at least `#data-integration`, `#designing-applications-around-dataflow`,
-  `#privacy-and-tracking`, `#batch-and-stream-processing`, `#enforcing-constraints`. All 15 ch 12
-  slugs exist in the registry with empty definitions.
-- Ch 11 build notes for calibration: 206KB (largest so far — the chapter is dense; earlier pages
+- `index.html` doesn't exist; every chapter footer and stub links to it (`href="index.html"`), and
+  ch 1's header eyebrow links `← index` too. It must live at repo root? No — links are relative
+  from `chapters/`, so the file goes at `chapters/index.html`. Verify with a link check before push.
+- Content per the map's Destination: an index of the 12 chapter artifacts. Natural shape: the locked
+  template's design language (sparse-index nav aesthetic, ember/cyan), one card/row per chapter with
+  title, 1st/2nd-ed mapping, stepper/figure/quiz counts, and links. Registry `concepts.json` has
+  per-chapter `file`, `title`, `second_ed`, `pdf_page` — generate the rows from it.
+- All 169 registry definitions are now filled (ch 12's were the last). The "Not yet specified"
+  items on the map (shared animation library, revision workflow) remain open — index build may
+  surface them but shouldn't decide them unilaterally.
+- Ch 12 build notes for calibration: 186KB, 6 steppers (unfriend/message causality race, CREATE
+  INDEX ≡ follower ≡ CDC bootstrap, write/read-path boundary shifting, end-to-end duplicate
+  suppression, uniqueness via log, multi-partition transfer without 2PC) + 7 static figures
+  (derive-vs-dual-writes, lambda vs unified, federation vs unbundling, RPC vs dataflow,
+  end-to-end stream, Merkle tree, feedback loop) + 1 table + 6 `.ed2` asides, 16-question quiz;
+  43 screenshots caught 5 collisions in 2 fix rounds. Assembly: `assemble12`-style inline python
+  (same sed-parameterization of assemble11.py; parts p12-1…p12-4).
+- Ch 11 build notes: 206KB (the chapter is dense; earlier pages
   ran 100–170KB), 6 steppers (AMQP redelivery reordering Fig 11-2, partitioned log with offsets /
   failover / replay Fig 11-3, dual-write race Fig 11-4, CDC log compaction + bootstrap, processing-
   vs event-time under a redeploy Fig 11-7, stream-stream join) + 7 static figures (load balancing
