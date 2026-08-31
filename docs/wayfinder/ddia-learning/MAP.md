@@ -26,6 +26,7 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
+- [Chapter 12: The Future of Data Systems](tickets/15-chapter-12-future-of-data-systems.md) — built to template and approved; 6 steppers (causality race, CREATE INDEX unbundled, write/read-path boundary, end-to-end dedup, uniqueness via log, multi-partition transfer), 7 figures, 1 table, 16-question quiz; ch 12 definitions filled — the 169-concept registry is complete and all 12 chapters are built.
 - [Chapter 6: Partitioning](tickets/09-chapter-06-partitioning.md) — built to template and approved; 6 steppers (key-range hot spot, hash + compound key, local vs global index, hash mod N, fixed-partition join, request routing), 5 figures, 14-question quiz; ch 6 definitions filled; headless-Chrome stepper screenshots adopted as pre-push visual QA.
 - [Chapter 7: Transactions](tickets/10-chapter-07-transactions.md) — built to template and approved; 6 steppers (lost update, read committed, MVCC snapshot, write skew, 2PL + deadlock, SSI tripwires), 5 figures, 15-question quiz; ch 7 definitions filled; full-step screenshot QA (43 shots) before first push.
 - [Chapter 8: The Trouble with Distributed Systems](tickets/11-chapter-08-trouble-with-distributed-systems.md) — built to template and approved; 5 steppers (no-response ambiguity, switch queueing, LWW inversion, TrueTime commit wait, fencing tokens), 4 figures, 2 tables, 15-question quiz; ch 8 definitions filled.
