@@ -1,16 +1,1403 @@
-<title>DDIA Ch 12: The Future of Data Systems</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDIA Ch 12 — The Future of Data Systems</title>
 <style>
-  :root { --bg:#faf9f6; --fg:#1a1a1a; --muted:#6b6b6b; --accent:#b45309; }
-  :root:not([data-theme="light"]) {}
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; } }
-  :root[data-theme="dark"] { --bg:#16161a; --fg:#e8e6e1; --muted:#9a9a9a; --accent:#f59e0b; }
-  body { background:var(--bg); color:var(--fg); font-family:Georgia,serif; display:grid; place-items:center; min-height:90vh; margin:0; }
-  main { text-align:center; padding:2rem; }
-  h1 { font-size:1.6rem; } p { color:var(--muted); }
-  a { color:var(--accent); }
+/* ---------- tokens ---------- */
+:root {
+  --paper: #f6f7f5;
+  --panel: #fdfdfc;
+  --panel2: #eef0ec;
+  --ink: #232a31;
+  --muted: #5f6b76;
+  --rule: #d8dcd6;
+  --write: #b4530a;       /* ember: writes, inserts, memtable, WAL */
+  --write-soft: #f3e0cf;
+  --read: #0b7285;        /* cyan: reads, lookups, scans */
+  --read-soft: #d5e9ed;
+  --hot: #8a3ffc22;
+  --code-bg: #eceee9;
+  --ok: #2b8a3e;
+  --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+    --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+    --write: #f08c3d; --write-soft: #4a2f16;
+    --read: #4dc3d9; --read-soft: #123a42;
+    --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15181c; --panel: #1c2026; --panel2: #23282f;
+  --ink: #dde3e8; --muted: #8b97a3; --rule: #2c333b;
+  --write: #f08c3d; --write-soft: #4a2f16;
+  --read: #4dc3d9; --read-soft: #123a42;
+  --code-bg: #21262d; --ok: #69c779; --bad: #ff7b72;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.65 Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--code-bg); padding: .08em .35em; border-radius: 3px; font-size: .85em; }
+pre { background: var(--code-bg); padding: .8em 1em; border-radius: 6px; overflow-x: auto; font-size: .82em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+a { color: var(--read); }
+h1, h2, h3, h4 { line-height: 1.25; }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .82em; color: var(--muted); margin-top: .6em; line-height: 1.5; }
+svg { max-width: 100%; height: auto; display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .88em; }
+th, td { border: 1px solid var(--rule); padding: .5em .7em; text-align: left; vertical-align: top; }
+th { background: var(--panel2); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; letter-spacing: .04em; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- layout: sparse index sidebar + reading column ---------- */
+.wrap { display: grid; grid-template-columns: 230px minmax(0, 72ch); gap: 3rem; max-width: 1080px; margin: 0 auto; padding: 0 1.2rem; }
+nav.sparse {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 1.4rem 0 2rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem;
+}
+nav.sparse .nav-title { color: var(--muted); letter-spacing: .12em; margin-bottom: 1em; }
+nav.sparse a { display: block; color: var(--muted); text-decoration: none; padding: .22em 0 .22em .9em; border-left: 2px solid var(--rule); }
+nav.sparse a.l1 { padding-left: 0; border-left: none; color: var(--ink); margin-top: .9em; }
+nav.sparse a:hover { color: var(--read); }
+main { padding: 1.4rem 0 4rem; min-width: 0; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.sparse { position: static; height: auto; border-bottom: 1px solid var(--rule); }
+}
+@media print { nav.sparse, .themebtn, .anim .ctl { display: none; } }
+
+/* ---------- header ---------- */
+header.chap { border-bottom: 3px double var(--rule); padding: 1rem 0 1.6rem; margin-bottom: 2rem; }
+.eyebrow { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); letter-spacing: .1em; display: flex; gap: 1em; flex-wrap: wrap; align-items: center; }
+.eyebrow a { color: var(--muted); }
+header.chap h1 { font-size: 2.3rem; margin: .35em 0 .2em; font-weight: 700; }
+.epigraph { color: var(--muted); font-style: italic; font-size: .92em; margin: .8em 0 0; max-width: 46ch; }
+.epigraph .attr { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+.themebtn { margin-left: auto; background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--muted); font: inherit; font-size: .95em; padding: .1em .55em; cursor: pointer; }
+
+/* ---------- concept sections ---------- */
+section.concept { margin-top: 3.2rem; }
+.key-chip { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; color: var(--muted); letter-spacing: .05em; }
+.key-chip::before { content: "key: "; opacity: .6; }
+h2 { font-size: 1.65rem; margin: .15em 0 .5em; border-bottom: 1px solid var(--rule); padding-bottom: .25em; }
+h3 { font-size: 1.25rem; margin: 2.2em 0 .4em; }
+h4 { font-size: 1.02rem; margin: 1.8em 0 .3em; }
+h2 a.self, h3 a.self, h4 a.self { color: inherit; text-decoration: none; }
+h2 a.self:hover::after, h3 a.self:hover::after, h4 a.self:hover::after { content: " #"; color: var(--muted); }
+
+/* ---------- feynman boxes ---------- */
+.feynman { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--read); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .95em; }
+.feynman .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--read); display: block; margin-bottom: .35em; }
+
+/* ---------- 2nd edition asides ---------- */
+.ed2 { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--write); border-radius: 6px; padding: .9em 1.1em; margin: 1.3em 0; font-size: .92em; }
+.ed2 .tag { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .68rem; letter-spacing: .1em; color: var(--write); display: block; margin-bottom: .35em; }
+
+/* ---------- cross references ---------- */
+.xref { text-decoration: none; border-bottom: 1px dotted var(--read); color: inherit; position: relative; }
+.xref sup { color: var(--read); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .62em; margin-left: .15em; }
+.xref.fwd sup { color: var(--write); }
+.xref.fwd { border-bottom-color: var(--write); }
+.xref:hover::after, .xref:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; bottom: 130%; z-index: 5;
+  background: var(--ink); color: var(--paper); padding: .5em .7em; border-radius: 5px;
+  font-size: .76rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.45;
+  width: max-content; max-width: 34ch; white-space: normal;
+}
+
+/* ---------- animation steppers ---------- */
+.anim { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1rem .8rem; }
+.anim .ctl { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; }
+.anim .ctl button {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem; cursor: pointer;
+  background: var(--panel2); color: var(--ink); border: 1px solid var(--rule); border-radius: 5px; padding: .35em .9em;
+}
+.anim .ctl button:hover:not(:disabled) { border-color: var(--read); color: var(--read); }
+.anim .ctl button:disabled { opacity: .35; cursor: default; }
+.anim .ctl .count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; color: var(--muted); margin-left: auto; }
+.anim .cap { list-style: none; margin: .6rem 0 0; padding: .6rem .2rem 0; border-top: 1px dashed var(--rule); min-height: 3.2em; }
+.anim .cap li { display: none; font-size: .88em; color: var(--ink); }
+.anim .cap li.cur { display: block; }
+.anim .cap li strong:first-child { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78em; font-weight: 600; margin-right: .5em; }
+.anim [data-on] { transition: opacity .25s ease; }
+.anim [data-on].off { opacity: 0; }
+.anim .hot { filter: drop-shadow(0 0 3px currentColor); }
+.anim svg text { fill: currentColor; }
+svg text { fill: currentColor; }
+
+/* ---------- takeaways ---------- */
+.takeaways { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; padding: 1.2em 1.4em; margin: 2em 0; }
+.takeaways h2 { border: none; margin-top: 0; }
+.takeaways li { margin: .55em 0; }
+
+/* ---------- quiz ---------- */
+.quiz { margin-top: 1.5em; counter-reset: q; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; counter-increment: q; }
+.q > p { margin: 0 0 .6em; font-weight: 600; }
+.q > p::before { content: "Q" counter(q) ". "; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-weight: 600; }
+.q label { display: block; padding: .3em .5em; border-radius: 5px; cursor: pointer; font-size: .95em; }
+.q label:hover { background: var(--panel2); }
+.q.graded label.picked.correct { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.q.graded label.picked.incorrect { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.q.graded label.answer { outline: 1.5px solid var(--ok); }
+.quiz-actions { display: flex; gap: 1em; align-items: center; margin: 1.4em 0; }
+.quiz-actions button { font: inherit; font-size: .95em; cursor: pointer; background: var(--ink); color: var(--paper); border: none; border-radius: 6px; padding: .5em 1.3em; }
+.score { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; color: var(--muted); }
+details.anskey { margin: 1.5em 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); }
+details.anskey summary { cursor: pointer; padding: .8em 1.2em; font-weight: 600; }
+details.anskey .body { padding: 0 1.2em 1em; }
+details.anskey .ak { margin: 1em 0; font-size: .93em; }
+details.anskey .ak .which { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ok); font-weight: 600; }
+
+footer.chap { border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.2rem; font-size: .85em; color: var(--muted); display: flex; gap: 2em; flex-wrap: wrap; }
+footer.chap a { color: var(--muted); }
 </style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="sparse" aria-label="Sparse index — jump to any section">
+  <div class="nav-title">SPARSE&nbsp;INDEX</div>
+  <a class="l1" href="#data-integration">data-integration</a>
+  <a href="#combining-specialized-tools-by-deriving-data">deriving-data</a>
+  <a href="#batch-and-stream-processing">batch+stream</a>
+  <a class="l1" href="#unbundling-databases">unbundling-databases</a>
+  <a href="#composing-data-storage-technologies">composing-storage</a>
+  <a href="#designing-applications-around-dataflow">dataflow-apps</a>
+  <a href="#observing-derived-state">derived-state</a>
+  <a class="l1" href="#aiming-for-correctness">aiming-for-correctness</a>
+  <a href="#the-end-to-end-argument-for-databases">end-to-end</a>
+  <a href="#enforcing-constraints">enforcing-constraints</a>
+  <a href="#timeliness-and-integrity">timeliness+integrity</a>
+  <a href="#trust-but-verify">trust-but-verify</a>
+  <a class="l1" href="#doing-the-right-thing">doing-the-right-thing</a>
+  <a href="#predictive-analytics">predictive-analytics</a>
+  <a href="#privacy-and-tracking">privacy+tracking</a>
+  <a class="l1" href="#core-takeaways">core-takeaways</a>
+  <a class="l1" href="#quiz">quiz</a>
+</nav>
+
 <main>
-  <h1>Chapter 12: The Future of Data Systems</h1>
-  <p>Not yet written — this stub holds the chapter's future URL so cross-references never break.</p>
-  <p><a href="index.html">← back to index</a></p>
+<header class="chap">
+  <div class="eyebrow">
+    <a href="index.html">← index</a>
+    <span>1st&nbsp;ed&nbsp;·&nbsp;chapter&nbsp;12</span>
+    <span>2nd&nbsp;ed&nbsp;·&nbsp;chapters&nbsp;13–14</span>
+    <button class="themebtn" id="themebtn" aria-label="Toggle color theme">◐</button>
+  </div>
+  <h1>The Future of Data Systems</h1>
+  <p class="epigraph">If a thing be ordained to another as to its end, its last end cannot consist in the preservation of its being. Hence a captain does not intend as a last end, the preservation of the ship entrusted to him, since a ship is ordained to something else as its end, viz. to navigation. (Often quoted as: If the highest aim of a captain was to preserve his ship, he would keep it in port forever.)
+  <span class="attr">— St. Thomas Aquinas, <em>Summa Theologica</em> (1265–1274)</span></p>
+</header>
+
+<p>Eleven chapters described data systems <em>as they are</em>. This last one is different in kind: Kleppmann shifts to how things <strong>should be</strong>, writes in the first person, and says plainly that these are opinions you are welcome to disagree with. It is also the chapter where the whole book converges. The goal stated in <a class="xref back" href="ch01-reliable-scalable-maintainable.html#reliability" data-tip="Ch 1 · Reliability — continuing to work correctly even when things go wrong">Chapter&nbsp;1<sup>←1</sup></a> — reliable, scalable, maintainable applications — gets its proposed answer here: build applications as <strong>dataflows of immutable events through deterministic derivations</strong>, get correctness from <strong>end-to-end mechanisms</strong> rather than by trusting any single layer, and then step back and ask whether the system you built is <strong>beneficial to humanity</strong> at all.</p>
+
+<p>The chapter runs in four movements. <em>Data integration</em>: no single tool fits all uses of your data, so how do copies in many systems stay in step? <em>Unbundling databases</em>: the parts of a database — indexes, views, replication — re-emerge as separately operated systems glued by logs; what does application design look like then? <em>Aiming for correctness</em>: how asynchronous, coordination-free dataflow can still give hard guarantees. And <em>doing the right thing</em>: the ethics of predictive analytics and of data collection itself.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the whole chapter in one idea</span>
+Every mechanism in this book is a special case of one move: <strong>write things down once, in one agreed order, and derive everything else from that record</strong>. A B-tree index, a replication follower, a cache, a search index, a data warehouse, a fraud model — all of them are <em>derived data</em>: the output of running a deterministic function over an ordered log of events. Databases do this <em>inside</em> one product (CREATE INDEX scans the table and then follows its changes); the future Kleppmann proposes does the same <em>across</em> products — the "database inside out." Correctness then stops being something you buy from a vendor and becomes an <strong>end-to-end property</strong>: a request ID minted where the user clicked, checked where the data lands, makes retries harmless without any distributed transaction. And because "derive everything from the record" is also precisely how surveillance works, the chapter ends by asking the engineer's question no tool can answer: <em>should</em> this be recorded at all? Colors as always: <span style="color:var(--write);font-weight:600">ember = writes / events / derivation</span>, <span style="color:var(--read);font-weight:600">cyan = reads / queries</span>.</div>
+
+<!-- ================================================================ -->
+<section class="concept" id="data-integration">
+<span class="key-chip">data-integration</span>
+<h2><a class="self" href="#data-integration">Data Integration</a></h2>
+
+<p>A recurring theme of the book: for any problem there are several solutions with different trade-offs — log-structured vs B-tree vs column storage in <a class="xref back" href="ch03-storage-and-retrieval.html#data-structures-that-power-your-database" data-tip="Ch 3 · Data Structures That Power Your Database — logs make writes cheap, indexes make reads cheap, every index taxes writes">Chapter&nbsp;3<sup>←3</sup></a>, single-leader vs multi-leader vs leaderless in <a class="xref back" href="ch05-replication.html#leaders-and-followers" data-tip="Ch 5 · Leaders and Followers — one replica accepts all writes and streams a replication log to followers">Chapter&nbsp;5<sup>←5</sup></a>. Every tool, even a "general-purpose" database, is designed for a particular usage pattern. The first challenge is mapping products to circumstances (vendors won't tell you what their software is bad at). The second is harder: in a real application, <em>the same data is used in several different ways</em>, so no single tool suffices and you inevitably compose several. Statements like "99% of people only need X" say more about the speaker's experience than about reality — the need for integration only becomes visible when you zoom out to the dataflows of a whole organization.</p>
+
+<h3 id="combining-specialized-tools-by-deriving-data"><a class="self" href="#combining-specialized-tools-by-deriving-data">Combining Specialized Tools by Deriving Data</a></h3>
+<span class="key-chip">combining-specialized-tools-by-deriving-data</span>
+
+<p>The canonical example: an OLTP database plus a full-text search index (PostgreSQL's built-in search is fine for simple cases, but serious retrieval needs a specialist tool — and a search index is a poor system of record, so you need both). Then copies creep into analytics systems, caches, denormalized views, ML pipelines, notification systems. <a class="xref back" href="ch11-stream-processing.html#keeping-systems-in-sync" data-tip="Ch 11 · Keeping Systems in Sync — dual writes race and half-fail; heterogeneous copies drift">Chapter&nbsp;11<sup>←11</sup></a> already posed the question this raises: how do all these representations stay consistent?</p>
+
+<h4>Reasoning about dataflows</h4>
+<p>When the same data lives in several systems, be explicit about <strong>inputs and outputs</strong>: where is data written <em>first</em>, and which representations derive from which sources? Funnel all writes through a single system that decides a total order, and every other representation can be derived by processing that one ordered stream — <a class="xref back" href="ch11-stream-processing.html#change-data-capture" data-tip="Ch 11 · Change Data Capture — the database's ordered changelog replayed into every derived system">change data capture<sup>←11</sup></a> or an event log; the principle is what matters, and it is state machine replication via <a class="xref back" href="ch09-consistency-and-consensus.html#total-order-broadcast" data-tip="Ch 9 · Total Order Broadcast — same-order delivery to all nodes; a replicated log; equivalent to consensus">total order broadcast<sup>←9</sup></a>. If instead the application writes to the database <em>and</em> the search index directly, you get the Figure 11-4 dual-write race: two systems each choose their own order for two concurrent writes and end up permanently disagreeing. Derivation from a log is also easy to make deterministic and idempotent, so recovering from faults is straightforward.</p>
+
+<figure>
+<svg viewBox="0 0 680 258" role="img" aria-label="Deriving data from a single ordered log. Clients write only to the system of record; change data capture emits its changes as an ordered log; a search index, a cache, and a data warehouse each consume that log in the same order, so they all converge. Below, the rejected alternative: the application writing directly to two systems, which can process concurrent writes in different orders and disagree forever.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="40" width="84" height="38" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="62" y="56" text-anchor="middle" font-size="9" fill="var(--write)">clients</text>
+    <text x="62" y="70" text-anchor="middle" font-size="8" fill="var(--write)">all writes</text>
+    <path d="M104 59 L 136 59" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f121-w)"/>
+    <rect x="138" y="34" width="120" height="50" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="198" y="54" text-anchor="middle" font-size="9" font-weight="700">system of record</text>
+    <text x="198" y="70" text-anchor="middle" font-size="8" opacity=".7">decides the order</text>
+    <path d="M258 59 L 292 59" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f121-w)"/>
+    <text x="275" y="48" text-anchor="middle" font-size="8" fill="var(--write)">CDC</text>
+    <g text-anchor="middle" font-size="9">
+      <rect x="294" y="44" width="30" height="30" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="309" y="63">e1</text>
+      <rect x="326" y="44" width="30" height="30" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="341" y="63">e2</text>
+      <rect x="358" y="44" width="30" height="30" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="373" y="63">e3</text>
+      <rect x="390" y="44" width="30" height="30" fill="none" stroke="currentColor" stroke-opacity=".3" stroke-dasharray="3 2"/>
+    </g>
+    <text x="357" y="34" text-anchor="middle" font-size="8" opacity=".7">ordered event log</text>
+    <path d="M420 52 C 470 40, 500 34, 528 34" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#f121-r)"/>
+    <path d="M420 59 L 528 66" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f121-r)"/>
+    <path d="M420 66 C 470 84, 500 96, 528 98" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#f121-r)"/>
+    <text x="472" y="30" font-size="8" fill="var(--read)">same order</text>
+    <rect x="530" y="22" width="130" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="595" y="38" text-anchor="middle" font-size="9">search index</text>
+    <rect x="530" y="54" width="130" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="595" y="70" text-anchor="middle" font-size="9">cache</text>
+    <rect x="530" y="86" width="130" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="595" y="102" text-anchor="middle" font-size="9">warehouse / ML</text>
+    <text x="20" y="132" font-size="9" opacity=".85">one writer decides the total order → every derived view replays it → all views agree (barring bugs)</text>
+
+    <rect x="20" y="150" width="640" height="88" rx="6" fill="none" stroke="var(--bad)" stroke-opacity=".7" stroke-dasharray="4 3"/>
+    <text x="30" y="170" font-size="9" font-weight="700" fill="var(--bad)">the rejected alternative: dual writes (Figure 11-4)</text>
+    <rect x="30" y="182" width="80" height="24" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="70" y="198" text-anchor="middle" font-size="9" fill="var(--write)">app</text>
+    <path d="M110 188 L 196 182" stroke="var(--write)" stroke-width="1.5" marker-end="url(#f121-w)"/>
+    <path d="M110 200 L 196 210" stroke="var(--write)" stroke-width="1.5" marker-end="url(#f121-w)"/>
+    <rect x="198" y="170" width="96" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="246" y="186" text-anchor="middle" font-size="9">database</text>
+    <rect x="198" y="202" width="96" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="246" y="218" text-anchor="middle" font-size="9">search index</text>
+    <text x="310" y="188" font-size="9" opacity=".85">two concurrent clients, no shared leader: each system</text>
+    <text x="310" y="203" font-size="9" opacity=".85">orders the writes itself → database says B, index says A,</text>
+    <text x="310" y="218" font-size="9" opacity=".85">no error raised, inconsistent forever.</text>
+    <defs>
+      <marker id="f121-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="f121-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>Derived data over dual writes.</strong> Writing first to one system of record and deriving every other representation from its ordered changelog is an application of state machine replication. The derived views may lag (asynchrony), but they can never <em>disagree</em> about the order of writes — which is exactly what dual writes cannot promise.</figcaption>
+</figure>
+
+<h4>Derived data versus distributed transactions</h4>
+<p>The classical way to keep systems consistent is a distributed transaction: <a class="xref back" href="ch09-consistency-and-consensus.html#atomic-commit-and-two-phase-commit-2pc" data-tip="Ch 9 · Atomic Commit and Two-Phase Commit — prepare, coordinator decision, commit/abort across participants">2PC<sup>←9</sup></a> decides the order of writes with locks and makes changes take effect exactly once with atomic commit. Log-based derivation reaches the same goals by different means: a log for ordering, deterministic retry + idempotence for exactly-once. The big functional difference is <strong>timing</strong>: transaction systems are usually <a class="xref back" href="ch09-consistency-and-consensus.html#linearizability" data-tip="Ch 9 · Linearizability — the illusion of a single copy; once anyone sees a new value, everyone does">linearizable<sup>←9</sup></a> — you get <a class="xref back" href="ch05-replication.html#reading-your-own-writes" data-tip="Ch 5 · Reading Your Own Writes — a user always sees their own submissions">read-your-writes<sup>←5</sup></a> for free — while derived systems update asynchronously and don't. Kleppmann's judgment: <a class="xref back" href="ch09-consistency-and-consensus.html#distributed-transactions-in-practice" data-tip="Ch 9 · Distributed Transactions in Practice — XA is slow, operationally fragile, and amplifies failures">XA<sup>←9</sup></a> has fault-tolerance and performance properties poor enough that log-based derivation is the more promising integration path — but "eventual consistency, suck it up" is not an answer either; the <a class="xref" href="#aiming-for-correctness" data-tip="This chapter · Aiming for Correctness — stronger guarantees on top of asynchronous derivation">Aiming for Correctness</a> section looks for the middle ground.</p>
+
+<h4>The limits of total ordering</h4>
+<p>A totally ordered event log is feasible for small systems — that is precisely single-leader replication. At scale, limits appear:</p>
+<ul>
+<li><strong>Throughput</strong> greater than one node can handle forces you to <a class="xref back" href="ch11-stream-processing.html#partitioned-logs" data-tip="Ch 11 · Partitioned Logs — total order within a partition, none across">partition the log<sup>←11</sup></a> — and the order of events in two different partitions is undefined.</li>
+<li><strong>Geo-distribution</strong>: a leader per datacenter (<a class="xref back" href="ch05-replication.html#multi-leader-replication" data-tip="Ch 5 · Multi-Leader Replication — a leader per datacenter; writes ordered independently in each">multi-leader<sup>←5</sup></a>) means events originating in different datacenters have no defined order.</li>
+<li><strong>Microservices</strong> deploy each service with its own durable state, no sharing (<a class="xref back" href="ch04-encoding-and-evolution.html#dataflow-through-services-rest-and-rpc" data-tip="Ch 4 · Dataflow Through Services — independent services with request/response APIs">Chapter&nbsp;4<sup>←4</sup></a>): events born in two services are unordered.</li>
+<li><strong>Offline-capable clients</strong> (<a class="xref back" href="ch05-replication.html#use-cases-for-multi-leader-replication" data-tip="Ch 5 · Use Cases for Multi-Leader Replication — every device a leader; offline writes sync later">Chapter&nbsp;5<sup>←5</sup></a>) update local state immediately and sync later — clients and servers will see events in different orders.</li>
+</ul>
+<p>Formally, deciding a total order <em>is</em> total order broadcast, which is equivalent to <a class="xref back" href="ch09-consistency-and-consensus.html#fault-tolerant-consensus" data-tip="Ch 9 · Fault-Tolerant Consensus — agreement, integrity, validity, termination; needs a majority">consensus<sup>←9</sup></a> — and consensus algorithms are designed for single-node throughput. Consensus that scales beyond one node's throughput, in a geo-distributed setting, is an open research problem.</p>
+
+<h4>Ordering events to capture causality</h4>
+<p>When events are truly concurrent, arbitrary order is fine; updates to the same object can be totally ordered by routing them to the same partition. But causality can cross those boundaries in subtle ways, and losing it produces real damage:</p>
+
+<figure class="anim" id="anim-causality">
+<svg viewBox="0 0 680 320" role="img" aria-label="A social network stores friendship state in one service and messages in another. A user unfriends their ex-partner and then posts a rude message to remaining friends. The two events go to two different logs with no order between them; the notifier processes the message before the unfriend, still sees the ex on the friend list, and sends them the notification — an external side effect that cannot be recalled.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- user -->
+    <rect x="20" y="106" width="86" height="52" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="63" y="126" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">user 1</text>
+    <text x="63" y="142" text-anchor="middle" font-size="8" fill="var(--write)">breakup!</text>
+    <!-- friends service -->
+    <rect x="150" y="40" width="200" height="62" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="250" y="58" text-anchor="middle" font-size="9" font-weight="700">friends service · log A</text>
+    <g data-on="1"><text x="160" y="80" font-size="9">friends(1) = {2, 3, 4}</text></g>
+    <g data-on="2-6"><text x="160" y="80" font-size="9">friends(1) = {3, 4}</text><text x="160" y="94" font-size="8" fill="var(--write)">e: unfriend(1→2)</text></g>
+    <!-- messages service -->
+    <rect x="150" y="170" width="200" height="62" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="250" y="188" text-anchor="middle" font-size="9" font-weight="700">messages service · log B</text>
+    <g data-on="1-2"><text x="160" y="210" font-size="9" opacity=".5">(empty)</text></g>
+    <g data-on="3-6"><text x="160" y="210" font-size="9">e: msg(1→friends,</text><text x="172" y="224" font-size="9">"my ex is awful")</text></g>
+    <!-- write arrows -->
+    <g data-on="2" data-hot="2"><path d="M106 118 L 146 82" stroke="var(--write)" stroke-width="2" marker-end="url(#a12c-w)"/><text x="96" y="92" font-size="8" fill="var(--write)">1st</text></g>
+    <g data-on="3" data-hot="3"><path d="M106 146 L 146 190" stroke="var(--write)" stroke-width="2" marker-end="url(#a12c-w)"/><text x="96" y="186" font-size="8" fill="var(--write)">2nd</text></g>
+    <!-- notifier -->
+    <rect x="410" y="106" width="150" height="66" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="485" y="124" text-anchor="middle" font-size="9" font-weight="700">notifier</text>
+    <text x="485" y="138" text-anchor="middle" font-size="8" opacity=".7">joins msgs ⋈ friends</text>
+    <g data-on="1-3"><text x="485" y="158" text-anchor="middle" font-size="8" opacity=".6">sees: nothing yet</text></g>
+    <g data-on="4-5"><text x="485" y="158" text-anchor="middle" font-size="8" fill="var(--bad)">sees msg FIRST</text></g>
+    <g data-on="6"><text x="485" y="158" text-anchor="middle" font-size="8" opacity=".8">unfriend arrives — late</text></g>
+    <!-- consume arrows: no cross-log order -->
+    <g data-on="4-6"><path d="M350 200 C 380 196, 392 172, 408 156" stroke="var(--read)" stroke-width="1.8" fill="none" marker-end="url(#a12c-r)"/><text x="360" y="222" font-size="8" fill="var(--read)">① msg event</text></g>
+    <g data-on="6"><path d="M350 72 C 380 76, 392 100, 408 118" stroke="var(--read)" stroke-width="1.8" fill="none" marker-end="url(#a12c-r)"/><text x="356" y="62" font-size="8" fill="var(--read)">② unfriend</text></g>
+    <g data-on="4-5"><path d="M350 72 C 380 76, 392 100, 408 118" stroke="var(--read)" stroke-width="1.4" stroke-dasharray="4 3" fill="none" opacity=".45"/><text x="356" y="62" font-size="8" opacity=".5">…still in flight</text></g>
+    <!-- ex partner -->
+    <rect x="590" y="112" width="76" height="54" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="628" y="132" text-anchor="middle" font-size="9">user 2</text>
+    <text x="628" y="146" text-anchor="middle" font-size="8" opacity=".7">the ex</text>
+    <g data-on="5-6" data-hot="5"><path d="M560 139 L 586 139" stroke="var(--bad)" stroke-width="2" marker-end="url(#a12c-b)"/><rect x="588" y="110" width="80" height="58" rx="7" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 3"/><text x="628" y="182" text-anchor="middle" font-size="8" fill="var(--bad)">notified! 📱</text></g>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="266" font-size="9" opacity=".85">setup: friendship state in one service, messages in another. A notifier joins them to alert friends.</text></g>
+    <g data-on="2"><text x="20" y="266" font-size="9" opacity=".85">first action: user 1 unfriends user 2. The event lands in the friends service's log A.</text></g>
+    <g data-on="3"><text x="20" y="266" font-size="9" opacity=".85">second action: user 1 messages remaining friends about the ex. That event lands in log B.</text></g>
+    <g data-on="4"><text x="20" y="266" font-size="9" opacity=".85">logs A and B have NO order between them. The notifier happens to consume the msg event first.</text></g>
+    <g data-on="5"><text x="20" y="266" font-size="9" opacity=".85">its copy of the friend list still contains user 2 → the rude message is delivered to the ex.</text></g>
+    <g data-on="6"><text x="20" y="266" font-size="9" opacity=".85">the unfriend event arrives — too late. A notification is an external side effect: unrecallable.</text></g>
+    <defs>
+      <marker id="a12c-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a12c-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+      <marker id="a12c-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>SETUP</strong> Friendship status lives in one service, messages in another — each with its own log, a normal microservice decomposition. A notifier consumes both: effectively a join between new messages and the sender's friend list.</li>
+  <li><strong>UNFRIEND</strong> User 1 removes user 2 as a friend. The event is appended to the friends service's log and the authoritative friend list updates immediately.</li>
+  <li><strong>MESSAGE</strong> User 1 then complains about the ex to their remaining friends. This event goes to a <em>different</em> log. Causally, the unfriend happened first — user 1's intent depends on it — but that dependency is recorded nowhere.</li>
+  <li><strong>RACE</strong> Across two logs there is no ordering guarantee. The notifier consumes the message-send event before the unfriend event — perfectly legal, since neither log did anything wrong.</li>
+  <li><strong>DAMAGE</strong> The notifier's view of the friend list still includes user 2, so it sends the notification to the ex-partner. Unlike state (which a later event could correct), a delivered notification is an external side effect — there is no undo.</li>
+  <li><strong>NO SIMPLE FIX</strong> The unfriend finally processes, uselessly. Starting points, none complete: logical timestamps (<a class="xref back" href="ch09-consistency-and-consensus.html#sequence-number-ordering" data-tip="Ch 9 · Sequence Number Ordering — Lamport timestamps: total order consistent with causality, but no gap detection">Chapter&nbsp;9<sup>←9</sup></a>) order without coordination but push out-of-order handling to recipients; logging an event that records <em>what the user saw</em> before acting captures the dependency explicitly ("reads are events too", below); conflict-resolution logic (<a class="xref back" href="ch05-replication.html#handling-write-conflicts" data-tip="Ch 5 · Handling Write Conflicts — convergent resolution of concurrently written values">Chapter&nbsp;5<sup>←5</sup></a>) repairs state but cannot repair side effects.</li>
+</ol>
+</figure>
+
+<h3 id="batch-and-stream-processing"><a class="self" href="#batch-and-stream-processing">Batch and Stream Processing</a></h3>
+<span class="key-chip">batch-and-stream-processing</span>
+
+<p>The goal of data integration, in one sentence: <em>make sure data ends up in the right form in all the right places</em>. Batch and stream processors are the tools that do it — consuming, transforming, joining, filtering, aggregating, training, and writing derived datasets: search indexes, materialized views, recommendations, aggregate metrics (<a class="xref back" href="ch10-batch-processing.html#the-output-of-batch-workflows" data-tip="Ch 10 · The Output of Batch Workflows — batch output is a structure: indexes, key-value stores, built immutably">Chapter&nbsp;10<sup>←10</sup></a>, <a class="xref back" href="ch11-stream-processing.html#uses-of-stream-processing" data-tip="Ch 11 · Uses of Stream Processing — CEP, analytics, view maintenance, search on streams">Chapter&nbsp;11<sup>←11</sup></a>). The fundamental difference — bounded vs unbounded input — is real, but the implementations are blurring: Spark does streams on a batch engine (microbatches), Flink does batch on a stream engine.</p>
+
+<h4>Maintaining derived state</h4>
+<p>Batch processing has a functional flavor: deterministic, pure functions, immutable inputs, append-only outputs. Stream processing extends this with managed, fault-tolerant state (<a class="xref back" href="ch11-stream-processing.html#fault-tolerance" data-tip="Ch 11 · Fault Tolerance — checkpointing, changelog topics, rebuilding operator state">Chapter&nbsp;11<sup>←11</sup></a>). Determinism buys fault tolerance <em>and</em> reasoning: think in pipelines that derive one thing from another. Derived views <em>could</em> be maintained synchronously (a relational database updates its secondary indexes in the writing transaction), but asynchrony is what makes log-based systems robust — a fault in one consumer stays local, while a distributed transaction turns any participant's failure into everyone's abort. Cross-partition secondary indexes (<a class="xref back" href="ch06-partitioning.html#partitioning-and-secondary-indexes" data-tip="Ch 6 · Partitioning and Secondary Indexes — document-partitioned (scatter/gather reads) vs term-partitioned (fan-out writes)">Chapter&nbsp;6<sup>←6</sup></a>) are most reliable when maintained asynchronously, too.</p>
+
+<h4>Reprocessing data for application evolution</h4>
+<p>Stream processing keeps derived views fresh with low delay; batch processing can <strong>reprocess the entire history</strong> to build a <em>new</em> view of an existing dataset. That is the strongest evolution mechanism the book offers: without reprocessing, schema evolution is limited to small additive changes (<a class="xref back" href="ch04-encoding-and-evolution.html#formats-for-encoding-data" data-tip="Ch 4 · Formats for Encoding Data — backward/forward compatibility permits only gradual, additive change">Chapter&nbsp;4<sup>←4</sup></a>); with it, you can restructure a dataset into a completely different model. And you can do it <em>gradually</em>: keep the old and new schema side by side as two derived views of the same log, shift users over incrementally, drop the old view when done — every stage reversible. The book's non-computer analogy: 19th-century English railways converted track gauges by adding a third rail (<em>mixed gauge</em>) so trains of both gauges ran for years during the migration; expensive, which is why BART still runs a nonstandard gauge today.</p>
+
+<h4>The lambda architecture</h4>
+<p>If batch reprocesses history and streams handle recent events, how do you combine them? The <strong>lambda architecture</strong> (Marz): record incoming data as immutable events in an always-growing dataset (like <a class="xref back" href="ch11-stream-processing.html#event-sourcing" data-tip="Ch 11 · Event Sourcing — immutable events expressing intent; state derived from the log">event sourcing<sup>←11</sup></a>), then run <em>two parallel systems</em> over it — a stream processor (Storm) producing fast approximate views, and a batch processor (Hadoop) later producing corrected exact views. Influential — it popularized deriving views from immutable events and reprocessing — but with practical problems Kleppmann lists bluntly: the same logic maintained in two frameworks; two outputs that must be merged (easy for tumbling-window aggregates, hard for joins and sessionization); and frequent full reprocessing is too expensive, so the batch layer goes incremental, reacquiring exactly the straggler-and-window headaches (<a class="xref back" href="ch11-stream-processing.html#reasoning-about-time" data-tip="Ch 11 · Reasoning About Time — event time vs processing time; stragglers; window completeness">Chapter&nbsp;11<sup>←11</sup></a>) it was meant to escape.</p>
+
+<figure>
+<svg viewBox="0 0 680 262" role="img" aria-label="Lambda architecture versus unified processing. Lambda: events feed both a batch layer producing exact but delayed views and a speed layer producing fast approximate views; queries must merge the two outputs, and the same logic lives in two systems. Unified: one engine replays the same log for both reprocessing and live processing, using event-time windows and exactly-once semantics.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="20" font-weight="700">(a) lambda: two systems, one logic written twice</text>
+    <rect x="20" y="34" width="92" height="34" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="66" y="50" text-anchor="middle" font-size="9">immutable</text><text x="66" y="62" text-anchor="middle" font-size="9">event log</text>
+    <path d="M112 44 L 152 36" stroke="var(--write)" stroke-width="1.6" marker-end="url(#f122-w)"/>
+    <path d="M112 60 L 152 70" stroke="var(--write)" stroke-width="1.6" marker-end="url(#f122-w)"/>
+    <rect x="154" y="22" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="219" y="40" text-anchor="middle" font-size="9">batch layer (Hadoop)</text>
+    <rect x="154" y="60" width="130" height="28" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="219" y="78" text-anchor="middle" font-size="9">speed layer (Storm)</text>
+    <path d="M284 36 L 322 46" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f122-r)"/>
+    <path d="M284 74 L 322 62" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f122-r)"/>
+    <text x="290" y="33" font-size="8" opacity=".7">exact, hours late</text>
+    <text x="196" y="102" font-size="8" opacity=".7">approximate, seconds late</text>
+    <rect x="324" y="40" width="92" height="30" rx="4" fill="var(--panel2)" stroke="var(--bad)" stroke-opacity=".8"/><text x="370" y="59" text-anchor="middle" font-size="9" fill="var(--bad)">merge at query</text>
+    <text x="430" y="46" font-size="8" opacity=".85">× logic duplicated in two frameworks</text>
+    <text x="430" y="60" font-size="8" opacity=".85">× merging hard beyond simple aggregates</text>
+    <text x="430" y="74" font-size="8" opacity=".85">× incremental batches re-import time pain</text>
+
+    <text x="20" y="140" font-weight="700">(b) unified: one engine, replay when needed</text>
+    <rect x="20" y="154" width="92" height="34" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="66" y="170" text-anchor="middle" font-size="9">immutable</text><text x="66" y="182" text-anchor="middle" font-size="9">event log</text>
+    <path d="M112 166 L 168 166" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f122-w)"/>
+    <path d="M112 180 C 130 198, 148 198, 166 182" stroke="var(--write)" stroke-width="1.4" stroke-dasharray="4 3" fill="none" marker-end="url(#f122-w)"/>
+    <text x="112" y="212" font-size="8" fill="var(--write)">replay history through the SAME code</text>
+    <rect x="170" y="148" width="150" height="40" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="245" y="164" text-anchor="middle" font-size="9">one processing engine</text>
+    <text x="245" y="178" text-anchor="middle" font-size="8" opacity=".7">Flink / Beam / Kafka Streams</text>
+    <path d="M320 168 L 360 168" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f122-r)"/>
+    <rect x="362" y="153" width="92" height="30" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="408" y="172" text-anchor="middle" font-size="9">derived view</text>
+    <text x="470" y="152" font-size="8" opacity=".85">needs: ① replayable log (Kafka, HDFS)</text>
+    <text x="470" y="166" font-size="8" opacity=".85">② exactly-once for stream processors</text>
+    <text x="470" y="180" font-size="8" opacity=".85">③ event-time windowing, since processing</text>
+    <text x="470" y="194" font-size="8" opacity=".85">&nbsp;&nbsp;&nbsp;time is meaningless during a replay</text>
+    <text x="20" y="244" font-size="9" opacity=".85">same benefits as lambda — immutable events, reprocessing — without running two systems.</text>
+    <defs>
+      <marker id="f122-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="f122-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>Lambda vs unified.</strong> Lambda runs the same computation twice — once exactly (batch) and once quickly (stream) — and merges. Unifying batch and stream in one system keeps lambda's principles (immutable events, derived views, reprocessing) and drops the duplication. The three features that make it possible: replaying history through the same engine, exactly-once semantics, and windowing by event time.</figcaption>
+</figure>
+
+<h4>Unifying batch and stream processing</h4>
+<p>Recent systems get lambda's benefits without its downsides by doing both computations in <em>one</em> system. Three requirements, all now widely available: (1) <strong>replay</strong> of historical events through the same engine that handles recent ones — log-based brokers can replay, and stream processors can read from HDFS; (2) <strong>exactly-once semantics</strong> — output as if no fault occurred, by discarding partial output of failed tasks (<a class="xref back" href="ch11-stream-processing.html#fault-tolerance" data-tip="Ch 11 · Fault Tolerance — microbatching, barrier checkpoints, idempotent writes">Chapter&nbsp;11<sup>←11</sup></a>); (3) <strong>windowing by event time</strong>, not processing time, which is meaningless when replaying (Apache Beam expresses such computations; Flink or Google Cloud Dataflow runs them).</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · the "future" chapter becomes a philosophy of the present</span>
+The 2nd edition splits this chapter in two, and the technical half — <strong>Chapter&nbsp;13, "A Philosophy of Streaming Systems"</strong> — drops the speculative framing entirely: what was a forward-looking essay in 2017 is presented as a philosophy of systems that now exist. Data integration via logs and the lambda-architecture critique carry over intact; <em>unbundling the database</em> is reframed alongside the 2020s vocabulary of <strong>composable data systems</strong> and polystores; "turning the database inside out" and microservices-as-event-driven-systems are treated as established practice. <em>[inferred from the 2nd-edition references repo — Ch&nbsp;13's citations are precisely this chapter's literature plus newer composable-data-systems work]</em></div>
+</section>
+<!-- ================================================================ -->
+<section class="concept" id="unbundling-databases">
+<span class="key-chip">unbundling-databases</span>
+<h2><a class="self" href="#unbundling-databases">Unbundling Databases</a></h2>
+
+<p>At the most abstract level, databases, Hadoop, and operating systems all do the same job: store data, let you process and query it. They just come from opposite philosophies. <strong>Unix</strong> gives programmers a logical but low-level abstraction over hardware — pipes, and files that are just byte sequences. <strong>Relational databases</strong> give a high-level abstraction that hides on-disk data structures, concurrency, and crash recovery — SQL and transactions. Both emerged in the early 1970s and the tension is still unresolved; NoSQL can be read as applying the Unix low-level approach to distributed OLTP. This section tries to reconcile the two — and the reconciliation is this chapter's central design idea.</p>
+
+<h3 id="composing-data-storage-technologies"><a class="self" href="#composing-data-storage-technologies">Composing Data Storage Technologies</a></h3>
+<span class="key-chip">composing-data-storage-technologies</span>
+
+<p>Databases have features: <a class="xref back" href="ch03-storage-and-retrieval.html#other-indexing-structures" data-tip="Ch 3 · Other Indexing Structures — secondary indexes: search records by field value">secondary indexes<sup>←3</sup></a>, <a class="xref back" href="ch03-storage-and-retrieval.html#aggregation-data-cubes-and-materialized-views" data-tip="Ch 3 · Data Cubes and Materialized Views — physically cached query results">materialized views<sup>←3</sup></a>, <a class="xref back" href="ch05-replication.html#implementation-of-replication-logs" data-tip="Ch 5 · Implementation of Replication Logs — the ordered write stream followers replay">replication logs<sup>←5</sup></a>, full-text search. And Chapters 10–11 built the same things <em>outside</em> any database: search indexes as batch output, materialized views maintained by stream processors, changes replicated to derived systems by CDC. The parallel is exact, and one command exposes it:</p>
+
+<figure class="anim" id="anim-createindex">
+<svg viewBox="0 0 680 320" role="img" aria-label="What CREATE INDEX actually does: scan a consistent snapshot of the table, sort and write out the index, process the backlog of writes made since the snapshot, then maintain the index continuously. The same three-step shape is exactly how a new replication follower is set up and how change data capture bootstraps a new derived system.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- table + wal -->
+    <rect x="20" y="46" width="150" height="70" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="95" y="64" text-anchor="middle" font-size="9" font-weight="700">table (keeps taking</text>
+    <text x="95" y="78" text-anchor="middle" font-size="9" font-weight="700">writes throughout)</text>
+    <g data-on="1-6"><text x="95" y="100" text-anchor="middle" font-size="8" fill="var(--write)">w1 w2 w3 w4 w5 …</text></g>
+    <!-- snapshot -->
+    <g data-on="2-6"><rect x="20" y="140" width="150" height="34" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="4 3"/><text x="95" y="161" text-anchor="middle" font-size="8">snapshot @ w3</text></g>
+    <g data-on="2" data-hot="2"><path d="M95 116 L 95 136" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12i-r)"/></g>
+    <!-- index -->
+    <rect x="480" y="46" width="180" height="128" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="570" y="64" text-anchor="middle" font-size="9" font-weight="700">new index (derived view)</text>
+    <g data-on="1"><text x="570" y="110" text-anchor="middle" font-size="9" opacity=".5">(does not exist yet)</text></g>
+    <g data-on="2-6"><text x="490" y="92" font-size="8">built from snapshot:</text><text x="490" y="106" font-size="9">sorted entries ≤ w3</text></g>
+    <g data-on="3-6"><text x="490" y="128" font-size="8">backlog applied:</text><text x="490" y="142" font-size="9">w4 w5</text></g>
+    <g data-on="4-6"><text x="490" y="164" font-size="9" fill="var(--write)">w6 w7 … (live)</text></g>
+    <!-- arrows -->
+    <g data-on="2"><path d="M170 156 C 300 156, 380 120, 476 100" stroke="var(--read)" stroke-width="1.8" fill="none" marker-end="url(#a12i-r)"/><text x="270" y="182" font-size="8" fill="var(--read)">scan + sort the snapshot</text></g>
+    <g data-on="3" data-hot="3"><path d="M170 80 C 300 70, 380 90, 476 128" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a12i-w)"/><text x="268" y="60" font-size="8" fill="var(--write)">replay backlog since snapshot</text></g>
+    <g data-on="4-6"><path d="M170 92 C 300 96, 380 120, 476 156" stroke="var(--write)" stroke-width="1.8" fill="none" marker-end="url(#a12i-w)"/><text x="278" y="120" font-size="8" fill="var(--write)">follow every new write</text></g>
+    <!-- the three names -->
+    <g data-on="5-6">
+      <rect x="20" y="204" width="640" height="66" rx="6" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="4 3"/>
+      <text x="30" y="222" font-size="9" font-weight="700">the same picture, three names:</text>
+      <text x="30" y="240" font-size="9">CREATE INDEX&nbsp;&nbsp;·&nbsp;&nbsp;new follower replica (snapshot + catch-up, ch 5)</text>
+      <text x="30" y="256" font-size="9">·&nbsp;&nbsp;CDC bootstrap of a derived system (initial snapshot + changelog, ch 11)</text>
+    </g>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="300" font-size="9" opacity=".85">you run CREATE INDEX on a live table. Writes keep arriving the whole time.</text></g>
+    <g data-on="2"><text x="20" y="300" font-size="9" opacity=".85">the database scans a consistent snapshot, picks out the indexed field, sorts, writes the index.</text></g>
+    <g data-on="3"><text x="20" y="300" font-size="9" opacity=".85">writes made since the snapshot are in the log — apply the backlog to catch the index up.</text></g>
+    <g data-on="4"><text x="20" y="300" font-size="9" opacity=".85">from now on, every transaction that writes the table also maintains the index. Done.</text></g>
+    <g data-on="5"><text x="20" y="300" font-size="9" opacity=".85">snapshot → catch up → follow: exactly how ch 5 set up a follower and ch 11 bootstrapped CDC.</text></g>
+    <g data-on="6"><text x="20" y="300" font-size="9" opacity=".85">so CREATE INDEX = reprocess the dataset + derive a new view. The database is a dataflow inside.</text></g>
+    <defs>
+      <marker id="a12i-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a12i-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>CREATE INDEX</strong> You add an index to a live table. The table keeps accepting writes throughout — no lock, no downtime. How does the database do that?</li>
+  <li><strong>SNAPSHOT</strong> It scans a consistent snapshot of the table (pinned to a position in the log), extracts the field values being indexed, sorts them, and writes out the index — a batch job over existing data.</li>
+  <li><strong>CATCH UP</strong> Writes that happened since the snapshot are sitting in the write-ahead log. The database replays that backlog against the new index until it is current.</li>
+  <li><strong>FOLLOW</strong> Thereafter the index is maintained continuously: every transaction that writes the table updates the index too. Batch bootstrap has handed over to stream maintenance.</li>
+  <li><strong>THREE NAMES</strong> Snapshot → catch-up → follow is precisely <a class="xref back" href="ch05-replication.html#setting-up-new-followers" data-tip="Ch 5 · Setting Up New Followers — snapshot pinned to a log position, copy, then replay the log">setting up a new follower<sup>←5</sup></a> and precisely <a class="xref back" href="ch11-stream-processing.html#change-data-capture" data-tip="Ch 11 · Change Data Capture — initial snapshot pinned to an offset, then the changelog">bootstrapping CDC<sup>←11</sup></a>. One mechanism, three products.</li>
+  <li><strong>THE POINT</strong> CREATE INDEX reprocesses the existing dataset and derives a new view onto it. A database is already a little dataflow system internally — unbundling just performs the same moves across separate systems, teams, and machines.</li>
+</ol>
+</figure>
+
+<h4>The meta-database of everything</h4>
+<p>Seen this way, <strong>the dataflow across an entire organization looks like one huge database</strong>. Every batch, stream, or ETL process that carries data from one place-and-form to another is acting like a database subsystem keeping an index or materialized view up to date; the derived systems themselves are like different index types — one team's search cluster is the organization's full-text index, another's cache is its materialized view. If no single data model or storage format fits all access patterns, there are two routes to a cohesive whole:</p>
+
+<figure>
+<svg viewBox="0 0 680 250" role="img" aria-label="Federation versus unbundling. Federation unifies reads: one query interface over many different storage engines, in the relational tradition. Unbundling unifies writes: one ordered event log fans changes out to every storage system, in the Unix tradition of small composable tools.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="20" font-weight="700">(a) federation — unify READS</text>
+    <rect x="60" y="34" width="180" height="30" rx="5" fill="var(--panel2)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="150" y="53" text-anchor="middle" font-size="9" fill="var(--read)">unified query interface</text>
+    <path d="M96 64 L 66 104" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f123-r)"/>
+    <path d="M150 64 L 150 104" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f123-r)"/>
+    <path d="M204 64 L 234 104" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f123-r)"/>
+    <rect x="26" y="106" width="80" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="66" y="123" text-anchor="middle" font-size="9">OLTP db</text>
+    <rect x="112" y="106" width="80" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="152" y="123" text-anchor="middle" font-size="9">graph db</text>
+    <rect x="198" y="106" width="80" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="238" y="123" text-anchor="middle" font-size="9">warehouse</text>
+    <text x="20" y="158" font-size="8" opacity=".85">"polystore": PostgreSQL foreign data wrappers.</text>
+    <text x="20" y="172" font-size="8" opacity=".85">Relational tradition: high-level language,</text>
+    <text x="20" y="186" font-size="8" opacity=".85">elegant semantics, complicated implementation.</text>
+    <text x="20" y="206" font-size="8" opacity=".85">…but no answer for keeping WRITES in sync.</text>
+
+    <text x="360" y="20" font-weight="700">(b) unbundling — unify WRITES</text>
+    <rect x="360" y="34" width="120" height="30" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="420" y="53" text-anchor="middle" font-size="9" fill="var(--write)">ordered event log</text>
+    <path d="M420 64 L 396 104" stroke="var(--write)" stroke-width="1.6" marker-end="url(#f123-w)"/>
+    <path d="M444 64 L 490 104" stroke="var(--write)" stroke-width="1.6" marker-end="url(#f123-w)"/>
+    <path d="M468 56 L 580 104" stroke="var(--write)" stroke-width="1.6" marker-end="url(#f123-w)"/>
+    <rect x="356" y="106" width="80" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="396" y="123" text-anchor="middle" font-size="9">OLTP db</text>
+    <rect x="452" y="106" width="80" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="492" y="123" text-anchor="middle" font-size="9">search idx</text>
+    <rect x="548" y="106" width="80" height="26" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="588" y="123" text-anchor="middle" font-size="9">cache</text>
+    <text x="360" y="158" font-size="8" opacity=".85">CDC + event logs + idempotent consumers.</text>
+    <text x="360" y="172" font-size="8" opacity=".85">Unix tradition: small tools, one uniform</text>
+    <text x="360" y="186" font-size="8" opacity=".85">low-level API (the log ≈ the pipe).</text>
+    <text x="360" y="206" font-size="8" opacity=".85">The harder engineering problem — and the focus.</text>
+    <text x="20" y="236" font-size="9" opacity=".85">two sides of the same coin: composing a reliable, scalable, maintainable system from diverse parts.</text>
+    <defs>
+      <marker id="f123-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="f123-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>Federated databases unify reads</strong> (one query interface over many engines — a manageable problem of mapping data models); <strong>unbundled databases unify writes</strong> (making sure every change reaches every system, even under faults — the harder problem, like unbundling a database's index-maintenance machinery). Applications needing a specialized model still hit the underlying engines directly.</figcaption>
+</figure>
+
+<h4>Making unbundling work</h4>
+<p>Synchronizing writes across heterogeneous systems the traditional way means distributed transactions across them — which Kleppmann argues is the wrong solution (transactions <em>within</em> one system work; across technologies built by different teams, the lack of a standard protocol makes an asynchronous event log with <strong>idempotent consumers</strong> far more robust). The payoff is <strong>loose coupling</strong> at two levels. System level: a slow or failed consumer doesn't stop anyone else — the log buffers (<a class="xref back" href="ch11-stream-processing.html#partitioned-logs" data-tip="Ch 11 · Partitioned Logs — a slow consumer hurts only itself; the disk buffer is large">Chapter&nbsp;11<sup>←11</sup></a>), the consumer catches up when fixed — whereas distributed transactions escalate local faults into large-scale failures. Human level: teams develop and operate their systems independently, with the event log as an interface strong enough to carry durability and ordering, general enough to carry almost any data.</p>
+
+<h4>Unbundled versus integrated systems</h4>
+<p>Unbundling won't replace databases: stream processors need stores for state, and query results have to be served from somewhere (<a class="xref back" href="ch10-batch-processing.html#comparing-hadoop-to-distributed-databases" data-tip="Ch 10 · Comparing Hadoop to Distributed Databases — MPP query engines excel at exploratory analytics">Chapter&nbsp;10<sup>←10</sup></a>). Running many pieces of infrastructure has real cost — each has a learning curve and operational quirks — and a single integrated product will beat a composed system on the workloads it was designed for. The goal of unbundling is <strong>breadth, not depth</strong>: good performance across a much wider range of workloads than any single product covers. If one technology satisfies all your requirements, use it; the advantages of composition only appear when no single piece of software does.</p>
+
+<h4>What's missing?</h4>
+<p>The unbundled equivalent of the Unix <em>shell</em>: a high-level declarative language for composing storage and processing systems. Kleppmann's wish: <code>mysql | elasticsearch</code> — the unbundled CREATE INDEX, taking every document in MySQL, indexing it into Elasticsearch, then capturing every subsequent change automatically. Likewise declaratively specified, automatically maintained caches and materialized views — including over recursive graph queries (<a class="xref back" href="ch02-data-models-query-languages.html#graph-like-data-models" data-tip="Ch 2 · Graph-Like Data Models — vertices and edges; recursive traversal queries">Chapter&nbsp;2<sup>←2</sup></a>) and arbitrary application logic. He points to <em>differential dataflow</em> as the promising early research.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · composable data systems — the wish list ships</span>
+The 2nd edition can name what 2017 could only ask for. "Unbundling" is reframed alongside the now-standard banner of <strong>composable data systems</strong>: open formats and shared components (columnar formats, table formats, embeddable query engines) composing into pipelines, with polystores as the federated-read side. And the differential-dataflow research Kleppmann hoped would "find its way into production systems" did: <strong>incremental view maintenance</strong> became a product category — streaming databases that keep declaratively specified materialized views continuously up to date, exactly the "declarative caching" this section asks for. <em>[the composable-systems reframing is inferred from the refs repo; the IVM arc is covered in the ch 11 deltas]</em></div>
+
+<h3 id="designing-applications-around-dataflow"><a class="self" href="#designing-applications-around-dataflow">Designing Applications Around Dataflow</a></h3>
+<span class="key-chip">designing-applications-around-dataflow</span>
+
+<p>Composing specialized storage and processing systems with application code is becoming known as the <strong>"database inside-out"</strong> approach — Kleppmann's own 2014 talk title, though he insists it's a design pattern, not a new architecture, amalgamated from dataflow languages (Oz, Juttle), functional reactive programming (Elm), and logic programming (Bloom); the term <em>unbundling</em> is Jay Kreps's.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the spreadsheet test</span>
+Put <code>=SUM(A1:A9)</code> in a spreadsheet cell and you never think about it again: change any input and the sum <em>is</em> correct, immediately, always. You don't poll the cell, schedule a refresh job, or reconcile it nightly. Now notice that your search index, your cache, and your analytics dashboard are all just formulas over your database — and yet keeping them right is somebody's full-time job. That is the indictment: <strong>data systems still haven't caught up with VisiCalc, 1979</strong>. The difference is that modern derived data must also be fault-tolerant, scalable, durable, and built by different teams on different technologies — but the goal stands: when a record changes, everything derived from it updates, and you simply trust that it works.</div>
+
+<h4>Application code as a derivation function</h4>
+<p>Derived datasets are outputs of transformation functions: a secondary index is a cookie-cutter derivation (so databases build it in — <code>CREATE INDEX</code>); a full-text index is standard linguistic processing (language detection, stemming, synonyms) feeding an inverted index; an ML model is derived from training data by feature extraction and statistics; a cache holds an aggregation in exactly the shape the UI displays. When the derivation function is <em>not</em> cookie-cutter, you need custom code — and that is where databases struggle: triggers, stored procedures, and UDFs exist but were afterthoughts, fighting the requirements of modern application development.</p>
+
+<h4>Separation of application code and state</h4>
+<p>Databases could in theory be deployment environments for arbitrary application code; in practice they are terrible at it (no dependency management, version control, rolling upgrades, monitoring…). Cluster schedulers — Mesos, YARN, Docker, Kubernetes — specialize in running application code and do it much better. So the trend holds: <strong>stateless application logic here, state management there</strong> — don't put application logic in the database, don't put persistent state in the application. As the functional-programming joke goes: <em>we believe in the separation of Church and state</em>. In this model the database is a passive, mutable shared variable reached synchronously over the network. And in most languages you cannot <em>subscribe</em> to a mutable variable's changes — you can only read it periodically. Databases inherited that passivity: polling is usually your only option; subscribing to changes is only beginning to appear as a feature.</p>
+
+<h4>Dataflow: the interplay of state, state changes, and code</h4>
+<p>Thinking in dataflow renegotiates that relationship: application code <em>responds</em> to state changes in one place by triggering state changes in another — the database's changelog treated as a subscribable event stream (<a class="xref back" href="ch11-stream-processing.html#databases-and-streams" data-tip="Ch 11 · Databases and Streams — a write is an event; the replication log is a stream">Chapter&nbsp;11<sup>←11</sup></a>), actors reacting to messages (<a class="xref back" href="ch04-encoding-and-evolution.html#message-passing-dataflow" data-tip="Ch 4 · Message-Passing Dataflow — asynchronous one-way messages between processes">Chapter&nbsp;4<sup>←4</sup></a>), the 1980s tuple-spaces model of processes observing and reacting. Crucially, maintaining derived data is <em>not</em> ordinary asynchronous job execution — it makes two stringent demands that traditional messaging doesn't meet: <strong>stable ordering</strong> (several views derived from one log must process events in the same order or they diverge — redelivery reorders, dual writes are out) and <strong>fault-tolerant processing</strong> (losing one message leaves a derived view permanently out of sync). Modern stream processors provide both at scale, cheaper and more robustly than distributed transactions, and let application code run as operators between the streams.</p>
+
+<h4>Stream processors and services</h4>
+<p>This looks like microservices — loose coupling, independent teams — but the communication mechanism is inverted: one-directional asynchronous streams instead of synchronous request/response. The book's example, a purchase priced in one currency and paid in another:</p>
+
+<figure>
+<svg viewBox="0 0 680 240" role="img" aria-label="Microservice approach versus dataflow approach for currency conversion. Microservice: the purchase service queries the exchange-rate service synchronously for every purchase, adding a network hop that can be slow or down. Dataflow: the purchase processor subscribes to the stream of rate updates ahead of time and keeps a local copy, so processing a purchase is a local lookup — a stream-table join.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <text x="20" y="20" font-weight="700">(a) microservice: ask at purchase time</text>
+    <rect x="20" y="36" width="110" height="40" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="75" y="52" text-anchor="middle" font-size="9">purchase</text><text x="75" y="66" text-anchor="middle" font-size="9">service</text>
+    <path d="M130 48 L 196 48" stroke="var(--read)" stroke-width="1.6" marker-end="url(#f124-r)"/>
+    <text x="163" y="40" text-anchor="middle" font-size="8" fill="var(--read)">query rate</text>
+    <path d="M196 64 L 130 64" stroke="currentColor" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="3 2" marker-end="url(#f124-n)"/>
+    <text x="163" y="80" text-anchor="middle" font-size="8" opacity=".6">response…?</text>
+    <rect x="198" y="36" width="110" height="40" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="253" y="52" text-anchor="middle" font-size="9">exchange-rate</text><text x="253" y="66" text-anchor="middle" font-size="9">service</text>
+    <text x="20" y="104" font-size="8" opacity=".85">a synchronous network hop inside EVERY purchase:</text>
+    <text x="20" y="118" font-size="8" opacity=".85">slower, and the purchase fails if the rate service is down.</text>
+
+    <text x="360" y="20" font-weight="700">(b) dataflow: subscribe ahead of time</text>
+    <rect x="360" y="36" width="110" height="40" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="415" y="52" text-anchor="middle" font-size="9" fill="var(--write)">rate updates</text><text x="415" y="66" text-anchor="middle" font-size="9" fill="var(--write)">(stream)</text>
+    <path d="M470 56 L 536 56" stroke="var(--write)" stroke-width="1.6" marker-end="url(#f124-w)"/>
+    <text x="503" y="48" text-anchor="middle" font-size="8" fill="var(--write)">push changes</text>
+    <rect x="538" y="30" width="122" height="92" rx="5" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="599" y="48" text-anchor="middle" font-size="9">purchase processor</text>
+    <rect x="548" y="58" width="102" height="26" rx="4" fill="var(--panel2)" stroke="var(--read)" stroke-opacity=".9"/>
+    <text x="599" y="75" text-anchor="middle" font-size="8" fill="var(--read)">local rate table</text>
+    <text x="599" y="104" text-anchor="middle" font-size="8" opacity=".7">lookup = local read</text>
+    <path d="M415 132 C 460 132, 510 120, 546 108" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#f124-w)"/>
+    <rect x="360" y="120" width="56" height="24" rx="4" fill="var(--write-soft)" stroke="var(--write)"/><text x="388" y="136" text-anchor="middle" font-size="8" fill="var(--write)">purchases</text>
+    <text x="424" y="152" font-size="8" opacity=".85">= a stream-table join, not an RPC:</text>
+    <text x="424" y="166" font-size="8" opacity=".85">faster (no request at all) and robust</text>
+    <text x="424" y="180" font-size="8" opacity=".85">to the other service's failure.</text>
+    <text x="20" y="150" font-size="8" opacity=".85">caching the rate in (a) to avoid the hop means polling or</text>
+    <text x="20" y="164" font-size="8" opacity=".85">subscribing to changes — i.e. reinventing (b).</text>
+    <text x="20" y="216" font-size="9" opacity=".85">"the fastest and most reliable network request is no network request at all." Both must handle the</text>
+    <text x="20" y="230" font-size="9" opacity=".85">time-dependence: reprocessing needs the rate as of the ORIGINAL purchase time (ch 11, SCD).</text>
+    <defs>
+      <marker id="f124-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="f124-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+      <marker id="f124-n" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" fill-opacity=".5"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>RPC vs dataflow for the same join.</strong> The microservice version queries the exchange-rate service inside every purchase; the dataflow version subscribes to rate changes ahead of time and joins locally — a <a class="xref back" href="ch11-stream-processing.html#stream-joins" data-tip="Ch 11 · Stream Joins — stream-table join: a CDC-maintained local copy, probed per event">stream-table join<sup>←11</sup></a>. Either way the join is time-dependent: reprocess last month's purchases and you need last month's rates.</figcaption>
+</figure>
+
+<h3 id="observing-derived-state"><a class="self" href="#observing-derived-state">Observing Derived State</a></h3>
+<span class="key-chip">observing-derived-state</span>
+
+<p>The dataflows above create and maintain derived datasets — call that the <strong>write path</strong>: work done eagerly, as soon as data arrives, whether or not anyone asked to see it. The reason the derived dataset exists is the <strong>read path</strong>: work done lazily, only when a user asks. The derived dataset is where the two paths meet (the book's Figure 12-1) — and it marks a movable trade-off between write-time work and read-time work:</p>
+
+<figure class="anim" id="anim-boundary">
+<svg viewBox="0 0 680 330" role="img" aria-label="The boundary between write path and read path, and how indexes, precomputation, and caches shift it. With a search index, writes update the index and reads query it. With no index, writes are free and reads must scan everything. Precomputing all possible query results makes reads free but writes infinite. Caching common queries sits between. Twitter's home-timeline fan-out from chapter 1 is the same trade-off.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- fixed frame -->
+    <rect x="20" y="40" width="180" height="44" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="110" y="58" text-anchor="middle" font-size="9" fill="var(--write)" font-weight="700">write path (eager)</text>
+    <text x="110" y="74" text-anchor="middle" font-size="8" fill="var(--write)">document updates</text>
+    <rect x="480" y="40" width="180" height="44" rx="6" fill="var(--panel2)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="570" y="58" text-anchor="middle" font-size="9" fill="var(--read)" font-weight="700">read path (lazy)</text>
+    <text x="570" y="74" text-anchor="middle" font-size="8" fill="var(--read)">search queries</text>
+    <!-- middle box varies -->
+    <g data-on="1"><rect x="270" y="34" width="140" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="340" y="56" text-anchor="middle" font-size="9" font-weight="700">search index</text><text x="340" y="72" text-anchor="middle" font-size="8" opacity=".7">where they meet</text>
+      <path d="M200 62 L 266 62" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12b-w)"/><text x="222" y="54" font-size="8" fill="var(--write)">update</text>
+      <path d="M476 62 L 414 62" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12b-r)"/><text x="428" y="54" font-size="8" fill="var(--read)">search</text></g>
+    <g data-on="2"><rect x="396" y="34" width="60" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 3"/><text x="426" y="66" text-anchor="middle" font-size="9">none</text>
+      <path d="M200 62 L 250 62" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12b-w)"/><text x="212" y="54" font-size="8" fill="var(--write)">append only</text>
+      <path d="M476 100 C 380 130, 240 130, 150 100" stroke="var(--read)" stroke-width="1.8" fill="none" marker-end="url(#a12b-r)"/><text x="260" y="142" font-size="8" fill="var(--read)">grep EVERY document per query</text></g>
+    <g data-on="3"><rect x="220" y="34" width="240" height="56" rx="6" fill="var(--panel2)" stroke="var(--write)" stroke-width="1.5"/><text x="340" y="56" text-anchor="middle" font-size="9" font-weight="700" fill="var(--write)">ALL possible query results</text><text x="340" y="72" text-anchor="middle" font-size="8" fill="var(--write)">precomputed…</text>
+      <path d="M200 62 L 216 62" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12b-w)"/>
+      <path d="M476 62 L 464 62" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12b-r)"/>
+      <text x="220" y="112" font-size="8" fill="var(--bad)">infinite queries → infinite write-time work. Impossible.</text></g>
+    <g data-on="4"><rect x="250" y="26" width="180" height="34" rx="6" fill="var(--panel2)" stroke="var(--write)" stroke-width="1.2"/><text x="340" y="47" text-anchor="middle" font-size="8" fill="var(--write)">cache of common queries</text>
+      <rect x="250" y="66" width="180" height="34" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="340" y="87" text-anchor="middle" font-size="8">index for the rest</text>
+      <path d="M200 56 L 246 44" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a12b-w)"/>
+      <path d="M200 68 L 246 82" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a12b-w)"/>
+      <path d="M476 56 L 434 44" stroke="var(--read)" stroke-width="1.6" marker-end="url(#a12b-r)"/>
+      <path d="M476 68 L 434 82" stroke="var(--read)" stroke-width="1.6" marker-end="url(#a12b-r)"/>
+      <text x="240" y="118" font-size="8" opacity=".85">common queries answered instantly; rare ones do read-path work</text></g>
+    <g data-on="5"><rect x="270" y="34" width="140" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="340" y="56" text-anchor="middle" font-size="9" font-weight="700">home timelines</text><text x="340" y="72" text-anchor="middle" font-size="8" opacity=".7">(materialized caches)</text>
+      <path d="M200 62 L 266 62" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12b-w)"/><text x="200" y="30" font-size="8" fill="var(--write)">fan-out on tweet</text>
+      <path d="M476 62 L 414 62" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12b-r)"/><text x="420" y="30" font-size="8" fill="var(--read)">read = cheap</text>
+      <text x="220" y="112" font-size="8" opacity=".85">celebrities: fan-out too expensive → shift work BACK to the read path for them</text></g>
+    <g data-on="6"><rect x="270" y="34" width="140" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".7"/><text x="340" y="66" text-anchor="middle" font-size="9" font-weight="700">derived dataset</text>
+      <path d="M200 62 L 266 62" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12b-w)"/>
+      <path d="M476 62 L 414 62" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12b-r)"/>
+      <path d="M340 90 L 340 128" stroke="currentColor" stroke-opacity=".5" stroke-width="1.2"/>
+      <text x="340" y="146" text-anchor="middle" font-size="8" opacity=".85">← slide the boundary: more precomputation ⇄ more query-time work →</text></g>
+    <!-- eager/lazy annotation -->
+    <text x="20" y="186" font-size="8" opacity=".7">functional-programming lens: write path ≈ eager evaluation · read path ≈ lazy evaluation</text>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="286" font-size="9" opacity=".85">Figure 12-1: writes update the search index eagerly; reads query it lazily. They meet at the index.</text></g>
+    <g data-on="2"><text x="20" y="286" font-size="9" opacity=".85">remove the index: writes cost nothing extra, but every query greps all documents. Fine when small.</text></g>
+    <g data-on="3"><text x="20" y="286" font-size="9" opacity=".85">other extreme: precompute results for every possible query. Reads free; writes infinite. No.</text></g>
+    <g data-on="4"><text x="20" y="286" font-size="9" opacity=".85">middle ground: cache results of COMMON queries (a materialized view); index serves the rest.</text></g>
+    <g data-on="5"><text x="20" y="286" font-size="9" opacity=".85">full circle to ch 1: Twitter fans out tweets into home-timeline caches — and draws the boundary</text><text x="20" y="302" font-size="9" opacity=".85">differently for celebrities, whose followers do the join at read time instead.</text></g>
+    <g data-on="6"><text x="20" y="286" font-size="9" opacity=".85">caches, indexes, materialized views all do one thing: shift work between write path and read path.</text></g>
+    <defs>
+      <marker id="a12b-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a12b-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>WHERE PATHS MEET</strong> A search index: the write path updates index entries for every term in a changed document (eager, precomputed); the read path parses the query and searches (lazy, on demand). The derived dataset is the meeting point, and both sides do real work.</li>
+  <li><strong>NO INDEX</strong> Drop the index and writes get cheaper — nothing to maintain — but every query must scan all documents, like grep. Viable only for tiny corpora: the boundary has been pushed all the way toward the read path.</li>
+  <li><strong>PRECOMPUTE EVERYTHING</strong> The opposite extreme: precompute the results of all possible queries. Reads become trivial lookups, but the set of possible queries is infinite, so the write path would need infinite time and storage. The boundary can't be pushed all the way to the write path either.</li>
+  <li><strong>CACHE COMMON QUERIES</strong> Practical middle ground: precompute results for only the most common queries — a cache, or equally a materialized view, since it must be kept up to date as new documents arrive. Rare queries fall through to the index.</li>
+  <li><strong>FULL CIRCLE</strong> This is the <a class="xref back" href="ch01-reliable-scalable-maintainable.html#describing-load" data-tip="Ch 1 · Describing Load — Twitter's fan-out: precompute home timelines at write time; celebrities handled at read time">Twitter example from Chapter&nbsp;1<sup>←1</sup></a>: fan-out materializes each home timeline at write time, except for celebrities, where the boundary is drawn at read time. After 500 pages, the book's first example turns out to have been about the write/read-path boundary all along.</li>
+  <li><strong>THE ABSTRACTION</strong> Caches, indexes, and materialized views are all the same move: do more work on the write path to save effort on the read path. Where to draw the line is a per-workload engineering decision — and the next question is how far toward the user the write path can be extended.</li>
+</ol>
+</figure>
+
+<h4>Stateful, offline-capable clients</h4>
+<p>The client/server model — stateless clients, authoritative servers — is an assumption, not a law. Single-page apps and mobile apps hold real state on the device and work offline; <strong>offline-first</strong> applications do as much as possible against a local database and sync in the background (<a class="xref back" href="ch05-replication.html#use-cases-for-multi-leader-replication" data-tip="Ch 5 · Use Cases for Multi-Leader Replication — a device's local database as a leader; sync = replication">Chapter&nbsp;5<sup>←5</sup></a>). Then the on-device state is <em>a cache of state on the server</em>: the pixels on screen are a materialized view onto client-side model objects, which are a replica of state in a datacenter — the write/read-path picture extended one more hop.</p>
+
+<h4>Pushing state changes to clients</h4>
+<p>A loaded web page is a stale snapshot — a read done once, never updated unless you poll (RSS is just polling). Server-sent events (EventSource) and WebSockets keep a TCP connection open so the server can <em>push</em> changes: the write path extended all the way to the end user. Offline devices? Already solved — a consumer of a log-based broker resumes from its <a class="xref back" href="ch11-stream-processing.html#partitioned-logs" data-tip="Ch 11 · Partitioned Logs — a consumer's offset lets it reconnect and miss nothing">offset<sup>←11</sup></a> after disconnection; each device is a small subscriber to a small stream.</p>
+
+<figure>
+<svg viewBox="0 0 680 170" role="img" aria-label="An end-to-end event stream: user interaction on device A becomes an event in a log, flows through stream processors that update derived views, and is pushed over a WebSocket to the user interface on device B, with under a second of end-to-end delay.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="20" y="50" width="86" height="46" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+    <text x="63" y="69" text-anchor="middle" font-size="9" fill="var(--write)">device A</text>
+    <text x="63" y="84" text-anchor="middle" font-size="8" fill="var(--write)">interaction</text>
+    <path d="M106 73 L 148 73" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f125-w)"/>
+    <text x="127" y="64" text-anchor="middle" font-size="8" fill="var(--write)">event</text>
+    <rect x="150" y="50" width="96" height="46" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="198" y="76" text-anchor="middle" font-size="9">event log</text>
+    <path d="M246 73 L 288 73" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f125-w)"/>
+    <rect x="290" y="50" width="130" height="46" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="355" y="69" text-anchor="middle" font-size="9">stream processors</text>
+    <text x="355" y="84" text-anchor="middle" font-size="8" opacity=".7">derived views</text>
+    <path d="M420 73 L 462 73" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f125-w)"/>
+    <text x="441" y="64" text-anchor="middle" font-size="8" fill="var(--write)">push</text>
+    <rect x="464" y="50" width="110" height="46" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="519" y="69" text-anchor="middle" font-size="9">WebSocket /</text>
+    <text x="519" y="84" text-anchor="middle" font-size="9">EventSource</text>
+    <path d="M574 73 L 606 73" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f125-w)"/>
+    <rect x="608" y="50" width="58" height="46" rx="6" fill="var(--panel2)" stroke="var(--read)" stroke-width="1.5"/>
+    <text x="637" y="69" text-anchor="middle" font-size="9" fill="var(--read)">device B</text>
+    <text x="637" y="84" text-anchor="middle" font-size="8" fill="var(--read)">UI updates</text>
+    <text x="20" y="126" font-size="9" opacity=".85">the write path extended to the end user: state changes flow device → log → derivations → other devices,</text>
+    <text x="20" y="142" font-size="9" opacity=".85">end to end in under a second. Initial page load still uses the read path; thereafter, subscribe.</text>
+    <defs>
+      <marker id="f125-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>End-to-end event streams.</strong> Instant messaging and online games already work this way; the proposal is to build <em>all</em> applications like this. The obstacle is nothing technical so much as an ingrained assumption: databases, libraries, frameworks, and protocols are all built around stateless request/response, and "a request that returns a stream of responses over time" is barely supported anywhere.</figcaption>
+</figure>
+
+<h4>End-to-end event streams</h4>
+<p>Tools like Elm and React/Flux/Redux already manage client state as a stream of events, structured like event sourcing. Extending that pipeline so <em>servers</em> can push state-change events into it gives the picture above: state changes flowing from one device's interaction, through logs and derivations, to another device's UI, with sub-second delay. Building this way means moving from request/response to <strong>publish/subscribe dataflow</strong> throughout the stack — worth it, Kleppmann argues, for more responsive UIs and real offline support. When designing systems: <em>keep the option of subscribing to changes, not just querying current state</em>.</p>
+
+<h4>Reads are events too</h4>
+<p>Writes go through the log; reads usually go straight to the store — the store being the boundary where the two paths meet. But reads can <em>also</em> be represented as events, routed to the same operator as the writes: the processor responds by emitting the result onto an output stream. Then serving a query is literally a <strong>stream-table join</strong> between the query stream and the data (<a class="xref back" href="ch11-stream-processing.html#stream-joins" data-tip="Ch 11 · Stream Joins — a one-off read is a passing join; a subscription is a persistent join">Chapter&nbsp;11<sup>←11</sup></a>) — the read event is co-partitioned with the data it reads, just like any join (<a class="xref back" href="ch06-partitioning.html#request-routing" data-tip="Ch 6 · Request Routing — sending a request to the partition that holds its key">Chapter&nbsp;6<sup>←6</sup></a>). A one-off read passes through the join and is forgotten; a subscription is a standing join with future events. Recording read events buys <strong>causal-dependency tracking</strong> — you can reconstruct what the user <em>saw</em> before they acted (the fix the unfriend example needed), e.g. the shipping estimate shown before a purchase — at the cost of extra storage and I/O.</p>
+
+<h4>Multi-partition data processing</h4>
+<p>For single-partition queries, a query stream is overkill. Its payoff is queries that must combine data from <em>many</em> partitions: the stream processor's message routing, partitioning, and joining infrastructure does the distributed execution. Storm's distributed RPC computed "how many people have seen this URL" — the union of the follower sets of everyone who tweeted it; fraud scoring joins a purchase event against differently partitioned reputation databases for IP, email, billing and shipping addresses. MPP databases do this internally (<a class="xref back" href="ch10-batch-processing.html#comparing-hadoop-to-distributed-databases" data-tip="Ch 10 · Comparing Hadoop to Distributed Databases — MPP engines parallelize a query across nodes">Chapter&nbsp;10<sup>←10</sup></a>) — use one if it fits; streams are the option when applications outgrow off-the-shelf limits.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · offline-first grew a research field — and Kleppmann leads it</span>
+The "stateful, offline-capable clients" thread is the one part of this chapter whose author personally built the future it predicts: after the 1st edition, Kleppmann co-authored the <em>local-first software</em> manifesto (2019) and drives the Automerge CRDT project. The 2nd edition folds this in as sync engines and CRDTs — conflict-resolved replicated data on end-user devices, the multi-leader story of <a class="xref back" href="ch05-replication.html#handling-write-conflicts" data-tip="Ch 5 · Handling Write Conflicts — convergent conflict resolution; CRDTs merge concurrent edits automatically">Chapter&nbsp;5<sup>←5</sup></a> made a first-class application architecture rather than a curiosity. <em>[the sync-engine/CRDT addition is from the deltas research's edition-wide findings; its exact chapter placement in the 2nd ed is inferred]</em></div>
+</section>
+<!-- ================================================================ -->
+<section class="concept" id="aiming-for-correctness">
+<span class="key-chip">aiming-for-correctness</span>
+<h2><a class="self" href="#aiming-for-correctness">Aiming for Correctness</a></h2>
+
+<p>Stateless read-only services shrug off bugs — fix, restart, done. Stateful systems remember things forever, so mistakes potentially last forever. And our engineering methods here are surprisingly flaky: transactions' foundations are weaker than they look (witness the confusion of <a class="xref back" href="ch07-transactions.html#weak-isolation-levels" data-tip="Ch 7 · Weak Isolation Levels — read committed, snapshot isolation; each allows different races">weak isolation levels<sup>←7</sup></a>); some systems abandoned transactions entirely for messier semantics (<a class="xref back" href="ch05-replication.html#leaderless-replication" data-tip="Ch 5 · Leaderless Replication — Dynamo-style quorums; better availability, messier semantics">Chapter&nbsp;5<sup>←5</sup></a>); "consistency" is much invoked and poorly defined (<a class="xref back" href="ch09-consistency-and-consensus.html#consistency-guarantees" data-tip="Ch 9 · Consistency Guarantees — eventual consistency is a weak convergence promise, nothing more">Chapter&nbsp;9<sup>←9</sup></a>); and Kyle Kingsbury's Jepsen experiments keep finding daylight between products' claimed guarantees and their behavior under network faults. Serializability and atomic commit are established but costly — single-datacenter, limited scale. This section proposes ways of thinking about correctness for dataflow architectures.</p>
+
+<h3 id="the-end-to-end-argument-for-databases"><a class="self" href="#the-end-to-end-argument-for-databases">The End-to-End Argument for Databases</a></h3>
+<span class="key-chip">the-end-to-end-argument-for-databases</span>
+
+<p>Using a data system with strong safety properties does not make your application correct. If the application writes wrong data or deletes good data, serializable transactions won't save you. (Immutable, append-only data helps you recover from buggy code — <a class="xref back" href="ch11-stream-processing.html#state-streams-and-immutability" data-tip="Ch 11 · State, Streams, and Immutability — faulty code can't destroy good data if data is immutable">Chapter&nbsp;11<sup>←11</sup></a> — but it is not a cure-all.) A subtler corruption: <strong>processing a message twice</strong>. Exactly-once semantics (<a class="xref back" href="ch11-stream-processing.html#fault-tolerance" data-tip="Ch 11 · Fault Tolerance — arrange the computation so the effect is as if no fault occurred">Chapter&nbsp;11<sup>←11</sup></a>) means arranging that the final effect is as if no fault occurred, typically via <em>idempotence</em> — which takes real care: extra metadata (which operation IDs have been applied), plus <a class="xref back" href="ch08-trouble-with-distributed-systems.html#the-truth-is-defined-by-the-majority" data-tip="Ch 8 · The Truth Is Defined by the Majority — fencing tokens stop a paused zombie from writing">fencing<sup>←8</sup></a> across failovers. Where duplicates come from, and why no single layer can suppress them:</p>
+
+<figure class="anim" id="anim-dedup">
+<svg viewBox="0 0 680 330" role="img" aria-label="A money transfer is submitted from a browser. The database transaction commits but the connection drops before the confirmation reaches the user, who retries; without an end-to-end operation identifier the transfer executes twice, since TCP deduplication only covers one connection and the retry is a new transaction. Adding a client-generated request ID with a uniqueness constraint makes the retry harmlessly abort.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- actors -->
+    <rect x="20" y="40" width="90" height="48" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="65" y="60" text-anchor="middle" font-size="9" font-weight="700">browser</text>
+    <text x="65" y="76" text-anchor="middle" font-size="8" opacity=".7">weak signal</text>
+    <rect x="270" y="40" width="110" height="48" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="325" y="60" text-anchor="middle" font-size="9" font-weight="700">app server</text>
+    <text x="325" y="76" text-anchor="middle" font-size="8" opacity=".7">POST /transfer</text>
+    <rect x="540" y="40" width="120" height="48" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="600" y="60" text-anchor="middle" font-size="9" font-weight="700">database</text>
+    <text x="600" y="76" text-anchor="middle" font-size="8" opacity=".7">accounts table</text>
+    <!-- step 1: happy-ish path -->
+    <g data-on="1-2"><path d="M110 56 L 266 56" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12d-w)"/><text x="150" y="48" font-size="8" fill="var(--write)">POST: A→B $11</text>
+      <path d="M380 56 L 536 56" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12d-w)"/><text x="420" y="48" font-size="8" fill="var(--write)">BEGIN…COMMIT</text></g>
+    <g data-on="1"><text x="600" y="110" text-anchor="middle" font-size="9" fill="var(--write)">balance: −11 / +11 ✓</text></g>
+    <!-- step 2: response lost -->
+    <g data-on="2-6"><text x="600" y="110" text-anchor="middle" font-size="9" fill="var(--write)">committed ✓</text></g>
+    <g data-on="2" data-hot="2"><path d="M536 70 L 380 70" stroke="currentColor" stroke-opacity=".6" stroke-width="1.4" marker-end="url(#a12d-n)"/><path d="M266 70 L 200 70" stroke="currentColor" stroke-opacity=".6" stroke-width="1.4"/><text x="180" y="94" font-size="9" fill="var(--bad)">✂ connection drops — confirmation never arrives</text></g>
+    <!-- step 3: retry duplicates -->
+    <g data-on="3" data-hot="3"><path d="M110 62 L 266 62" stroke="var(--bad)" stroke-width="2" marker-end="url(#a12d-b)"/><text x="128" y="98" font-size="8" fill="var(--bad)">"resubmit form?" → yes</text>
+      <path d="M380 62 L 536 62" stroke="var(--bad)" stroke-width="2" marker-end="url(#a12d-b)"/><text x="430" y="98" font-size="8" fill="var(--bad)">new TCP conn, new txn</text>
+      <text x="600" y="128" text-anchor="middle" font-size="9" fill="var(--bad)">−22 / +22 ✗ TWICE</text></g>
+    <!-- step 4: layers that don't help -->
+    <g data-on="4"><rect x="20" y="140" width="640" height="76" rx="6" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="4 3"/>
+      <text x="30" y="158" font-size="9" font-weight="700">why each layer's dedup fails to catch it:</text>
+      <text x="30" y="176" font-size="9">TCP seq numbers — dedupe within ONE connection; the retry is a new connection</text>
+      <text x="30" y="192" font-size="9">2PC — lets a coordinator reconnect &amp; finish a txn, but the user's retry is a NEW transaction</text>
+      <text x="30" y="208" font-size="9">web tier — Post/Redirect/Get avoids the warning dialog, not a timed-out POST</text></g>
+    <!-- step 5: request id -->
+    <g data-on="5-6"><rect x="20" y="140" width="304" height="60" rx="6" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/>
+      <text x="30" y="158" font-size="9" fill="var(--write)" font-weight="700">end-to-end fix: operation ID</text>
+      <text x="30" y="176" font-size="8" fill="var(--write)">hidden form field: req = 0286FDB8… (UUID),</text>
+      <text x="30" y="192" font-size="8" fill="var(--write)">same on every retry of this one submission</text></g>
+    <g data-on="5-6"><rect x="356" y="140" width="304" height="60" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+      <text x="366" y="158" font-size="9" font-weight="700">in the database:</text>
+      <text x="366" y="176" font-size="8">INSERT INTO requests(request_id,…) —</text>
+      <text x="366" y="192" font-size="8">UNIQUE(request_id) + balance updates, one txn</text></g>
+    <g data-on="6" data-hot="6"><path d="M110 62 L 266 62" stroke="var(--write)" stroke-width="2" marker-end="url(#a12d-w)"/><text x="140" y="98" font-size="8" fill="var(--write)">retry, same req ID</text>
+      <path d="M380 62 L 536 62" stroke="var(--write)" stroke-width="2" marker-end="url(#a12d-w)"/>
+      <text x="600" y="128" text-anchor="middle" font-size="9" fill="var(--ok)">duplicate INSERT → abort ✓</text></g>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="266" font-size="9" opacity=".85">a browser submits a transfer; the app server runs the transaction; the database commits. Fine.</text></g>
+    <g data-on="2"><text x="20" y="266" font-size="9" opacity=".85">the cellular signal dies after COMMIT but before the response. The user sees an error — did it work?</text></g>
+    <g data-on="3"><text x="20" y="266" font-size="9" opacity=".85">the user retries (the browser even asks politely). New connection, new transaction: $22 moves.</text><text x="20" y="282" font-size="9" opacity=".85">Example 12-1 is the textbook atomicity example — and it is not actually correct end to end.</text></g>
+    <g data-on="4"><text x="20" y="266" font-size="9" opacity=".85">every layer deduplicates only within its own scope. None of them can see that these two</text><text x="20" y="282" font-size="9" opacity=".85">transactions are the same user intention.</text></g>
+    <g data-on="5"><text x="20" y="266" font-size="9" opacity=".85">so carry the intention itself: the client mints one operation ID for the submission and every</text><text x="20" y="282" font-size="9" opacity=".85">retry carries it. The database records it in a table with a uniqueness constraint (Example 12-2).</text></g>
+    <g data-on="6"><text x="20" y="266" font-size="9" opacity=".85">the retry's INSERT violates UNIQUE(request_id) → transaction aborts → applied exactly once.</text><text x="20" y="282" font-size="9" opacity=".85">Bonus: the requests table is an event log — the balance updates could be derived downstream.</text></g>
+    <defs>
+      <marker id="a12d-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a12d-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+      <marker id="a12d-n" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" fill-opacity=".6"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>HAPPY PATH</strong> A browser POSTs a transfer of $11 from account A to B; the app server runs the transaction (Example 12-1); the database commits atomically. Textbook.</li>
+  <li><strong>LOST CONFIRMATION</strong> The network fails after the COMMIT but before the response reaches the user (the <a class="xref back" href="ch08-trouble-with-distributed-systems.html#unreliable-networks" data-tip="Ch 8 · Unreliable Networks — a lost reply is indistinguishable from a lost request">Chapter&nbsp;8<sup>←8</sup></a> ambiguity). The user cannot know whether the transfer happened.</li>
+  <li><strong>DOUBLE SPEND</strong> The user retries. From the server's view it's a separate request; from the database's, a separate transaction. Example 12-1 is not idempotent, so $22 moves. The standard example of transaction atomicity is, end to end, <em>wrong</em> — real banks do not work like this.</li>
+  <li><strong>NO LAYER SAVES YOU</strong> TCP suppresses duplicate packets — within one connection. 2PC survives coordinator reconnects — within one transaction. The web tier's Post/Redirect/Get avoids resubmission dialogs — not timed-out POSTs. Each layer's guarantee is scoped too narrowly to recognize the duplicate <em>intention</em>.</li>
+  <li><strong>OPERATION ID</strong> The fix must ride with the request end to end: the client generates a UUID (or a hash of the form fields) that is identical on every retry. The transaction INSERTs it into a <code>requests</code> table with a uniqueness constraint, alongside the balance updates (Example 12-2).</li>
+  <li><strong>EXACTLY ONCE</strong> A retried submission tries to INSERT the same request ID, violates the constraint, and aborts — duplicate suppressed, even at weak isolation levels (uniqueness constraints hold where an application-level check-then-insert would fall to <a class="xref back" href="ch07-transactions.html#write-skew-and-phantoms" data-tip="Ch 7 · Write Skew and Phantoms — check-then-act races under nonserializable isolation">write skew<sup>←7</sup></a>). And the requests table is an event log in disguise: the balance updates are derivable from it, pointing straight at event sourcing.</li>
+</ol>
+</figure>
+
+<h4>The end-to-end argument</h4>
+<p>This is an instance of the <strong>end-to-end argument</strong> (Saltzer, Reed &amp; Clark, 1984): a function like duplicate suppression "can completely and correctly be implemented only with the knowledge and help of the application standing at the endpoints" — a lower layer's version can be a useful performance optimization, never the whole answer. Same for <strong>integrity</strong>: Ethernet, TCP, and TLS checksums catch network corruption but not bugs at either end or rot on disk — only an end-to-end checksum catches everything. Same for <strong>encryption</strong>: WiFi passwords stop snooping neighbors, TLS stops network attackers, but only end-to-end encryption protects against the server itself. The low-level features remain worth having (they make higher-level faults rare); they are just not sufficient.</p>
+
+<h4>Applying end-to-end thinking in data systems</h4>
+<p>The uncomfortable conclusion: <em>your application needs its own end-to-end correctness measures, and transactions alone were never enough</em>. Transactions were a beautiful abstraction — collapsing concurrency, constraint violations, crashes, network faults into "commit or abort" — but they are expensive (especially heterogeneous/XA, <a class="xref back" href="ch09-consistency-and-consensus.html#distributed-transactions-in-practice" data-tip="Ch 9 · Distributed Transactions in Practice — XA: fsyncs, round trips, coordinator as single point of failure">Chapter&nbsp;9<sup>←9</sup></a>), and when teams refuse them on performance grounds they end up reimplementing fault tolerance in application code — where reasoning about concurrency and partial failure reliably goes wrong. The abstraction that would wrap up end-to-end fault tolerance cheaply — the successor to the transaction — has not been found yet. The rest of this section assembles the best current candidate from parts we already have.</p>
+
+<h3 id="enforcing-constraints"><a class="self" href="#enforcing-constraints">Enforcing Constraints</a></h3>
+<span class="key-chip">enforcing-constraints</span>
+
+<h4>Uniqueness constraints require consensus</h4>
+<p>A username must identify one user; a seat sells once; a balance stays non-negative; stock doesn't go below zero; meeting rooms don't double-book — most such constraints reduce to uniqueness-style enforcement. In a distributed setting, enforcing uniqueness <strong>requires consensus</strong> (<a class="xref back" href="ch09-consistency-and-consensus.html#relying-on-linearizability" data-tip="Ch 9 · Relying on Linearizability — hard uniqueness constraints need one up-to-date value all nodes agree on">Chapter&nbsp;9<sup>←9</sup></a>): several concurrent claims on the same value, one accepted, the rest rejected. The usual implementation is a single leader (funnel everything through one node; if it fails you're back at consensus); it scales out by <strong>partitioning by the constrained value</strong> — requests for the same username hash to the same partition (<a class="xref back" href="ch06-partitioning.html#partitioning-by-hash-of-key" data-tip="Ch 6 · Partitioning by Hash of Key — a stable hash maps each key to one partition">Chapter&nbsp;6<sup>←6</sup></a>). Asynchronous multi-leader replication is ruled out: masters that independently accept conflicting writes destroy uniqueness. If you must reject violations immediately, synchronous coordination is unavoidable.</p>
+
+<h4>Uniqueness in log-based messaging</h4>
+<p>The log gives the same guarantee in unbundled form — it <em>is</em> total order broadcast, which is equivalent to consensus:</p>
+
+<figure class="anim" id="anim-unique">
+<svg viewBox="0 0 680 300" role="img" aria-label="Three clients concurrently claim the username tony. All three requests are appended to the log partition chosen by hashing the username, which fixes a total order. A single-threaded stream processor reads the partition sequentially, grants the first claim, rejects the other two, and emits the decisions to an output stream that the clients watch.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- clients -->
+    <rect x="20" y="34" width="76" height="30" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="58" y="53" text-anchor="middle" font-size="9" fill="var(--write)">client A</text>
+    <rect x="20" y="74" width="76" height="30" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="58" y="93" text-anchor="middle" font-size="9" fill="var(--write)">client B</text>
+    <rect x="20" y="114" width="76" height="30" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="58" y="133" text-anchor="middle" font-size="9" fill="var(--write)">client C</text>
+    <g data-on="1"><text x="110" y="53" font-size="8" fill="var(--write)">claim "tony"</text><text x="110" y="93" font-size="8" fill="var(--write)">claim "tony"</text><text x="110" y="133" font-size="8" fill="var(--write)">claim "tony"</text></g>
+    <!-- log partition -->
+    <g data-on="2-6"><path d="M96 49 C 140 49, 160 70, 196 78" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a12u-w)"/>
+      <path d="M96 89 L 196 89" stroke="var(--write)" stroke-width="1.6" marker-end="url(#a12u-w)"/>
+      <path d="M96 129 C 140 129, 160 106, 196 98" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a12u-w)"/></g>
+    <rect x="200" y="60" width="200" height="62" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="300" y="78" text-anchor="middle" font-size="9" font-weight="700">log partition = hash("tony")</text>
+    <g data-on="1"><text x="300" y="104" text-anchor="middle" font-size="9" opacity=".5">(empty)</text></g>
+    <g data-on="2-6" text-anchor="middle" font-size="9"><text x="240" y="104">0: B</text><text x="300" y="104">1: C</text><text x="360" y="104">2: A</text></g>
+    <g data-on="2"><text x="200" y="142" font-size="8" opacity=".85">append order — whatever it is — IS the decision order</text></g>
+    <!-- processor -->
+    <rect x="440" y="52" width="150" height="78" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="515" y="70" text-anchor="middle" font-size="9" font-weight="700">stream processor</text>
+    <text x="515" y="84" text-anchor="middle" font-size="8" opacity=".7">single thread, in order</text>
+    <g data-on="1-2"><text x="515" y="108" text-anchor="middle" font-size="8" opacity=".6">taken = {}</text></g>
+    <g data-on="3"><text x="515" y="108" text-anchor="middle" font-size="8" fill="var(--ok)">taken = {tony→B}</text></g>
+    <g data-on="4-6"><text x="515" y="108" text-anchor="middle" font-size="8">taken = {tony→B}</text><text x="515" y="122" text-anchor="middle" font-size="8" fill="var(--bad)">C, A: already taken</text></g>
+    <g data-on="3-6"><path d="M400 91 L 436 91" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12u-r)"/></g>
+    <!-- output stream -->
+    <rect x="200" y="180" width="390 " height="52" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="395" y="198" text-anchor="middle" font-size="9" font-weight="700">output stream (decisions)</text>
+    <g data-on="1-2"><text x="395" y="218" text-anchor="middle" font-size="9" opacity=".5">—</text></g>
+    <g data-on="3"><text x="230" y="218" font-size="9" fill="var(--ok)">B: granted ✓</text></g>
+    <g data-on="4-6"><text x="230" y="218" font-size="9" fill="var(--ok)">B: granted ✓</text><text x="340" y="218" font-size="9" fill="var(--bad)">C: rejected ✗</text><text x="450" y="218" font-size="9" fill="var(--bad)">A: rejected ✗</text></g>
+    <g data-on="4-6"><path d="M515 134 C 515 154, 480 168, 460 178" stroke="var(--write)" stroke-width="1.6" fill="none" marker-end="url(#a12u-w)"/></g>
+    <g data-on="5-6"><path d="M198 206 C 140 206, 100 170, 74 148" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a12u-r)"/><text x="88" y="176" font-size="8" fill="var(--read)">clients await their verdict</text></g>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="266" font-size="9" opacity=".85">three clients race for the username "tony". Someone must pick exactly one winner: consensus.</text></g>
+    <g data-on="2"><text x="20" y="266" font-size="9" opacity=".85">every claim is appended to the SAME partition (hash of the username). The log fixes a total order.</text></g>
+    <g data-on="3"><text x="20" y="266" font-size="9" opacity=".85">a single-threaded processor reads sequentially: first claim for "tony" (B's) wins; recorded locally.</text></g>
+    <g data-on="4"><text x="20" y="266" font-size="9" opacity=".85">later claims find the name taken → rejection messages to the output stream. Deterministic, no locks.</text></g>
+    <g data-on="5"><text x="20" y="266" font-size="9" opacity=".85">each client watches the output stream for the message matching its request — a synchronous</text><text x="20" y="282" font-size="9" opacity=".85">wait bolted onto an asynchronous pipeline.</text></g>
+    <g data-on="6"><text x="20" y="266" font-size="9" opacity=".85">this is "implementing linearizable storage via total order broadcast" (ch 9), unbundled. It scales:</text><text x="20" y="282" font-size="9" opacity=".85">more partitions = more throughput. Works for ANY conflict routable to one partition (Bayou, 1990s).</text></g>
+    <defs>
+      <marker id="a12u-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a12u-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>THE RACE</strong> Several users concurrently request the same username. Exactly one must win — a consensus problem, conventionally solved by funneling requests through a single leader node.</li>
+  <li><strong>ORDER BY APPEND</strong> Every claim is encoded as a message and appended to a partition determined by the hash of the username. Within a partition the log is totally ordered (<a class="xref back" href="ch11-stream-processing.html#partitioned-logs" data-tip="Ch 11 · Partitioned Logs — total order within a partition, offsets, sequential consumption">Chapter&nbsp;11<sup>←11</sup></a>) — whichever append happened first is, by definition, first.</li>
+  <li><strong>SEQUENTIAL DECISION</strong> A stream processor consumes the partition on a single thread, keeping a local database of taken names. The first claim for "tony" is granted and recorded; the processor emits a success message.</li>
+  <li><strong>REJECTIONS</strong> Every later claim for the same name deterministically fails: the processor emits rejections. No locks, no heartbeats — the ordering already happened at append time.</li>
+  <li><strong>CLIENTS WAIT</strong> The client that sent a claim watches the output stream for the decision on its request — synchronously informing the sender, though the enforcement itself never depended on the sender waiting.</li>
+  <li><strong>WHY IT'S SOUND</strong> The log provides total order broadcast, which is <a class="xref back" href="ch09-consistency-and-consensus.html#total-order-broadcast" data-tip="Ch 9 · Total Order Broadcast — equivalent to consensus; the algorithm here is ch 9's linearizable-storage recipe">equivalent to consensus<sup>←9</sup></a> — this is Chapter 9's linearizable-CAS-via-log algorithm wearing streaming clothes. The principle generalizes: <em>any writes that may conflict get routed to the same partition and processed sequentially</em>, with arbitrary validation logic in the processor.</li>
+</ol>
+</figure>
+
+<h4>Multi-partition request processing</h4>
+<p>What about operations whose data spans partitions? The transfer in Example 12-2 touches three: the request ID's partition, the payer's, the payee's. Traditionally that demands an atomic commit across all three — total order across all their transactions, throughput dies. With logs, equivalent correctness <em>without</em> atomic commit:</p>
+
+<figure class="anim" id="anim-multipartition">
+<svg viewBox="0 0 680 310" role="img" aria-label="A multi-partition money transfer without atomic commit. The transfer request is appended as one message to a log partitioned by request ID — a single atomic write. A stream processor reads it and emits a debit instruction to account A's partition and a credit instruction to account B's partition, both carrying the request ID. Downstream processors apply them, deduplicating by request ID. A crash and restart of the middle processor re-emits duplicates, which the deduplication makes harmless.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <!-- request log -->
+    <rect x="20" y="46" width="120" height="54" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="80" y="64" text-anchor="middle" font-size="9" font-weight="700">request log</text>
+    <text x="80" y="78" text-anchor="middle" font-size="8" opacity=".7">partition: req ID</text>
+    <g data-on="1-6"><text x="80" y="94" text-anchor="middle" font-size="8" fill="var(--write)">{r7: A→B $11}</text></g>
+    <!-- processor 1 -->
+    <rect x="220" y="40" width="150" height="66" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="295" y="58" text-anchor="middle" font-size="9" font-weight="700">splitter processor</text>
+    <text x="295" y="72" text-anchor="middle" font-size="8" opacity=".7">deterministic, checkpointed</text>
+    <g data-on="4" data-hot="4"><rect x="218" y="38" width="154" height="70" rx="7" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 3"/><text x="295" y="96" text-anchor="middle" font-size="8" fill="var(--bad)">CRASH → restart</text></g>
+    <g data-on="2-3,5-6"><path d="M140 73 L 216 73" stroke="var(--read)" stroke-width="1.8" marker-end="url(#a12m-r)"/></g>
+    <!-- instruction streams -->
+    <rect x="440" y="20" width="220" height="46" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="550" y="38" text-anchor="middle" font-size="9">debit stream · partition: acct A</text>
+    <g data-on="2-3"><text x="550" y="54" text-anchor="middle" font-size="8" fill="var(--write)">{r7: A −11}</text></g>
+    <g data-on="4-6"><text x="550" y="54" text-anchor="middle" font-size="8" fill="var(--write)">{r7: A −11} {r7: A −11} dup!</text></g>
+    <rect x="440" y="86" width="220" height="46" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="550" y="104" text-anchor="middle" font-size="9">credit stream · partition: acct B</text>
+    <g data-on="2-3"><text x="550" y="120" text-anchor="middle" font-size="8" fill="var(--write)">{r7: B +11}</text></g>
+    <g data-on="4-6"><text x="550" y="120" text-anchor="middle" font-size="8" fill="var(--write)">{r7: B +11} {r7: B +11} dup!</text></g>
+    <g data-on="2,5"><path d="M370 60 L 436 46" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12m-w)"/><path d="M370 86 L 436 106" stroke="var(--write)" stroke-width="1.8" marker-end="url(#a12m-w)"/></g>
+    <!-- appliers -->
+    <rect x="440" y="170" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="490" y="188" text-anchor="middle" font-size="8" font-weight="700">applier A</text>
+    <g data-on="3-6"><text x="490" y="204" text-anchor="middle" font-size="8">seen: {r7}</text><text x="490" y="218" text-anchor="middle" font-size="8" fill="var(--ok)">bal −11 once</text></g>
+    <rect x="560" y="170" width="100" height="56" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="610" y="188" text-anchor="middle" font-size="8" font-weight="700">applier B</text>
+    <g data-on="3-6"><text x="610" y="204" text-anchor="middle" font-size="8">seen: {r7}</text><text x="610" y="218" text-anchor="middle" font-size="8" fill="var(--ok)">bal +11 once</text></g>
+    <g data-on="3,6"><path d="M486 54 C 430 66, 430 148, 482 166" stroke="var(--read)" stroke-width="1.6" fill="none" marker-end="url(#a12m-r)"/><path d="M614 132 L 611 166" stroke="var(--read)" stroke-width="1.6" marker-end="url(#a12m-r)"/></g>
+    <g data-on="6"><text x="440" y="246" font-size="8" fill="var(--ok)">dedup by r7 → second copies ignored ✓</text></g>
+    <!-- optional validator note -->
+    <g data-on="1"><text x="20" y="130" font-size="8" opacity=".7">(optionally: a validator partitioned by payer</text><text x="20" y="144" font-size="8" opacity=".7">admits only affordable requests into this log)</text></g>
+    <!-- captions -->
+    <g data-on="1"><text x="20" y="276" font-size="9" opacity=".85">the whole transfer is ONE message, appended to a log partitioned by request ID. Single-object</text><text x="20" y="292" font-size="9" opacity=".85">append is atomic in almost every system — it's in the log, or it isn't. No multi-partition commit.</text></g>
+    <g data-on="2"><text x="20" y="276" font-size="9" opacity=".85">a processor reads the request and emits TWO instructions — debit to A's partition, credit to B's —</text><text x="20" y="292" font-size="9" opacity=".85">each carrying the original request ID r7.</text></g>
+    <g data-on="3"><text x="20" y="276" font-size="9" opacity=".85">downstream appliers consume their streams and update the balances, remembering r7 as applied.</text></g>
+    <g data-on="4"><text x="20" y="276" font-size="9" opacity=".85">the splitter crashes and restarts from its checkpoint. It reprocesses r7 and re-emits both</text><text x="20" y="292" font-size="9" opacity=".85">instructions — duplicates now sit in both streams.</text></g>
+    <g data-on="5"><text x="20" y="276" font-size="9" opacity=".85">but the splitter is deterministic: the duplicates are byte-identical, same request ID.</text></g>
+    <g data-on="6"><text x="20" y="276" font-size="9" opacity=".85">appliers dedup by r7: each balance changed exactly once, both or neither — the atomic-commit</text><text x="20" y="292" font-size="9" opacity=".85">guarantee, achieved by fault-tolerant streams + end-to-end IDs, with partitions still independent.</text></g>
+    <defs>
+      <marker id="a12m-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="a12m-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--read)"/></marker>
+    </defs>
+  </g>
+</svg>
+<div class="ctl">
+  <button class="prev">◀ prev</button>
+  <button class="next">next ▶</button>
+  <button class="restart">↺</button>
+  <span class="count"></span>
+</div>
+<ol class="cap">
+  <li><strong>ONE ATOMIC APPEND</strong> The client's transfer request — payer, payee, amount, a unique request ID — is durably logged as a <em>single message</em> in a partition chosen by request ID. Single-object writes are atomic essentially everywhere (<a class="xref back" href="ch07-transactions.html#single-object-and-multi-object-operations" data-tip="Ch 7 · Single-Object and Multi-Object Operations — per-object atomicity is cheap; multi-object is what costs">Chapter&nbsp;7<sup>←7</sup></a>): the request is in the log or it isn't. If the client sent debit and credit directly, <em>that</em> would need atomic commit across two partitions.</li>
+  <li><strong>DERIVE THE PIECES</strong> A stream processor consumes the request log and emits a debit instruction (partitioned by payer account) and a credit instruction (partitioned by payee account), both stamped with the request ID.</li>
+  <li><strong>APPLY</strong> Further processors consume the instruction streams and update the account balances, tracking which request IDs they have already applied.</li>
+  <li><strong>CRASH</strong> The splitter dies mid-flight and resumes from its last checkpoint. It skips nothing — but it may reprocess r7 and emit duplicate instructions.</li>
+  <li><strong>DETERMINISM</strong> Because the splitter is deterministic, the re-emitted instructions are identical to the originals, carrying the same end-to-end request ID.</li>
+  <li><strong>EXACTLY ONCE, NO 2PC</strong> Appliers deduplicate by request ID: every request affects both accounts exactly once, under faults, with no coordination between the partitions — which keep processing independently at full throughput. Want overdraft protection? Add a validator processor partitioned by payer that admits requests into the log only after checking the balance.</li>
+</ol>
+</figure>
+
+<h3 id="timeliness-and-integrity"><a class="self" href="#timeliness-and-integrity">Timeliness and Integrity</a></h3>
+<span class="key-chip">timeliness-and-integrity</span>
+
+<p>Notice what the log-based constraint check gave up: the client may have to <em>wait</em> for the outcome to appear on the output stream. Consumers of a log are asynchronous by design. This points at a distinction the word "consistency" conflates — and separating it is the chapter's sharpest conceptual contribution:</p>
+
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>Timeliness</th><th>Integrity</th></tr></thead>
+<tbody>
+<tr><td><strong>Means</strong></td><td>Users observe the system in an up-to-date state</td><td>Absence of corruption: no data lost, none contradictory or false; derived views correctly reflect their sources</td></tr>
+<tr><td><strong>A violation is…</strong></td><td>Temporary — resolved by waiting and retrying (<a class="xref back" href="ch05-replication.html#problems-with-replication-lag" data-tip="Ch 5 · Problems with Replication Lag — stale reads from asynchronous followers, eventually resolved">replication lag<sup>←5</sup></a>)</td><td>Permanent — waiting fixes nothing; needs explicit checking and repair</td></tr>
+<tr><td><strong>Slogan</strong></td><td>"eventual consistency"</td><td>"perpetual inconsistency"</td></tr>
+<tr><td><strong>Related guarantees</strong></td><td>Linearizability (strong), read-after-write (weaker)</td><td>ACID atomicity + durability; exactly-once processing</td></tr>
+<tr><td><strong>Bank statement example</strong></td><td>A transaction from the last 24 h missing from the statement — normal, annoying at worst</td><td>The balance not equaling sum of transactions, or a charge with no matching payout — catastrophic</td></tr>
+</tbody>
+</table></div>
+
+<p>Kleppmann's assertion: <strong>in most applications integrity is far more important than timeliness</strong>. ACID promises both together, so the distinction is invisible there. Event-based dataflow <em>decouples</em> them: no timeliness unless you build waiting in — but integrity is the streaming world's home turf, achieved by combining four mechanisms: (1) the write's content as a <em>single atomically-writable message</em> (event sourcing); (2) all other state derived via <em>deterministic functions</em> (like stored procedures, <a class="xref back" href="ch07-transactions.html#actual-serial-execution" data-tip="Ch 7 · Actual Serial Execution — deterministic transactions run one at a time">Chapter&nbsp;7<sup>←7</sup></a>); (3) a <em>client-generated request ID</em> passed through every level for end-to-end idempotence; (4) <em>immutable messages</em> so derived data can be reprocessed after bugs.</p>
+
+<h4>Loosely interpreted constraints</h4>
+<p>Hard uniqueness needs consensus — but does your business actually need hard uniqueness? Often a violated constraint can be repaired afterwards with an <strong>apology</strong>: two users register the same username — email one to pick another (a <em>compensating transaction</em>); customers buy more than the warehouse holds — order stock, apologize, discount (the same workflow a forklift accident forces anyway); airlines and hotels deliberately overbook and compensate with refunds and upgrades; overdrafts become fees plus a bounded daily-withdrawal risk. The cost of an apology is a business quantity, often low. If it's acceptable, write optimistically, check afterwards — these applications still require <strong>integrity</strong> (don't lose the reservation) but not <strong>timeliness of enforcement</strong>. Coordination and constraints reduce apologies for inconsistency but also reduce availability, thereby increasing apologies for outages; the optimum is not zero of either.</p>
+
+<h4>Coordination-avoiding data systems</h4>
+<p>Two observations compose: dataflow systems keep integrity without atomic commit, linearizability, or synchronous cross-partition coordination; and many constraints can be loose. So <strong>coordination-avoiding</strong> systems can serve real applications with strong integrity but no synchronous coordination — e.g. multi-leader across regions, each datacenter operating independently (<a class="xref back" href="ch05-replication.html#multi-leader-replication" data-tip="Ch 5 · Multi-Leader Replication — asynchronous replication between datacenters">Chapter&nbsp;5<sup>←5</sup></a>), weak timeliness (not linearizable) yet no corruption. Serializable transactions still earn their keep — <em>at small scope</em>, maintaining derived state; heterogeneous XA is not required. Coordination becomes a purchase you make only where the business case (apology cost) justifies it.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · this became the OLEP / sagas program</span>
+The 2nd edition names what this section describes: <strong>OLEP</strong> — online event processing — from Kleppmann, Beresford &amp; Svingen's 2019 CACM paper "Online Event Processing," which canonizes the multi-partition-transfer construction above as the transaction-free alternative for heterogeneous systems. The apology/compensating-transaction thread is carried by the now-mainstream <strong>saga</strong> pattern vocabulary. End-to-end correctness without distributed transactions is a headline theme of Ch&nbsp;13. <em>[inferred from the refs repo: Ch 13's citations are precisely this literature]</em></div>
+
+<h3 id="trust-but-verify"><a class="self" href="#trust-but-verify">Trust, but Verify</a></h3>
+<span class="key-chip">trust-but-verify</span>
+
+<p>Everything so far assumed a <a class="xref back" href="ch08-trouble-with-distributed-systems.html#system-model-and-reality" data-tip="Ch 8 · System Model and Reality — stated assumptions about what can and cannot fail">system model<sup>←8</sup></a>: crashes and network faults happen; fsync'd data survives, memory doesn't corrupt, the CPU multiplies correctly. Binary "can/cannot happen" is really a spectrum of probabilities. Data rots on disk untouched; corruption evades TCP checksums (<a class="xref back" href="ch08-trouble-with-distributed-systems.html#byzantine-faults" data-tip="Ch 8 · Byzantine Faults — weak forms of lying: corrupted messages, bit flips, wrong checksums">Chapter&nbsp;8<sup>←8</sup></a>); at fleet scale, random bit flips in client RAM show up in crash reports; <em>rowhammer</em> flips bits in fault-free memory on purpose. Rare — but not beyond possibility, and therefore deserving attention.</p>
+
+<h4>Maintaining integrity in the face of software bugs</h4>
+<p>Worse than hardware: bugs. MySQL has failed to maintain a uniqueness constraint; PostgreSQL's serializable isolation has exhibited write skew — in two of the most battle-tested databases there are. Application code is far buggier, and frequently misuses even the integrity features databases do offer (many apps skip foreign-key and uniqueness constraints altogether). ACID <em>consistency</em> is built on the assumption that transactions are bug-free; the database cannot save an application that uses it incorrectly.</p>
+
+<h4>Don't just blindly trust what they promise — a culture of verification</h4>
+<p>If corruption is eventually inevitable, you need to <em>find</em> it: checking data integrity is <strong>auditing</strong> — not just for accountants (though finance is auditable precisely because everyone admits mistakes happen). HDFS and S3 don't fully trust disks: background processes continually re-read files against replicas and rotate them across disks. If you don't read your backups occasionally, you'll learn they're broken only after the data is gone. Most systems, though, run on blind trust — the ACID culture taught us to treat correctness guarantees as absolute, then NoSQL's weaker guarantees and younger storage arrived and the auditing habit still didn't. Mature systems <em>self-validate</em>: trust, but verify.</p>
+
+<h4>Designing for auditability</h4>
+<p>A transaction that mutated several tables doesn't say <em>why</em> after the fact — the invocation that decided it is gone. Event-sourced systems are better: user input is one immutable event; state updates derive from it deterministically and reproducibly — run the same log through the same code and get the same result. Explicit dataflow makes provenance clear: hash the event log to verify storage; re-run (or redundantly run) derivations to verify views; the same determinism gives time-travel debugging. And continuous end-to-end integrity checks work like automated tests for your data: increased confidence means you can move faster (like the evolvability argument of <a class="xref back" href="ch01-reliable-scalable-maintainable.html#evolvability-making-change-easy" data-tip="Ch 1 · Evolvability — making change easy through confidence-preserving structure">Chapter&nbsp;1<sup>←1</sup></a>).</p>
+
+<h4>The end-to-end argument again — and cryptographic tools</h4>
+<p>The more systems one integrity check spans, the fewer places corruption can hide — an end-to-end checksum over a whole derived-data pipeline implicitly checks every disk, network, and algorithm on the path. The frontier is <em>cryptographic</em> auditing: cryptocurrencies and distributed ledgers are, from a data-systems view, replicated databases whose mutually untrusting replicas continually cross-check integrity. Kleppmann is skeptical of the Byzantine-fault-tolerance framing and finds proof-of-work "extraordinarily wasteful" — but the integrity machinery is interesting, chiefly <strong>Merkle trees</strong>:</p>
+
+<figure>
+<svg viewBox="0 0 680 218" role="img" aria-label="A Merkle tree: records are hashed, hashes are pairwise hashed up to a single root. Proving that record C is included in the dataset requires only the log-n hashes along its path to the root, not the whole dataset. Certificate transparency uses this to audit TLS certificates.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace" text-anchor="middle">
+    <rect x="290" y="18" width="100" height="26" rx="5" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.5"/><text x="340" y="35" font-size="9" fill="var(--write)">root hash</text>
+    <path d="M310 60 L 332 46" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3"/>
+    <path d="M370 60 L 348 46" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3"/>
+    <rect x="200" y="62" width="90" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="245" y="78" font-size="9">h(AB)</text>
+    <rect x="390" y="62" width="90" height="24" rx="4" fill="var(--panel2)" stroke="var(--read)" stroke-width="1.4"/><text x="435" y="78" font-size="9" fill="var(--read)">h(CD)</text>
+    <path d="M222 104 L 238 88" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3"/>
+    <path d="M268 104 L 252 88" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3"/>
+    <path d="M412 104 L 428 88" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3"/>
+    <path d="M458 104 L 442 88" stroke="currentColor" stroke-opacity=".6" stroke-width="1.3"/>
+    <rect x="180" y="106" width="66" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="213" y="122" font-size="9">h(A)</text>
+    <rect x="252" y="106" width="66" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="285" y="122" font-size="9">h(B)</text>
+    <rect x="366" y="106" width="66" height="24" rx="4" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/><text x="399" y="122" font-size="9">h(C)</text>
+    <rect x="438" y="106" width="66" height="24" rx="4" fill="var(--panel2)" stroke="var(--read)" stroke-width="1.4"/><text x="471" y="122" font-size="9" fill="var(--read)">h(D)</text>
+    <path d="M399 146 L 399 132" stroke="var(--write)" stroke-width="1.5" marker-end="url(#f126-w)"/>
+    <rect x="356" y="148" width="86" height="24" rx="4" fill="var(--write-soft)" stroke="var(--write)" stroke-width="1.4"/><text x="399" y="164" font-size="9" fill="var(--write)">record C</text>
+    <text x="120" y="164" font-size="8" opacity=".85" text-anchor="start">proof that C is included:</text>
+    <text x="120" y="178" font-size="8" opacity=".85" text-anchor="start">just h(D), h(AB), root —</text>
+    <text x="120" y="192" font-size="8" opacity=".85" text-anchor="start">log(n) hashes, not n records</text>
+    <text x="500" y="164" font-size="8" opacity=".85" text-anchor="start">used by certificate transparency</text>
+    <text x="500" y="178" font-size="8" opacity=".85" text-anchor="start">to audit every TLS cert issued —</text>
+    <text x="500" y="192" font-size="8" opacity=".85" text-anchor="start">no blockchain hype required</text>
+    <defs>
+      <marker id="f126-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>Merkle trees</strong> hash records pairwise up to a single root, so proving a record appears in a dataset takes logarithmically few hashes. <em>Certificate transparency</em> already uses them to audit the TLS certificate authorities your browser trusts. Kleppmann's bet: integrity-checking and auditing algorithms of this family become widespread in general data systems — the work needed is making them scale with a low performance penalty.</figcaption>
+</figure>
+
+<div class="ed2"><span class="tag">2ND EDITION · auditing keeps its chapter; the ledger hype cools</span>
+Ch&nbsp;13 retains integrity checking and auditing — certificate transparency and Merkle trees are in its citation set — while the 2017 cryptocurrency survey (Bitcoin, Ethereum, Ripple, Stellar as data systems) ages into a historical footnote; the durable residue is exactly what this section predicted: tamper-evidence machinery, not proof-of-work economics. <em>[inferred from the refs repo]</em></div>
+</section>
+<!-- ================================================================ -->
+<section class="concept" id="doing-the-right-thing">
+<span class="key-chip">doing-the-right-thing</span>
+<h2><a class="self" href="#doing-the-right-thing">Doing the Right Thing</a></h2>
+
+<p>The book's final section steps back from architecture entirely. Every system is built for a purpose, and its consequences reach beyond that purpose; the engineers who build it share responsibility for those consequences. Many datasets are <em>about people</em> — their behavior, interests, identity — and deserve to be treated with humanity and respect: <strong>users are humans too, and human dignity is paramount</strong>. Guidelines exist (the ACM's Software Engineering Code of Ethics) but are rarely discussed or enforced, and engineers and product managers sometimes take a cavalier attitude to privacy as a result. A technology isn't good or bad in itself — what matters is how it's used and whom it affects; focusing on the technology and ignoring the consequences is not an option. Reasoning about ethics is hard; it is also too important to skip.</p>
+
+<div class="feynman"><span class="tag">FEYNMAN · the word-swap test</span>
+Take any proud sentence about your data platform and replace the word <em>data</em> with <em>surveillance</em>: "in our surveillance-driven organization we collect real-time surveillance streams in our surveillance warehouse, and our surveillance scientists derive new insights." If the sentence suddenly sounds sinister, ask what changed — the sentence, or your awareness of what it always described? Kleppmann's own polemic version: the book could be titled <em>Designing Surveillance-Intensive Applications</em>. The test is not a verdict; user-facing features genuinely need some behavioral tracking. It is a probe for the moment the relationship flips — when the tracking stops serving the person being tracked and starts serving whoever funds the tracking.</div>
+
+<h3 id="predictive-analytics"><a class="self" href="#predictive-analytics">Predictive Analytics</a></h3>
+<span class="key-chip">predictive-analytics</span>
+
+<p>Predicting the weather is one thing; predicting whether a convict reoffends, a borrower defaults, an applicant is worth hiring — those decisions hit individual lives. Organizations rationally prefer false "no" over costly "yes", so an algorithm that labels someone risky — accurately or not — can systematically exclude them from jobs, credit, flights, insurance, housing: an <strong>"algorithmic prison"</strong> — exclusion from key parts of society without proof of guilt and with little chance of appeal, inverting the presumption of innocence.</p>
+
+<h4>Bias and discrimination</h4>
+<p>Algorithmic decisions aren't automatically fairer than human ones: if the input data carries systematic bias, the model <strong>learns and amplifies</strong> it. Anti-discrimination law protects traits like ethnicity, age, gender, sexuality, disability, beliefs — but proxies leak: in a segregated city, postal code or IP address predicts race. Believing a model can take biased data and produce fair output is what the satire calls <em>"machine learning is like money laundering for bias."</em> Predictive analytics extrapolates the past; if the past is discriminatory, it codifies discrimination. A better future requires moral imagination, which only humans supply — data and models should be our tools, not our masters.</p>
+
+<h4>Responsibility and accountability</h4>
+<p>Who answers when the algorithm is wrong? A human decision-maker can be held accountable; a self-driving car's accident or a credit model's systematic bias has no clear address, and an opaque model may be unexplainable even under judicial review. Credit bureaus are the old version — but a credit score at least summarizes <em>your own</em> record ("how did <em>you</em> behave?") and errors are correctable in principle; ML scoring uses far broader, more opaque inputs and asks <em>"how did people like you behave?"</em> — stereotyping by construction, unfixable when the input data is wrong. Statistics are true of distributions, not individuals (average life expectancy of 80 says little about <em>your</em> death date); a blind belief in data supremacy over individual cases is not just delusional but dangerous. Analytics can also target the vulnerable — the same models that could focus aid instead sell payday loans and worthless degrees.</p>
+
+<h4>Feedback loops</h4>
+<p>Even mild predictive systems — recommenders — build echo chambers that breed misinformation and polarization. When predictions affect lives, the loops turn vicious:</p>
+
+<figure>
+<svg viewBox="0 0 680 218" role="img" aria-label="A self-reinforcing feedback loop: a misfortune causes missed bill payments, which lower the credit score; employers screen by credit score, so job applications fail; joblessness deepens poverty, causing more missed payments. The cycle amplifies itself — a downward spiral hidden behind mathematical rigor.">
+  <g font-size="10" font-family="ui-monospace,Menlo,monospace">
+    <rect x="60" y="30" width="130" height="44" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="125" y="48" text-anchor="middle" font-size="9">misfortune</text>
+    <text x="125" y="62" text-anchor="middle" font-size="8" opacity=".7">(illness, layoff…)</text>
+    <path d="M190 52 L 268 52" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f127-w)"/>
+    <text x="229" y="42" text-anchor="middle" font-size="8" fill="var(--write)">missed bills</text>
+    <rect x="270" y="30" width="130" height="44" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="335" y="48" text-anchor="middle" font-size="9">credit score ↓</text>
+    <text x="335" y="62" text-anchor="middle" font-size="8" opacity=".7">the "objective" input</text>
+    <path d="M400 52 L 478 52" stroke="var(--write)" stroke-width="1.8" marker-end="url(#f127-w)"/>
+    <text x="440" y="42" text-anchor="middle" font-size="8" fill="var(--write)">employer screens</text>
+    <rect x="480" y="30" width="130" height="44" rx="6" fill="var(--panel2)" stroke="var(--bad)" stroke-opacity=".9"/>
+    <text x="545" y="48" text-anchor="middle" font-size="9" fill="var(--bad)">job application</text>
+    <text x="545" y="62" text-anchor="middle" font-size="9" fill="var(--bad)">rejected</text>
+    <path d="M545 74 C 545 130, 420 148, 345 150" stroke="var(--bad)" stroke-width="1.8" fill="none" marker-end="url(#f127-b)"/>
+    <rect x="205" y="128" width="140" height="44" rx="6" fill="var(--panel2)" stroke="currentColor" stroke-opacity=".6"/>
+    <text x="275" y="146" text-anchor="middle" font-size="9">joblessness →</text>
+    <text x="275" y="160" text-anchor="middle" font-size="9">poverty</text>
+    <path d="M205 150 C 120 150, 90 110, 108 78" stroke="var(--bad)" stroke-width="1.8" fill="none" marker-end="url(#f127-b)"/>
+    <text x="96" y="130" font-size="8" fill="var(--bad)">more missed</text>
+    <text x="96" y="143" font-size="8" fill="var(--bad)">payments</text>
+    <text x="386" y="186" font-size="8" opacity=".85">each pass around the loop worsens the next —</text>
+    <text x="386" y="200" font-size="8" opacity=".85">"poisonous assumptions camouflaged by math"</text>
+    <defs>
+      <marker id="f127-w" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--write)"/></marker>
+      <marker id="f127-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)"/></marker>
+    </defs>
+  </g>
+</svg>
+<figcaption><strong>A self-reinforcing feedback loop.</strong> Employers screening hires by credit score punish misfortune with joblessness, which manufactures further misfortune. You can't always predict such loops, but <em>systems thinking</em> — analyzing the whole system including the humans in it, not just the computerized parts — catches many: does the system amplify existing differences between people, or combat them?</figcaption>
+</figure>
+
+<h3 id="privacy-and-tracking"><a class="self" href="#privacy-and-tracking">Privacy and Tracking</a></h3>
+<span class="key-chip">privacy-and-tracking</span>
+
+<p>Beyond decision-making there's the ethics of <em>collection</em>. When a user explicitly entrusts data to a service to have it processed, the service serves the user. When their activity is tracked as a side effect, the relationship blurs: the service acquires interests of its own. Some tracking genuinely serves users — clicked-result ranking, recommendations, A/B tests. But when the service is funded by advertising, the <em>advertisers</em> are the customers and users' interests take second place: tracking grows more detailed, retention longer, profiles richer. The relationship earns a more sinister name: <strong>surveillance</strong>.</p>
+
+<h4>Surveillance</h4>
+<p>In the rush to make software eat the world we have built the greatest mass surveillance infrastructure in history — internet-connected microphones in every inhabited space (phones, TVs, assistants, baby monitors, children's toys — many with terrible security records), locations and movements tracked by devices carried voluntarily, even enthusiastically. What totalitarian regimes only dreamed of, we opted into — the collector being corporations rather than governments. Why do we accept it? Perhaps you have "nothing to hide" — i.e., you're aligned with existing power structures and needn't fear persecution; not everyone is so fortunate. And "benign personalization" combined with predictive analytics stops looking benign: insurance premiums linked to car trackers, coverage conditional on fitness wearables — and a smartwatch's motion sensor can reconstruct what you type, passwords included.</p>
+
+<h4>Consent and freedom of choice</h4>
+<p>"Users agreed to the terms" fails on inspection. Users can't know what data they feed in or what it becomes — privacy policies obscure more than they illuminate — so <em>meaningful</em> consent is impossible; one user's data also describes non-users who agreed to nothing; the derived datasets of this book's third part are precisely the kind of thing no user can meaningfully understand. The exchange is one-way — terms set by the service, no negotiation. And declining is not free: when a service is "regarded by most people as essential for basic social participation," opting out has real social and professional costs — a freedom available only to the privileged. For everyone else, surveillance becomes inescapable.</p>
+
+<h4>Privacy and use of data</h4>
+<p>"Privacy is dead" misunderstands the word. Privacy is not secrecy; it is a <strong>decision right</strong> — the freedom to choose what to reveal, to whom, in each situation. Surveillance doesn't erode that right so much as <em>transfer</em> it: the company now decides what stays secret (mostly its own conclusions about you, revealed only as ad-targeting categories) and what gets used. Privacy settings return crumbs of control against other users, while the service itself keeps unfettered internal access. A person targeted in the bucket "suffers from illness X" has lost agency over an intimate disclosure even if never individually reidentified. This transfer of privacy rights from individuals to corporations, at scale, is historically unprecedented — surveillance used to be expensive and manual; trust-based data relationships (doctor, attorney) used to come with ethical and legal constraints that internet services shed.</p>
+
+<h4>Data as assets and power</h4>
+<p>"Data exhaust" gets the economics backwards: if targeted advertising pays for the service, then <em>behavioral data is the core asset</em> and the app is bait for the extraction machine — startups are literally valued by "eyeballs." Because the data is valuable, everyone wants it: companies collect it, governments obtain it by secret deal, compulsion, or theft; bankruptcy sells it; breaches leak it disconcertingly often. Hence the critics' terms: data as a <strong>"toxic asset,"</strong> at best <strong>"hazardous material."</strong> When deciding to collect, weigh not just today's government but all future ones: "it is poor civic hygiene to install technologies that could someday facilitate a police state." Knowledge is power, and scrutinizing others while avoiding scrutiny is one of power's most important forms.</p>
+
+<h4>Remembering the Industrial Revolution</h4>
+<p>Kleppmann's closing analogy: the information age as a second Industrial Revolution. The first brought sustained growth <em>and</em> dreadful pollution, dangerous factories, child labor; safeguards (environmental regulation, workplace safety, food inspection) took a long time and raised the cost of business — and society was hugely better for them. Bruce Schneier's formulation: <em>"Data is the pollution problem of the information age, and protecting privacy is the environmental challenge… our grandchildren will look back at us and judge us on how we addressed the challenge of data collection and misuse."</em> We should try to make them proud.</p>
+
+<h4>Legislation and self-regulation</h4>
+<p>The 1995 European Data Protection Directive already demanded purpose-limited, "adequate, relevant and not excessive" collection — philosophically the exact opposite of Big Data (maximize collection, combine datasets, use for unforeseen purposes). Kleppmann doubted 1995-era law's effectiveness and noted updated regulation in development; he calls over-regulation a real risk too (medical-data analysis could save lives). But the deeper ask is a <strong>culture shift</strong>: treat users as humans, not metrics to optimize; self-regulate to maintain trust; educate users about what happens to their data; purge data when no longer needed rather than retaining it forever (deletion vs immutability is solvable — <a class="xref back" href="ch11-stream-processing.html#state-streams-and-immutability" data-tip="Ch 11 · State, Streams, and Immutability — excision and shunning; real deletion is genuinely hard">Chapter&nbsp;11<sup>←11</sup></a>); enforce access control cryptographically rather than merely by policy. Individual control over data is like a natural environment: unprotected, it suffers the tragedy of the commons. Ubiquitous surveillance is not inevitable — we are still able to stop it.</p>
+
+<div class="ed2"><span class="tag">2ND EDITION · the ethics section becomes its own chapter — and the predictions came true</span>
+The 2nd edition promotes this closing section to a full <strong>Chapter&nbsp;14, "Doing the Right Thing,"</strong> in its own part ("Data and Society") — the strongest possible signal of how the material aged. The "updated regulations being developed" line resolved: <strong>GDPR is discussed as enacted, enforced law rather than prediction</strong>, alongside FTC actions and ML-bias enforcement statements. Predictive-analytics bias, algorithmic accountability, and feedback loops gain the intervening decade's AI-ethics literature (the ACM code, now with teeth); surveillance-as-business-model and the limits of consent carry over; and <em>Datensparsamkeit</em> — data minimization — is framed as an engineering duty, not merely a legal one. <em>[per the deltas research: Pragmatic Engineer's excerpt and the refs repo confirm the new chapter's scope]</em></div>
+</section>
+
+<!-- ================================================================ -->
+<section class="takeaways" id="core-takeaways">
+<h2>Core takeaways</h2>
+<ul>
+<li><strong>No single tool fits all uses of your data</strong> — integration is inevitable, and the sane architecture is <em>derived data</em>: designate systems of record, funnel writes into one ordered log (CDC or event sourcing), and let every other representation — index, cache, warehouse, model — be a deterministic, idempotent consumer. Dual writes race and diverge; a log cannot disagree with itself.</li>
+<li><strong>Total ordering is the scarce resource</strong>: it's equivalent to consensus, so it doesn't scale across partitions, datacenters, microservices, or offline clients. Most events don't need it — but <em>causal</em> dependencies (unfriend-then-vent) can span logs, and a lost dependency plus an external side effect (a sent notification) is unrepairable. Scalable causality capture is an open problem; logging what the user saw ("reads are events") is a starting point.</li>
+<li><strong>Batch reprocesses history, streams keep views fresh</strong> — evolution's killer feature is deriving a <em>new</em> view beside the old (railway-style gradual, reversible migration). The lambda architecture proved the principle and paid twice for it; unified engines (replay + exactly-once + event-time windows) keep the principle and drop the duplicate logic.</li>
+<li><strong>CREATE INDEX is a dataflow system in miniature</strong>: snapshot, catch up, follow — the same shape as setting up a replica or bootstrapping CDC. An organization's dataflow is one huge database: <em>federation</em> unifies its reads (polystores), <em>unbundling</em> unifies its writes (logs + idempotence), Unix-style: small tools, the log as the pipe. Missing: the shell — a declarative language over composed systems.</li>
+<li><strong>Unbundle only when needed</strong>: breadth, not depth. If one product satisfies your requirements, use it; composition wins only where no single product covers the workload span.</li>
+<li><strong>Design applications as dataflow</strong>: application code as derivation functions between state and derived state (the database inside-out); stateless services + state stores, but with <em>subscription</em> replacing polling. Derived-data maintenance is not generic async messaging — it demands stable ordering and fault-tolerant, non-lossy processing. Dataflow beats RPC where a synchronous lookup can become a local, subscribed copy (stream-table join).</li>
+<li><strong>Write path meets read path at the derived dataset</strong>: indexes, caches, and materialized views shift work between the two (grep ↔ precompute-everything; Twitter's fan-out is the canonical middle). The write path can extend to end-user devices — offline-first clients as followers, offsets for reconnection, sub-second end-to-end streams — if we build for publish/subscribe rather than request/response.</li>
+<li><strong>Correctness must be end-to-end</strong>: TCP, 2PC, and exactly-once stream semantics each dedupe within a scope, and a user's retry outlives every scope. A client-minted operation ID enforced by a uniqueness constraint gives exactly-once through arbitrary layers — the end-to-end argument applied to databases; low layers are optimizations, not guarantees.</li>
+<li><strong>Constraints without coordination</strong>: uniqueness needs consensus — a partitioned log provides exactly that (route conflicting claims to one partition, decide sequentially). Multi-partition operations decompose into one atomic append plus deterministic derived instructions deduped by request ID: atomic-commit correctness at partition-independent throughput.</li>
+<li><strong>Timeliness ≠ integrity</strong>: violated timeliness is temporary ("eventual consistency"); violated integrity is permanent ("perpetual inconsistency"). Integrity matters far more, and dataflow systems preserve it without coordination. Many business constraints are loose anyway — apologize and compensate (overbooking, overdrafts) — so buy coordination only where the apology is too expensive.</li>
+<li><strong>Trust, but verify</strong>: hardware lies rarely and software regularly; even MySQL and PostgreSQL have shipped integrity bugs. Audit continuously and end-to-end — event sourcing makes derivations reproducible, hashes make logs tamper-evident, Merkle trees (certificate transparency) make inclusion provable — and read your backups.</li>
+<li><strong>Engineers carry ethical responsibility</strong>: predictive analytics can build algorithmic prisons, launder bias, and spin feedback loops; tracking-funded services drift into surveillance; consent without understanding is not consent; privacy is a decision right that surveillance transfers to the collector. Data is the pollution problem of the information age — minimize collection, purge aggressively, and build the world you want to live in.</li>
+<li><strong>2nd-edition arc</strong>: the chapter splits — the technical program becomes Ch 13 "A Philosophy of Streaming Systems" (the future arrived: composable data systems, OLEP/sagas, IVM products, local-first/CRDTs), and the ethics section is promoted to Ch 14 "Doing the Right Thing" in a new "Data and Society" part, with GDPR as enacted law and a decade of AI-ethics developments folded in.</li>
+</ul>
+</section>
+
+<!-- ================================================================ -->
+<section id="quiz">
+<h2>Quiz — did it stick?</h2>
+<p>Sixteen questions across every section. Pick answers, then check; the full answer key with explanations is at the bottom.</p>
+<div class="quiz">
+
+<div class="q" data-a="b">
+<p>Why does Kleppmann prefer log-based derived data over distributed transactions for integrating heterogeneous systems?</p>
+<label><input type="radio" name="q1" value="a"> Logs are faster in all cases and provide the same guarantees, including linearizability</label>
+<label><input type="radio" name="q1" value="b"> They reach the same goals (ordering, exactly-once effect) via a log plus deterministic retry and idempotence; XA's fault tolerance and performance are poor, though derived systems do give up timing guarantees like read-your-writes</label>
+<label><input type="radio" name="q1" value="c"> Distributed transactions cannot order writes at all</label>
+<label><input type="radio" name="q1" value="d"> Logs eliminate the need for consensus entirely</label>
+</div>
+
+<div class="q" data-a="c">
+<p>In the unfriend-then-complain example, why might the ex-partner receive the notification even though nothing malfunctioned?</p>
+<label><input type="radio" name="q2" value="a"> The message broker redelivered the message after a crash</label>
+<label><input type="radio" name="q2" value="b"> The friend service used last-write-wins and dropped the unfriend event</label>
+<label><input type="radio" name="q2" value="c"> The unfriend and message-send events went to two different logs with no ordering between them; the notifier joined the message against a friend list that hadn't yet processed the causally earlier unfriend</label>
+<label><input type="radio" name="q2" value="d"> Clock skew between the two services reversed the timestamps</label>
+</div>
+
+<div class="q" data-a="d">
+<p>Which is NOT one of the lambda architecture's practical problems, as Kleppmann lists them?</p>
+<label><input type="radio" name="q3" value="a"> The same logic must be maintained in both a batch and a stream framework</label>
+<label><input type="radio" name="q3" value="b"> The two pipelines' outputs must be merged, which is hard beyond simple aggregations</label>
+<label><input type="radio" name="q3" value="c"> Frequent full reprocessing is too expensive, and incremental batches re-import the windowing/straggler problems</label>
+<label><input type="radio" name="q3" value="d"> Immutable append-only event storage cannot support fault tolerance</label>
+</div>
+
+<div class="q" data-a="a">
+<p>What three features let one system replace the lambda architecture's two?</p>
+<label><input type="radio" name="q4" value="a"> Replaying historical events through the same engine; exactly-once semantics; windowing by event time rather than processing time</label>
+<label><input type="radio" name="q4" value="b"> Microbatching; sliding windows; watermark propagation</label>
+<label><input type="radio" name="q4" value="c"> Distributed transactions; linearizable reads; synchronous replication</label>
+<label><input type="radio" name="q4" value="d"> Columnar storage; vectorized execution; data cubes</label>
+</div>
+
+<div class="q" data-a="c">
+<p>Running CREATE INDEX on a live table is "remarkably similar" to which two other operations?</p>
+<label><input type="radio" name="q5" value="a"> Two-phase commit and leader election</label>
+<label><input type="radio" name="q5" value="b"> Log compaction and snapshot isolation</label>
+<label><input type="radio" name="q5" value="c"> Setting up a new follower replica, and bootstrapping change data capture — all three scan a consistent snapshot, catch up on the backlog since it, then follow ongoing changes</label>
+<label><input type="radio" name="q5" value="d"> MapReduce shuffling and reduce-side joining</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Federation vs unbundling — which statement is correct?</p>
+<label><input type="radio" name="q6" value="a"> Federation synchronizes writes across systems; unbundling unifies queries</label>
+<label><input type="radio" name="q6" value="b"> Federation unifies <em>reads</em> (one query interface over many stores, relational tradition); unbundling unifies <em>writes</em> (one event log fanned to all stores with idempotent consumers, Unix tradition) — and keeping writes in sync is the harder problem</label>
+<label><input type="radio" name="q6" value="c"> They are competing names for the same technique</label>
+<label><input type="radio" name="q6" value="d"> Unbundling requires distributed transactions across the composed systems</label>
+</div>
+
+<div class="q" data-a="d">
+<p>In the currency-conversion example, what does the dataflow approach replace the microservice RPC with?</p>
+<label><input type="radio" name="q7" value="a"> A nightly batch export of exchange rates</label>
+<label><input type="radio" name="q7" value="b"> A synchronous query to a faster in-memory rate service</label>
+<label><input type="radio" name="q7" value="c"> An eventually consistent global variable</label>
+<label><input type="radio" name="q7" value="d"> A subscription to the stream of rate updates, keeping a local copy — turning the lookup into a stream-table join that is faster (no network request) and robust to the rate service's failure</label>
+</div>
+
+<div class="q" data-a="a">
+<p>What do indexes, caches, and materialized views all fundamentally do, in the write-path/read-path model?</p>
+<label><input type="radio" name="q8" value="a"> Shift the boundary between the two paths: more precomputation on the write path in exchange for less work on the read path — with grep (no index) and precomputing all possible query results as the two unusable extremes</label>
+<label><input type="radio" name="q8" value="b"> Guarantee linearizable reads</label>
+<label><input type="radio" name="q8" value="c"> Eliminate the read path entirely</label>
+<label><input type="radio" name="q8" value="d"> Make writes cheaper at the expense of reads</label>
+</div>
+
+<div class="q" data-a="c">
+<p>How does the "reads are events too" idea help with the causality problem from earlier in the chapter?</p>
+<label><input type="radio" name="q9" value="a"> It makes all reads linearizable</label>
+<label><input type="radio" name="q9" value="b"> It removes the need for request routing</label>
+<label><input type="radio" name="q9" value="c"> Durably logging read events records what the user <em>saw</em> before acting, so later events can reference it — reconstructing causal dependencies (and provenance), at extra storage and I/O cost</label>
+<label><input type="radio" name="q9" value="d"> It batches reads so they cannot interleave with writes</label>
+</div>
+
+<div class="q" data-a="b">
+<p>The user's browser times out after POSTing a money transfer, and the user clicks retry. Why don't TCP, 2PC, or stream-processor exactly-once semantics prevent the double transfer?</p>
+<label><input type="radio" name="q10" value="a"> Because the database was not configured for serializable isolation</label>
+<label><input type="radio" name="q10" value="b"> Each mechanism deduplicates only within its own scope — one TCP connection, one transaction, one framework — and the retry is a new connection, new transaction, new request; only an identifier carried end-to-end from the client can identify the two as the same operation</label>
+<label><input type="radio" name="q10" value="c"> Because the retry used a different HTTP method</label>
+<label><input type="radio" name="q10" value="d"> They do prevent it, provided the broker is log-based</label>
+</div>
+
+<div class="q" data-a="d">
+<p>In Example 12-2, what enforces exactly-once execution, and what does the requests table turn out to be?</p>
+<label><input type="radio" name="q11" value="a"> A serializable transaction; a lock table</label>
+<label><input type="radio" name="q11" value="b"> TCP sequence numbers; a message queue</label>
+<label><input type="radio" name="q11" value="c"> A trigger; an audit log that must be replicated synchronously</label>
+<label><input type="radio" name="q11" value="d"> A uniqueness constraint on the client-generated request ID (a duplicate INSERT aborts, even at weak isolation); an event log — the balance updates are redundant and could be derived downstream, which is event sourcing in miniature</label>
+</div>
+
+<div class="q" data-a="a">
+<p>How does a partitioned log enforce a username uniqueness constraint without locks?</p>
+<label><input type="radio" name="q12" value="a"> All claims for a name are appended to the partition given by hashing the name; the log's total order fixes who was first, and a single-threaded processor deterministically grants the first claim and rejects the rest, emitting decisions to an output stream the clients watch</label>
+<label><input type="radio" name="q12" value="b"> Each broker node keeps a lease on a range of usernames</label>
+<label><input type="radio" name="q12" value="c"> Claims are timestamped and the earliest wall-clock time wins</label>
+<label><input type="radio" name="q12" value="d"> The log rejects duplicate keys at append time</label>
+</div>
+
+<div class="q" data-a="c">
+<p>The multi-partition transfer avoids atomic commit. What makes the inevitable duplicate instructions (after a processor crash-restart) harmless?</p>
+<label><input type="radio" name="q13" value="a"> The broker guarantees each message is delivered exactly once</label>
+<label><input type="radio" name="q13" value="b"> Duplicates are impossible because checkpoints are synchronous</label>
+<label><input type="radio" name="q13" value="c"> The splitter is deterministic, so replayed output is identical and still carries the original end-to-end request ID; downstream appliers deduplicate on that ID before touching balances</label>
+<label><input type="radio" name="q13" value="d"> The debit and credit streams share one partition</label>
+</div>
+
+<div class="q" data-a="b">
+<p>Timeliness vs integrity: which pairing is right?</p>
+<label><input type="radio" name="q14" value="a"> Timeliness violations are permanent; integrity violations resolve by waiting</label>
+<label><input type="radio" name="q14" value="b"> Timeliness = users see up-to-date state; violating it is temporary ("eventual consistency"). Integrity = no loss or contradiction; violating it is permanent ("perpetual inconsistency"). Dataflow systems decouple them, preserving integrity without timeliness — and integrity matters more in most applications</label>
+<label><input type="radio" name="q14" value="c"> ACID transactions provide timeliness but never integrity</label>
+<label><input type="radio" name="q14" value="d"> They are synonyms; CAP uses them interchangeably</label>
+</div>
+
+<div class="q" data-a="d">
+<p>What is the argument for "loosely interpreted constraints"?</p>
+<label><input type="radio" name="q15" value="a"> Constraints are unnecessary if the schema is well designed</label>
+<label><input type="radio" name="q15" value="b"> Weak isolation levels enforce most constraints adequately</label>
+<label><input type="radio" name="q15" value="c"> Consensus is impossible in asynchronous systems, so constraints cannot be enforced anyway</label>
+<label><input type="radio" name="q15" value="d"> Many businesses can violate a constraint temporarily and repair with a compensating transaction — an apology (overbooking, overselling, overdrafts) — so enforcement needs integrity but not timeliness; write optimistically and check after, reserving synchronous coordination for where apologies are too costly</label>
+</div>
+
+<div class="q" data-a="a">
+<p>Why does Kleppmann argue for self-auditing systems, and what cryptographic structure does he single out?</p>
+<label><input type="radio" name="q16" value="a"> Hardware corrupts rarely and software (even MySQL/PostgreSQL) has shipped integrity bugs, so violations are eventually inevitable and must be <em>found</em>: check end-to-end, rerun deterministic derivations, read your backups. Merkle trees — as used by certificate transparency — make inclusion efficiently provable</label>
+<label><input type="radio" name="q16" value="b"> Because auditors legally require it; Bloom filters</label>
+<label><input type="radio" name="q16" value="c"> Because proof-of-work mining validates data; the blockchain</label>
+<label><input type="radio" name="q16" value="d"> Because ACID guarantees are absolute if configured correctly; B-trees</label>
+</div>
+
+</div>
+<div class="quiz-actions">
+  <button id="checkquiz">Check answers</button>
+  <span class="score" id="score"></span>
+</div>
+
+<details class="anskey" id="answer-key">
+<summary>Answer key with explanations</summary>
+<div class="body">
+<div class="ak"><span class="which">Q1 — b.</span> Same goals, different means: logs order, idempotent retry gives exactly-once effect. The honest cost is timing — derived systems are asynchronous, so no read-your-writes by default, which is why (a) is wrong. (c) is false (2PC orders via locks); (d) is false — total order still <em>is</em> consensus, just localized per partition.</div>
+<div class="ak"><span class="which">Q2 — c.</span> The causal dependency crossed two independently ordered logs. Nothing was redelivered (a); no LWW was involved (b); and (d) misses the point — even perfect clocks wouldn't help, because the notifier's friend-list <em>state</em> lagged, regardless of timestamps.</div>
+<div class="ak"><span class="which">Q3 — d.</span> Immutable event storage is the part of lambda Kleppmann <em>praises</em> — it's the architecture's lasting contribution. (a), (b), (c) are his three criticisms verbatim.</div>
+<div class="ak"><span class="which">Q4 — a.</span> Replay, exactly-once, event-time windows — each neutralizes one reason for having a separate batch layer. (b) are implementation details of particular streamers; (c) is the coordination stack this chapter argues around; (d) is Chapter 3's analytics toolkit.</div>
+<div class="ak"><span class="which">Q5 — c.</span> Snapshot → catch-up → follow, three times over: index build, follower setup (ch 5), CDC bootstrap (ch 11). The parallel is the section's evidence that a database is internally a dataflow system, so its features can be unbundled.</div>
+<div class="ak"><span class="which">Q6 — b.</span> Reads vs writes is exactly the split, with the traditions deliberately assigned (federation = relational elegance, unbundling = Unix composition). (a) swaps them; (d) is backwards — unbundling exists to <em>avoid</em> heterogeneous distributed transactions, using logs + idempotence instead.</div>
+<div class="ak"><span class="which">Q7 — d.</span> Subscribe ahead of time, join locally: "the fastest and most reliable network request is no network request at all." (b) keeps the synchronous hop; (a) reinvents stale caches; note the honest caveat either way — the join is time-dependent under reprocessing (SCD, ch 11).</div>
+<div class="ak"><span class="which">Q8 — a.</span> The boundary-shifting view unifies all three mechanisms — and retroactively explains Chapter 1's Twitter fan-out (precompute timelines at write time, except celebrities at read time). (d) is half the story (they make writes <em>more</em> expensive); (b) and (c) are wrong outright.</div>
+<div class="ak"><span class="which">Q9 — c.</span> A logged read is a durable fact ("the user was shown X at t") that later events can causally reference — e.g., the shipping estimate that preceded a purchase. The cost is storage/I-O, an open optimization problem. (a), (b), (d) are inventions.</div>
+<div class="ak"><span class="which">Q10 — b.</span> Scope is everything: TCP dedupes packets within a connection, 2PC ties up one transaction's fate, exactly-once holds within a framework — the user's intention spans all of them. Only an end-to-end operation ID travels the whole path. This is the Saltzer/Reed/Clark end-to-end argument applied to databases.</div>
+<div class="ak"><span class="which">Q11 — d.</span> UNIQUE(request_id) turns a duplicate into an abort — and uniqueness constraints hold even at weak isolation, where check-then-insert would race (write skew, ch 7). The bonus insight: the requests table is an event log, and the balance writes are derivable — the door to event sourcing.</div>
+<div class="ak"><span class="which">Q12 — a.</span> Partition-by-constrained-value + sequential single-threaded consumption = consensus via total order broadcast (ch 9's linearizable-storage algorithm). No leases (b), no wall clocks (c) — the append order itself is the decision. (d) ascribes application logic to the broker.</div>
+<div class="ak"><span class="which">Q13 — c.</span> Determinism + end-to-end IDs: replay produces identical instructions, and appliers keep a seen-set per request ID. (a) is the exactly-once myth — brokers redeliver; (b) checkpoints don't prevent reprocessing, they bound it; (d) would destroy the parallelism that is the whole point.</div>
+<div class="ak"><span class="which">Q14 — b.</span> The slogan pair: eventual consistency vs perpetual inconsistency. ACID bundles both guarantees, which is why the distinction stays invisible until you unbundle. The credit-card statement is the book's example: lag is fine; sums that don't balance are catastrophic.</div>
+<div class="ak"><span class="which">Q15 — d.</span> Compensating transactions and apology workflows already exist in the business (forklifts, weather, strikes), so linearizable enforcement is often paying for timeliness nobody needs. Integrity is still required throughout. (c) overstates FLP — consensus is practical (ch 9); the argument is economic, not impossibility.</div>
+<div class="ak"><span class="which">Q16 — a.</span> "Trust, but verify": HDFS/S3 re-read replicas continually; event-sourced derivations re-run deterministically; hash the log. Merkle trees prove inclusion in log(n) hashes and already secure the TLS certificate ecosystem via certificate transparency — the useful residue of the ledger hype, minus proof-of-work (c), which Kleppmann calls extraordinarily wasteful.</div>
+</div>
+</details>
+</section>
+
+<footer class="chap">
+  <a href="ch11-stream-processing.html">← ch 11 · Stream Processing</a>
+  <a href="index.html">index</a>
+  <span>ch 12 is the final chapter — you made it 🎉</span>
+  <span style="margin-left:auto">Feynman-style study notes on DDIA (Kleppmann, 1st ed) with 2nd-ed updates · not affiliated with the author</span>
+</footer>
+
 </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  /* theme toggle */
+  var root = document.documentElement;
+  var saved = null;
+  try { saved = localStorage.getItem("ddia-theme"); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  document.getElementById("themebtn").addEventListener("click", function () {
+    var cur = root.dataset.theme;
+    var sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    var isDark = cur ? cur === "dark" : sysDark;
+    var next = isDark ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("ddia-theme", next); } catch (e) {}
+  });
+
+  /* steppers */
+  function parseSteps(s) {
+    var set = new Set();
+    s.split(",").forEach(function (p) {
+      var m = p.split("-");
+      var a = parseInt(m[0], 10), b = parseInt(m[1] || m[0], 10);
+      for (var i = a; i <= b; i++) set.add(i);
+    });
+    return set;
+  }
+  document.querySelectorAll(".anim").forEach(function (anim) {
+    var caps = Array.prototype.slice.call(anim.querySelectorAll(".cap li"));
+    var els = Array.prototype.slice.call(anim.querySelectorAll("[data-on]")).map(function (e) {
+      return { e: e, on: parseSteps(e.dataset.on), hot: e.dataset.hot ? parseSteps(e.dataset.hot) : null };
+    });
+    var prev = anim.querySelector(".prev"), next = anim.querySelector(".next");
+    var restart = anim.querySelector(".restart"), count = anim.querySelector(".count");
+    var n = 1, total = caps.length;
+    function render() {
+      els.forEach(function (o) {
+        o.e.classList.toggle("off", !o.on.has(n));
+        o.e.classList.toggle("hot", !!o.hot && o.hot.has(n));
+      });
+      caps.forEach(function (c, i) { c.classList.toggle("cur", i === n - 1); });
+      count.textContent = "step " + n + " / " + total;
+      prev.disabled = n === 1;
+      next.disabled = n === total;
+    }
+    prev.addEventListener("click", function () { if (n > 1) { n--; render(); } });
+    next.addEventListener("click", function () { if (n < total) { n++; render(); } });
+    restart.addEventListener("click", function () { n = 1; render(); });
+    anim.setAttribute("tabindex", "0");
+    anim.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { if (n < total) { n++; render(); ev.preventDefault(); } }
+      if (ev.key === "ArrowLeft") { if (n > 1) { n--; render(); ev.preventDefault(); } }
+    });
+    render();
+  });
+
+  /* quiz */
+  var qs = Array.prototype.slice.call(document.querySelectorAll(".q"));
+  document.getElementById("checkquiz").addEventListener("click", function () {
+    var right = 0, answered = 0;
+    qs.forEach(function (q) {
+      q.classList.add("graded");
+      var correct = q.dataset.a;
+      q.querySelectorAll("label").forEach(function (l) {
+        l.classList.remove("picked", "correct", "incorrect", "answer");
+        var input = l.querySelector("input");
+        if (input.value === correct) l.classList.add("answer");
+        if (input.checked) {
+          answered++;
+          l.classList.add("picked", input.value === correct ? "correct" : "incorrect");
+          if (input.value === correct) right++;
+        }
+      });
+    });
+    var msg = right + " / " + qs.length + " correct";
+    if (answered < qs.length) msg += " · " + (qs.length - answered) + " unanswered";
+    document.getElementById("score").textContent = msg;
+    document.getElementById("answer-key").open = true;
+  });
+})();
+</script>
+</body>
+</html>

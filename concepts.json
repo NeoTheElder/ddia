@@ -1122,101 +1122,101 @@
   "data-integration": {
    "chapter": 12,
    "title": "Data Integration",
-   "definition": "",
+   "definition": "No single tool fits all uses of the same data; integrate by being explicit about dataflows — designate systems of record and derive every other representation from their ordered changes.",
    "pdf_page": 511
   },
   "combining-specialized-tools-by-deriving-data": {
    "chapter": 12,
    "title": "Combining Specialized Tools by Deriving Data",
-   "definition": "",
+   "definition": "Funnel all writes through one system that decides a total order (CDC / event log): derived views replaying that order stay consistent, unlike racing dual writes; but total ordering is consensus and doesn't scale, and causal dependencies can cross logs.",
    "pdf_page": 511,
    "parent": "data-integration"
   },
   "batch-and-stream-processing": {
    "chapter": 12,
    "title": "Batch and Stream Processing",
-   "definition": "",
+   "definition": "Integration's tools: deterministic derivation functions — streams keep views fresh, batch reprocesses history for gradual reversible migration; the lambda architecture ran both in parallel, unified engines (replay + exactly-once + event time) replace it.",
    "pdf_page": 515,
    "parent": "data-integration"
   },
   "unbundling-databases": {
    "chapter": 12,
    "title": "Unbundling Databases",
-   "definition": "",
+   "definition": "Databases, Hadoop, and OSes all manage information — relational (high-level, integrated) vs Unix (low-level, composable) philosophies; unbundling composes storage products into one 'database' glued by event logs.",
    "pdf_page": 520
   },
   "composing-data-storage-technologies": {
    "chapter": 12,
    "title": "Composing Data Storage Technologies",
-   "definition": "",
+   "definition": "CREATE INDEX = snapshot + catch-up + follow, exactly like follower setup and CDC bootstrap; federation unifies reads (polystore), unbundling unifies writes (log + idempotent consumers); missing: the declarative shell (mysql | elasticsearch).",
    "pdf_page": 520,
    "parent": "unbundling-databases"
   },
   "designing-applications-around-dataflow": {
    "chapter": 12,
    "title": "Designing Applications Around Dataflow",
-   "definition": "",
+   "definition": "The database inside-out: application code as derivation functions reacting to subscribed state changes (spreadsheet-style), stateless services beside state stores, and dataflow (subscribe + local stream-table join) replacing synchronous RPC.",
    "pdf_page": 525,
    "parent": "unbundling-databases"
   },
   "observing-derived-state": {
    "chapter": 12,
    "title": "Observing Derived State",
-   "definition": "",
+   "definition": "The eager write path meets the lazy read path at the derived dataset; indexes, caches, and materialized views shift that boundary — extendable to offline-capable clients via pushed state changes, with reads-as-events enabling causality tracking and multi-partition queries.",
    "pdf_page": 530,
    "parent": "unbundling-databases"
   },
   "aiming-for-correctness": {
    "chapter": 12,
    "title": "Aiming for Correctness",
-   "definition": "",
+   "definition": "Correctness for dataflow architectures: exactly-once via end-to-end operation IDs, constraints via logs (or apologies), and the insight that integrity — not timeliness — is the guarantee most applications actually need.",
    "pdf_page": 536
   },
   "the-end-to-end-argument-for-databases": {
    "chapter": 12,
    "title": "The End-to-End Argument for Databases",
-   "definition": "",
+   "definition": "TCP, 2PC, and framework exactly-once each deduplicate only within their own scope; a user's retry outlives them all, so only a client-minted operation ID enforced by a uniqueness constraint suppresses duplicates end to end (Saltzer/Reed/Clark, 1984).",
    "pdf_page": 537,
    "parent": "aiming-for-correctness"
   },
   "enforcing-constraints": {
    "chapter": 12,
    "title": "Enforcing Constraints",
-   "definition": "",
+   "definition": "Uniqueness requires consensus: route all conflicting claims to one log partition and decide sequentially; multi-partition operations decompose into one atomic append plus deterministic derived instructions deduped by request ID — atomic-commit correctness without coordination.",
    "pdf_page": 542,
    "parent": "aiming-for-correctness"
   },
   "timeliness-and-integrity": {
    "chapter": 12,
    "title": "Timeliness and Integrity",
-   "definition": "",
+   "definition": "Timeliness (up-to-date reads; violations temporary — 'eventual consistency') vs integrity (no loss or contradiction; violations permanent — 'perpetual inconsistency'); dataflow decouples them, preserving integrity without coordination; loose constraints are repaired by apology.",
    "pdf_page": 545,
    "parent": "aiming-for-correctness"
   },
   "trust-but-verify": {
    "chapter": 12,
    "title": "Trust, but Verify",
-   "definition": "",
+   "definition": "Hardware corrupts rarely and software (even MySQL/PostgreSQL) has shipped integrity bugs, so audit: continuous end-to-end checks, reproducible event-sourced derivations, hashed logs, Merkle trees (certificate transparency) — don't blindly trust.",
    "pdf_page": 549,
    "parent": "aiming-for-correctness"
   },
   "doing-the-right-thing": {
    "chapter": 12,
    "title": "Doing the Right Thing",
-   "definition": "",
+   "definition": "Engineers share responsibility for their systems' consequences: many datasets are about people, and human dignity — not optimization metrics — is the constraint; ethical reasoning is hard and non-optional.",
    "pdf_page": 554
   },
   "predictive-analytics": {
    "chapter": 12,
    "title": "Predictive Analytics",
-   "definition": "",
+   "definition": "Algorithmic decisions can build 'algorithmic prisons', launder and amplify the bias in their training data, evade accountability, and spin self-reinforcing feedback loops (credit score → joblessness); systems thinking and moral imagination are the counters.",
    "pdf_page": 554,
    "parent": "doing-the-right-thing"
   },
   "privacy-and-tracking": {
    "chapter": 12,
    "title": "Privacy and Tracking",
-   "definition": "",
+   "definition": "Advertising-funded tracking is surveillance; consent without understanding isn't consent; privacy is a decision right that collection transfers to the collector; data is a toxic asset — minimize, purge, self-regulate ('data is the pollution problem of the information age').",
    "pdf_page": 557,
    "parent": "doing-the-right-thing"
   }
