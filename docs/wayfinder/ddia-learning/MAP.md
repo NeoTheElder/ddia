@@ -23,6 +23,7 @@ A repo (`~/ddia`, private personal GitHub) containing 12 self-contained interact
 - Format fixed as **one self-contained HTML file per chapter** (inline CSS/JS; animations, quizzes, relative cross-links; viewable offline / GitHub Pages / publishable as claude.ai Artifacts for convenience) (charting session, 2026-08-12).
 - Production fixed as **pilot-first**: Chapter 3 (Storage & Retrieval, the most animation-demanding) built full-depth first, user reviews, template locks, then the other 11 chapters roll out one per session (charting session, 2026-08-12).
 - Source fixed as **user's PDF** at `reference/ddia-1st-edition.pdf` — section-heading walk per chapter for completeness (charting session, 2026-08-12).
+- Hosting fixed as **GitHub Pages on a public repo** (2026-09-18), reversing the bootstrap ticket's "Pages deferred": `NeoTheElder/ddia` flipped private→public (free-plan Pages needs a public repo), legacy build from `master:/`, live at https://neotheelder.github.io/ddia/. Root `index.html` is a 3-line redirect to `chapters/index.html` so the 24 `href="index.html"` chapter back-links stay put; `.nojekyll` skips the Jekyll build. Only the notes are public — the book PDF stays gitignored. Mirrors the sibling `algorithm-pattern-mastery` site.
 
 <!-- one line per closed ticket from here on: [ticket title](tickets/NN-file.md) — gist of the answer -->
 
